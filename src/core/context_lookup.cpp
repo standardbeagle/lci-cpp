@@ -105,6 +105,12 @@ bool ContextLookupEngine::fill_basic_info(CodeObjectContext& ctx,
 
 CodeObjectContext ContextLookupEngine::get_context(
     const CodeObjectID& object_id, bool& ok) const {
+    return get_context(object_id, ok, indexer_.ref_tracker().pin());
+}
+
+CodeObjectContext ContextLookupEngine::get_context(
+    const CodeObjectID& object_id, bool& ok,
+    std::shared_ptr<const ReferenceTracker::Snapshot> pinned) const {
     ok = false;
     CodeObjectContext ctx;
     ctx.object_id = object_id;
@@ -113,12 +119,20 @@ CodeObjectContext ContextLookupEngine::get_context(
 
     LookupDiagnostics& diag = ctx.diagnostics;
 
-    // RCU: pin the snapshot ONCE. Every fill reads from this frozen snapshot;
-    // re-pinning per section could straddle a concurrent reindex generation.
-    auto snap = indexer_.ref_tracker().pin();
+    // RCU: the snapshot is pinned ONCE (by the caller or here) and every fill
+    // reads from this frozen generation; re-pinning per section could straddle
+    // a concurrent reindex generation.
+    auto snap = std::move(pinned);
     diag.symbol_index_ready = snap != nullptr;
     diag.ref_tracker_ready = snap != nullptr;
-    diag.call_graph_populated = indexer_.ref_tracker().has_relationships();
+    // Same predicate as ReferenceTracker::has_relationships(), evaluated on
+    // the pinned generation: a caller that injected an older pin must not
+    // get a diagnostic flag from a newer one, and the 2-arg path already
+    // pins the live snapshot here anyway.
+    diag.call_graph_populated =
+        snap != nullptr && (!snap->incoming_refs.empty() ||
+                            !snap->outgoing_refs.empty() ||
+                            snap->stats.total_references > 0);
     if (!diag.call_graph_populated) {
         diag.add_error({"CALL_GRAPH_EMPTY",
                         "call graph index is empty - relationships not indexed",

@@ -1,9 +1,11 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <vector>
 
 #include <lci/core/context_lookup_types.h>
+#include <lci/core/reference_tracker.h>
 
 namespace lci {
 
@@ -76,6 +78,13 @@ class ContextLookupEngine {
     // (basic_info) fails — the returned context still carries diagnostics.
     CodeObjectContext get_context(const CodeObjectID& object_id,
                                   bool& ok) const;
+
+    // Same fill with a CALLER-pinned snapshot: every section reads `pinned`
+    // and nothing re-pins the live tracker, so the result is immune to
+    // concurrent reindex (the invariant the fills must keep — see
+    // context_lookup_relationships.cpp). `pinned` must be non-null.
+    CodeObjectContext get_context(const CodeObjectID& object_id, bool& ok,
+                                  std::shared_ptr<const ReferenceTracker::Snapshot> pinned) const;
 
     // -- Reference post-processing helpers (trap 8) -------------------------
     // std::stable_sort DESC by confidence — NOT Go's O(n^2) bubble sort.
