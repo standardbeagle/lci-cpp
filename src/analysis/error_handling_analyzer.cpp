@@ -98,7 +98,6 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
     std::vector<SymbolID> nodes;
     absl::flat_hash_map<SymbolID, int> unit_by_symbol;
 
-    const auto& results = analyzer.results();
     for (FileID fid : indexer.get_all_file_ids()) {
         std::string file_path = indexer.get_file_path(fid);
         std::string rel = git::normalize_rel(file_path, std::string(project_root));
@@ -121,12 +120,17 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
                 continue;
             nodes.push_back(es->id);
             if (!production) continue;
-            std::string key =
-                file_path + ":" + std::to_string(es->symbol.line) + ":0";
-            auto it = results.find(key);
-            if (it == results.end()) continue;
+            // Look the record up through the analyzer's own (file,line,column)
+            // keying, on the symbol's real start column. A hand-built
+            // `file:line:0` key predates the column fix and missed every
+            // function not seated at column 0 (two same-line one-liners, any
+            // indented method) — a silent under-count, never a fallback.
+            const SideEffectInfo* info =
+                analyzer.get_result(file_path, es->symbol.line,
+                                    es->symbol.column);
+            if (!info) continue;
             Unit u;
-            u.info = &it->second;
+            u.info = info;
             u.id = es->id;
             u.name = std::string(es->symbol.name);
             u.rel = rel;

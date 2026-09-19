@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <lci/analysis/codebase_intelligence.h>
+#include <lci/analysis/error_handling_analyzer.h>
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/config.h>
 #include <lci/core/graph_propagator.h>
@@ -561,6 +562,105 @@ TEST_F(SideEffectsIndentedMethodTest, SymbolModeFindsMethodAtNonZeroColumn) {
     ASSERT_EQ(json.value("available", true), true)
         << "reason: " << json.value("reason", std::string());
     ASSERT_EQ(json["total_count"].get<int>(), 1);
+}
+
+// S11 follow-up (criterion 3): with the extractor now passing the real start
+// column to begin_function, two functions sharing one line (JS one-liner /
+// minified style) must keep distinct results_ keys AND the error_handling
+// index lookup must still find BOTH. The hand-built `file:line:0` key at
+// error_handling_analyzer.cpp:125 predates the column fix: it looked up every
+// function at column 0, so any function not seated at column 0 (i.e. both
+// one-liners) was silently dropped from the scored set. error_handling reads
+// through the analyzer's own (file,line,column) keying, so a mismatch is a
+// miss — never a fallback.
+TEST(SideEffectsSameLineColumnTest, JsFunctionsOnOneLineStayDistinctAndErrorHandlingFindsBoth) {
+    auto dir = lci::test::unique_temp_dir("lci_side_effects_oneline_");
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream out(dir / "one.js");
+        out << "function alpha(){ open('/tmp/a'); return 1; } "
+               "function beta(){ fetch('/x'); return 2; }\n";
+    }
+    Config config;
+    config.project.root = dir.string();
+    auto indexer = std::make_unique<MasterIndex>(config);
+    auto analyzer = std::make_unique<SideEffectAnalyzer>("generic");
+    indexer->set_side_effect_sink(analyzer.get());
+    indexer->index_directory(dir.string());
+    analyzer->populate_from_index(*indexer);
+    analyzer->propagate_transitive(*indexer);
+
+    // End-to-end through the extractor + index: the analyzer holds BOTH
+    // functions under distinct keys.
+    auto snap = indexer->ref_tracker().pin();
+    int found_records = 0;
+    for (const auto& name : {std::string_view("alpha"), std::string_view("beta")}) {
+        auto hs = snap->find_symbols_by_name(name);
+        ASSERT_FALSE(hs.empty()) << name << " missing from the index";
+        const EnhancedSymbol* es = hs[0].get();
+        const auto* info = analyzer->get_result(
+            indexer->get_file_path(es->symbol.file_id), es->symbol.line,
+            es->symbol.column);
+        ASSERT_NE(info, nullptr)
+            << name << " has no side-effect record at its (line,column)";
+        EXPECT_EQ(info->function_name, name);
+        ++found_records;
+    }
+    EXPECT_EQ(found_records, 2);
+
+    // error_handling_analyzer must score BOTH, not drop them via the stale
+    // column-0 key.
+    auto eh = ErrorHandlingAnalyzer::analyze(*analyzer, *indexer,
+                                             dir.string());
+    EXPECT_EQ(eh.errors.functions_scored, 2)
+        << "error_handling dropped a same-line function (stale :0 lookup)";
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+// S11 follow-up (criterion 2): `SideEffectAnalyzer::fixpoint_truncated()` had
+// no reader at all before this wiring, so a transitive assessment that hit the
+// 100-iteration fixpoint cap was silently partial. The side_effects summary
+// now carries a named truncation field. A 150-link chain g0->...->g149 needs
+// more than kMaxPropagationIterations passes, so the MCP tool output — not just
+// the analyzer's internal flag — must report it.
+TEST(SideEffectsSummaryTruncationTest, LongChainSurfacesTruncationFieldInToolOutput) {
+    constexpr int kChain = 150;
+    auto dir = lci::test::unique_temp_dir("lci_se_trunc_tool_");
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream o(dir / "chain.go");
+        o << "package main\n\n";
+        for (int i = 0; i < kChain; ++i) {
+            if (i + 1 == kChain) {
+                o << "func g" << i << "() {\n\tprintln(\"x\")\n}\n\n";
+            } else {
+                o << "func g" << i << "() {\n\tg" << (i + 1) << "()\n}\n\n";
+            }
+        }
+    }
+    Config config;
+    config.project.root = dir.string();
+    auto indexer = std::make_unique<MasterIndex>(config);
+    auto analyzer = std::make_unique<SideEffectAnalyzer>("generic");
+    indexer->index_directory(dir.string());
+    analyzer->populate_from_index(*indexer);
+    analyzer->propagate_transitive(*indexer);
+    ASSERT_TRUE(analyzer->fixpoint_truncated())
+        << "fixture does not actually exceed the fixpoint cap";
+
+    nlohmann::json params;
+    params["mode"] = "summary";
+    auto result = handle_side_effects(params, *analyzer, indexer.get());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    EXPECT_TRUE(json.value("fixpoint_truncated", false))
+        << "truncation flag missing from side_effects summary output:\n"
+        << result.text;
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
 }
 
 // A stale column-0 key on ANY writer (populate_from_index, propagate_transitive
@@ -1890,21 +1990,28 @@ class ErrorHandlingSectionTest : public ::testing::Test {
         // findings under a name the report can never join back.
         std::string main_path = (temp_dir_ / "main.go").generic_string();
         std::string test_path = (temp_dir_ / "util_test.go").generic_string();
+        // These are top-level Go `func` declarations: the extractor seats them
+        // at start column 1 (start.column + 1), and error_handling joins the
+        // record by the index symbol's real column. Key the fabricated records
+        // at that same column so the (file,line,column) key matches — a
+        // column-0 record would be invisible to the report, as it is in
+        // production for any indented or same-line function.
+        constexpr int kTopLevelCol = 1;
 
-        analyzer_->begin_function("swallowIt", main_path, 3, 4);
+        analyzer_->begin_function("swallowIt", main_path, 3, 4, kTopLevelCol);
         CatchSiteInfo site;
         site.line = 3;
         site.body_empty = true;
         analyzer_->record_catch(site);
         analyzer_->end_function();
 
-        analyzer_->begin_function("leakIt", main_path, 6, 7);
+        analyzer_->begin_function("leakIt", main_path, 6, 7, kTopLevelCol);
         analyzer_->record_call_site_resources("Open", 6, false);
         analyzer_->end_function();
 
         // A cause-loss funnel: rethrows, but the new error never chains the
         // cause. Seeds the api-reaches-cause-loss exposure via PublicEntry.
-        analyzer_->begin_function("funnelIt", main_path, 9, 10);
+        analyzer_->begin_function("funnelIt", main_path, 9, 10, kTopLevelCol);
         CatchSiteInfo funnel;
         funnel.line = 9;
         funnel.has_rethrow = true;
@@ -1913,10 +2020,10 @@ class ErrorHandlingSectionTest : public ::testing::Test {
         analyzer_->end_function();
 
         // The caller must be a scored unit for exposure to name it.
-        analyzer_->begin_function("PublicEntry", main_path, 12, 15);
+        analyzer_->begin_function("PublicEntry", main_path, 12, 15, kTopLevelCol);
         analyzer_->end_function();
 
-        analyzer_->begin_function("helperSwallow", test_path, 3, 4);
+        analyzer_->begin_function("helperSwallow", test_path, 3, 4, kTopLevelCol);
         analyzer_->record_catch(site);
         analyzer_->end_function();
     }
@@ -1964,8 +2071,9 @@ TEST_F(ErrorHandlingSectionTest, ZeroSignalRendersNAInsteadOfPerfectScore) {
     SideEffectAnalyzer plain("go");
     // generic_string() for the same reason as the fixture's paths: the
     // report joins findings back through the index's generic spelling.
+    // Column 1 = the real top-level `func` start column the report joins on.
     std::string main_path = (temp_dir_ / "main.go").generic_string();
-    plain.begin_function("PublicEntry", main_path, 12, 15);
+    plain.begin_function("PublicEntry", main_path, 12, 15, 1);
     plain.end_function();
 
     nlohmann::json params;

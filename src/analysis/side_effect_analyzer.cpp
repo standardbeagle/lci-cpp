@@ -80,18 +80,14 @@ namespace {
 uint32_t classify_callee_category(std::string_view callee);
 
 // results_ key: file:line:column. The column distinguishes functions that
-// share a start line (minified JS / one-liners); callers without column
-// information pass 0.
-//
-// TODO(finding 6, src/parser/unified_extractor.cpp:391): the AST pass's
-// begin_function() call site never passes start_column, so today every
-// caller of make_result_key (the AST pass here, and populate_from_index /
-// propagate_transitive below via the index) keys on column 0 uniformly —
-// consistent, but blind to same-line distinct functions until the parser
-// side supplies a real column. When it does, populate_from_index and
-// propagate_transitive must read es->symbol.column (or equivalent) instead
-// of the hardcoded 0 below, keeping the (file,line,column) key exact rather
-// than falling back to a line-only key.
+// share a start line (minified JS / one-liners). The AST pass supplies the
+// real start column via unified_extractor's begin_function(node start.column
+// + 1), and the index pass (populate_from_index / propagate_transitive) keys
+// on the same es->symbol.column, so the two passes MERGE on one exact key
+// rather than falling back to a line-only or column-0 key. Callers that
+// genuinely lack column information (none in the production wiring) still pass
+// 0; error_handling joins through get_result(symbol.column), never a hand-built
+// :0 key, so an indented or same-line function is never silently missed.
 std::string make_result_key(std::string_view file, int line, int column) {
     std::string key(file);
     key += ':';
