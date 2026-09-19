@@ -1731,6 +1731,136 @@ TEST(PipelineLoadFailureTest, ReadableCorpusHasNoLoadFailures) {
 // prefix as soon as the next expected file_id arrives.
 // ---------------------------------------------------------------------------
 
+TEST(ReorderFileBufferTest, RandomizedArrivalReleasesAscending) {
+    // The whole point: a per-file pseudo-random completion order (the delay
+    // model of the worker pool) must still drain in exact file_id order.
+    std::vector<uint32_t> ids(500);
+    std::iota(ids.begin(), ids.end(), 1);
+    std::mt19937 rng(0xC0FFEE);
+    std::shuffle(ids.begin(), ids.end(), rng);
+
+    std::vector<uint32_t> released;
+    ReorderFileBuffer reorder([&](ProcessedFile&& pf) {
+        released.push_back(pf.file_id);
+    });
+    for (uint32_t id : ids) {
+        ProcessedFile pf;
+        pf.file_id = id;
+        reorder.push(std::move(pf));
+    }
+    reorder.close();
+
+    ASSERT_EQ(released.size(), 500u);
+    for (uint32_t i = 0; i < 500; ++i) {
+        EXPECT_EQ(released[i], i + 1)
+            << "release order not ascending at index " << i;
+    }
+}
+
+TEST(ReorderFileBufferTest, BoundedPrefixUnderSlidingWindowArrival) {
+    // A realistic worker pool completes files within a small window of the
+    // dispatch order, so the reorder buffer should hold only ~that window,
+    // not the whole corpus. Build a genuinely bounded-window permutation:
+    // key = id + uniform(0, W), arrival order = ascending key, so no id
+    // lands more than W ranks from its sorted position (adjacent-swap
+    // shuffles cascade and are NOT bounded).
+    constexpr uint32_t kFiles = 2000;
+    constexpr uint32_t kJitter = 8;
+    std::mt19937 rng(7);
+    std::uniform_int_distribution<uint32_t> jitter(0, kJitter);
+
+    std::vector<std::pair<uint32_t, uint32_t>> keyed(kFiles);
+    for (uint32_t i = 0; i < kFiles; ++i) {
+        keyed[i] = {i + 1, (i + 1) + jitter(rng)};
+    }
+    std::sort(keyed.begin(), keyed.end(),
+              [](const auto& a, const auto& b) { return a.second < b.second; });
+
+    size_t peak_held = 0;
+    ReorderFileBuffer reorder([&](ProcessedFile&&) {});
+    for (const auto& [id, key] : keyed) {
+        ProcessedFile pf;
+        pf.file_id = id;
+        reorder.push(std::move(pf));
+        peak_held = std::max(peak_held, reorder.held());
+    }
+    reorder.close();
+    EXPECT_LT(peak_held, kJitter * 4u)
+        << "reorder window grew far past the arrival jitter";
+}
+
+TEST(ReorderFileBufferTest, NoteMissingAdvancesPastGapThenFlushesRest) {
+    // file_id 2 errors out (never buffered): note_missing lets 3 release
+    // contiguously. file_id 4 never appears at all until close() flushes it.
+    std::vector<uint32_t> released;
+    ReorderFileBuffer reorder([&](ProcessedFile&& pf) {
+        released.push_back(pf.file_id);
+    });
+    auto push = [&](uint32_t id) {
+        ProcessedFile pf;
+        pf.file_id = id;
+        reorder.push(std::move(pf));
+    };
+    push(1);            // releases 1
+    push(3);            // held: 2 not yet seen
+    reorder.note_missing(2);  // 2 errored -> releases 3
+    push(5);
+    push(6);
+    reorder.close();    // flushes 5,6 (4 never arrived) ascending
+
+    EXPECT_EQ(released, (std::vector<uint32_t>{1, 3, 5, 6}));
+}
+
+TEST(PipelineTest, IntegrationOrderIsFileIdOrderUnderParallelParse) {
+    // End-to-end acceptance: a 500-file synthetic corpus parsed by a worker
+    // pool (completion order is scheduling-random per file) must integrate —
+    // and therefore assign symbol ids — in file_id order. Monotonicity of
+    // symbol id with file id across every symbol proves the reorder buffer
+    // released to the integrator strictly ascending, the identical order the
+    // old whole-corpus drain+sort produced. MasterIndex drives the full
+    // flow so the symbol name index is built and queryable.
+    constexpr int kFiles = 500;
+    TempDir dir;
+    for (int i = 0; i < kFiles; ++i) {
+        std::string name = "f" + std::to_string(i);
+        std::string src = "package " + name +
+                          "\nfunc Fn" + std::to_string(i) + "() int { return " +
+                          std::to_string(i) + " }\n";
+        dir.write_file(name + ".go", src);
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.performance.parallel_file_workers = 8;
+
+    MasterIndex index(cfg);
+    ASSERT_TRUE(index.index_directory(dir.path().string()))
+        << "index_directory failed for the 500-file synthetic corpus";
+
+    auto snap = index.ref_tracker().pin();
+    ASSERT_NE(snap, nullptr);
+
+    // Collect (file_id, symbol_id) for each file's one unique-named symbol.
+    std::vector<std::pair<uint32_t, SymbolID>> got;
+    got.reserve(kFiles);
+    for (int i = 0; i < kFiles; ++i) {
+        auto h = snap->find_symbol_by_name("Fn" + std::to_string(i));
+        ASSERT_NE(h, nullptr) << "Fn" << i << " not indexed";
+        got.emplace_back(h->symbol.file_id, h->id);
+    }
+
+    // Integration order == file_id order iff, sorted by file_id, the symbol
+    // ids are strictly increasing (ids are handed out in integrate() order).
+    std::sort(got.begin(), got.end());
+    for (size_t n = 1; n < got.size(); ++n) {
+        ASSERT_NE(got[n].first, got[n - 1].first)
+            << "two files share a file_id at index " << n;
+        EXPECT_GT(got[n].second, got[n - 1].second)
+            << "file_id " << got[n].first << " symbol id is below the prior "
+               "file's: integration ran out of file_id order";
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Progress: the scan count must be observable while the scan phase is still
 // live. set_total() used to flip is_scanning=0 immediately (pipeline.cpp

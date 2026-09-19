@@ -1,6 +1,5 @@
 #include <lci/indexing/pipeline.h>
 
-#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <thread>
@@ -153,13 +152,19 @@ void Pipeline::scan_and_parse() {
     // producing bucketed trigrams (dead ShardedTrigramStorage feed — see
     // pipeline_processor.cpp), so there is nothing to merge.
 
-    // Stage 3: Integrate results (runs on this thread). Buffer all
-    // ProcessedFile outputs from the worker pool, then sort by file_id
-    // (assigned deterministically by the producer above) so symbol_id
-    // assignment in ref_tracker.process_file follows the same scan
-    // order. This mirrors Go's reference indexer ordering and keeps
-    // HTTP / MCP responses bit-stable across runs.
+    // Stage 3a: drain results through a bounded reorder buffer keyed by
+    // file_id (assigned deterministically by the producer above). The
+    // buffer releases each file to buffered_ as soon as the next expected
+    // id arrives, so files reach the integrator in ascending file_id
+    // order — the identical order the old whole-corpus drain+sort produced
+    // — without holding every parsed file at once. symbol_id assignment in
+    // ref_tracker.process_file therefore follows scan order and HTTP/MCP
+    // responses stay bit-stable across runs (mirrors Go's reference
+    // indexer ordering).
     buffered_.clear();
+    buffered_.reserve(static_cast<size_t>(file_count));
+    ReorderFileBuffer reorder(
+        [this](ProcessedFile&& pf) { buffered_.push_back(std::move(pf)); });
     {
         ProcessedFile result;
         while (result_queue.pop(result)) {
@@ -172,6 +177,7 @@ void Pipeline::scan_and_parse() {
                 err.message = result.error.message;
                 err.operation = result.stage;
                 progress_.add_error(std::move(err));
+                reorder.note_missing(result.file_id);
                 continue;
             }
             if (result.file_id == 0) continue;
@@ -195,18 +201,14 @@ void Pipeline::scan_and_parse() {
                 progress_.add_error(std::move(warn));
             }
 
-            buffered_.push_back(std::move(result));
+            reorder.push(std::move(result));
         }
+        reorder.close();
     }
 
     // Workers are done once the drain loop above exits (the processor
     // closes result_queue after joining them).
     const auto t_parsed = std::chrono::steady_clock::now();
-
-    std::sort(buffered_.begin(), buffered_.end(),
-              [](const ProcessedFile& a, const ProcessedFile& b) {
-                  return a.file_id < b.file_id;
-              });
 
     // One line per bulk index: the stage wall split is the first question
     // every indexing-perf investigation asks, and reconstructing it from a
@@ -259,6 +261,29 @@ void Pipeline::integrate() {
 
     for (auto& result : buffered_) {
         integrator_.integrate_file(result);
+        // Release the merged payload immediately. After integrate_file()
+        // nothing reads these vectors again; leaving them until
+        // buffered_.clear() kept the whole corpus's parse output alive
+        // through the entire integrate phase, stacking on top of the
+        // merged index. Freeing per file makes the integrate-phase
+        // transient decay as progress advances.
+        result.symbols.clear();
+        result.symbols.shrink_to_fit();
+        result.enhanced_symbols.clear();
+        result.enhanced_symbols.shrink_to_fit();
+        result.references.clear();
+        result.references.shrink_to_fit();
+        result.field_types.clear();
+        result.field_types.shrink_to_fit();
+        result.scopes.clear();
+        result.scopes.shrink_to_fit();
+        result.symbol_metadata.clear();
+        result.symbol_metadata.shrink_to_fit();
+        result.postings_tokens.clear();
+        result.postings_tokens.shrink_to_fit();
+        result.line_offsets.clear();
+        result.line_offsets.shrink_to_fit();
+        result.trigram_bloom.reset();
         progress_.increment_integrated();
     }
     buffered_.clear();
