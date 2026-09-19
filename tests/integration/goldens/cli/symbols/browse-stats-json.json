@@ -5,7 +5,7 @@
     "path": "${CORPUS}/a.go"
   },
   "stats": {
-    "avg_complexity": 1.0,
+    "avg_complexity": "1",
     "exported_count": 1,
     "function_count": 1,
     "max_complexity": 1,

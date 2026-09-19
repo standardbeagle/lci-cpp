@@ -2,7 +2,7 @@
   "result": {
     "content": [
       {
-        "text": "{\"mode\":\"overview\",\"overview\":{\"avg_refs_per_symbol\":1.6666666666666667,\"avg_symbols_per_file\":1.5,\"language_breakdown\":{\"cpp\":1,\"go\":1,\"python\":1,\"rust\":1},\"total_files\":4,\"total_references\":10,\"total_symbols\":6,\"type_breakdown\":{\"function\":4,\"variable\":2},\"unique_languages\":4},\"timestamp_ms\":1788373560960}",
+        "text": "{\"mode\":\"overview\",\"overview\":{\"avg_refs_per_symbol\":1.6666666666666667,\"avg_symbols_per_file\":1.5,\"language_breakdown\":{\"cpp\":1,\"go\":1,\"python\":1,\"rust\":1},\"total_files\":4,\"total_references\":10,\"total_symbols\":6,\"type_breakdown\":{\"function\":4,\"variable\":2},\"unique_languages\":4},\"timestamp_ms\":1789707783847}",
         "type": "text"
       }
     ]
