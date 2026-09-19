@@ -117,54 +117,99 @@ ExpansionEngine::LinesResult ExpansionEngine::extract_source_by_lines(
     return {std::string(content.substr(begin_off, end_off - begin_off)), ""};
 }
 
+// -- Identity resolution ------------------------------------------------------
+
+ExpansionEngine::ResolveStart ExpansionEngine::resolve_start(
+    const std::string& file_path, const std::string& symbol_name) {
+    auto& tracker = index_.ref_tracker();
+    auto snap = tracker.pin();
+    ResolveStart out;
+
+    const bool file_scoped = !file_path.empty();
+    FileID fid = 0;
+    if (file_scoped) {
+        fid = index_.path_to_id(file_path);
+        if (fid == 0) {
+            out.status = RefResolution::MissingFile;
+            return out;
+        }
+    }
+
+    auto handles = snap->find_symbols_by_name(symbol_name);
+    std::vector<ReferenceTracker::Snapshot::SymbolHandle> matches;
+    for (const auto& h : handles) {
+        if (!h) continue;
+        if (file_scoped && h->symbol.file_id != fid) continue;
+        matches.push_back(h);
+    }
+
+    if (matches.empty()) {
+        // A file-scoped miss is a hard stop: never fall back to a same-name
+        // symbol from another file (that would hydrate unrelated code under
+        // the requested file's identity).
+        out.status = RefResolution::MissingSymbol;
+        return out;
+    }
+    if (matches.size() > 1 && file_scoped) {
+        out.status = RefResolution::AmbiguousSymbol;
+        return out;
+    }
+
+    // Symbol-only refs (no file) keep legacy first-match behavior, made
+    // deterministic by (file_id, line) so the same index always yields the
+    // same symbol.
+    if (!file_scoped && matches.size() > 1) {
+        std::sort(matches.begin(), matches.end(),
+                  [](const auto& a, const auto& b) {
+                      if (a->symbol.file_id != b->symbol.file_id) {
+                          return a->symbol.file_id < b->symbol.file_id;
+                      }
+                      return a->symbol.line < b->symbol.line;
+                  });
+    }
+    out.id = matches.front()->id;
+    out.status = RefResolution::Resolved;
+    return out;
+}
+
 ExpansionEngine::ExtractResult ExpansionEngine::extract_symbol_source(
     const std::string& file_path, const std::string& symbol_name,
-    const LineRange* line_hint, FormatType /*format*/) {
-    // If we have a line hint, use it directly
-    if (line_hint && line_hint->start > 0) {
-        auto [source, err] =
-            extract_source_by_lines(file_path, line_hint->start, line_hint->end);
-        if (!err.empty()) {
-            return {{}, {}, {}, err};
+    FormatType /*format*/) {
+    // Saved line hints are deliberately ignored for symbol refs: a hint is a
+    // position from an earlier index and, after edits, points at unrelated
+    // code. The symbol's identity (resolved inside its own file) governs.
+    auto rs = resolve_start(file_path, symbol_name);
+    if (rs.status != RefResolution::Resolved) {
+        std::string err;
+        switch (rs.status) {
+            case RefResolution::MissingFile:
+                err = "file not found in index: " + file_path;
+                break;
+            case RefResolution::MissingSymbol:
+                err = "symbol " + symbol_name +
+                      " not found" +
+                      (file_path.empty() ? "" : " in file " + file_path);
+                break;
+            case RefResolution::AmbiguousSymbol:
+                err = "symbol " + symbol_name +
+                      " is ambiguous in file " + file_path +
+                      " (multiple same-name definitions)";
+                break;
+            default:
+                err = "unresolved symbol " + symbol_name;
         }
-        SymbolInfo info;
-        info.start_line = line_hint->start;
-        info.end_line = line_hint->end;
-        auto nl = source.find('\n');
-        if (nl != std::string::npos) {
-            info.signature = source.substr(0, nl);
-        } else {
-            info.signature = source;
-        }
-        // Trim leading/trailing whitespace from signature
-        auto first = info.signature.find_first_not_of(" \t");
-        if (first != std::string::npos) {
-            info.signature = info.signature.substr(first);
-        }
-        return {std::move(source), *line_hint, std::move(info), {}};
+        return {{}, {}, {}, std::move(err), rs.status};
     }
 
-    // Search for the symbol by name in the reference tracker
     auto& tracker = index_.ref_tracker();
     auto rt_snap = tracker.pin();
-    auto sym = rt_snap->find_symbol_by_name(symbol_name);
+    auto sym = rt_snap->get_enhanced_symbol(rs.id);
     if (!sym) {
-        return {{}, {}, {}, "symbol " + symbol_name + " not found"};
+        return {{}, {}, {}, "symbol " + symbol_name + " not found",
+                RefResolution::MissingSymbol};
     }
 
-    // Check file matches
     auto sym_path = get_file_path(sym->symbol.file_id);
-    auto fid = index_.path_to_id(file_path);
-    if (fid != 0 && sym->symbol.file_id != fid) {
-        // Try finding in the specified file
-        auto file_sym =
-            rt_snap->find_symbol_by_file_and_name(fid, symbol_name);
-        if (file_sym) {
-            sym = file_sym;
-            sym_path = file_path;
-        }
-    }
-
     int start = sym->symbol.line;
     int end = sym->symbol.end_line;
     if (end < start) end = start;
@@ -172,7 +217,7 @@ ExpansionEngine::ExtractResult ExpansionEngine::extract_symbol_source(
     auto [source, err] = extract_source_by_lines(
         sym_path.empty() ? file_path : sym_path, start, end);
     if (!err.empty()) {
-        return {{}, {}, {}, err};
+        return {{}, {}, {}, err, RefResolution::Resolved};
     }
 
     SymbolInfo info;
@@ -189,7 +234,8 @@ ExpansionEngine::ExtractResult ExpansionEngine::extract_symbol_source(
             (first != std::string::npos) ? line.substr(first) : line;
     }
 
-    return {std::move(source), {start, end}, std::move(info), {}};
+    return {std::move(source), {start, end}, std::move(info), {},
+            RefResolution::Resolved};
 }
 
 namespace {
@@ -239,20 +285,22 @@ ExpansionEngine::HydrateResult ExpansionEngine::hydrate_reference(
     if (format == FormatType::Outline) {
         hr.source = build_file_outline(index_, file_path);
         if (hr.source.empty()) {
-            return {{}, 0, "no symbols found for outline: " + ref.file};
+            RefResolution reason =
+                index_.path_to_id(file_path) == 0 ? RefResolution::MissingFile
+                                                  : RefResolution::Resolved;
+            return {{}, 0, "no symbols found for outline: " + ref.file, reason};
         }
         int tokens = static_cast<int>(hr.source.size()) / 4;
-        return {std::move(hr), tokens, {}};
+        return {std::move(hr), tokens, {}, RefResolution::Resolved};
     }
 
     if (!ref.symbol.empty()) {
-        // Case 1: Symbol name provided
-        const LineRange* hint =
-            ref.has_line_range ? &ref.line_range : nullptr;
-        auto [source, lines, info, err] =
-            extract_symbol_source(file_path, ref.symbol, hint, format);
-        if (!err.empty()) {
-            return {{}, 0, err};
+        // Case 1: Symbol name provided. Resolved by identity inside the
+        // named file; any saved line hint is ignored.
+        auto [source, lines, info, err, reason] =
+            extract_symbol_source(file_path, ref.symbol, format);
+        if (!err.empty() || reason != RefResolution::Resolved) {
+            return {{}, 0, err, reason};
         }
         hr.source = std::move(source);
         hr.lines = lines;
@@ -261,20 +309,71 @@ ExpansionEngine::HydrateResult ExpansionEngine::hydrate_reference(
         hr.is_exported = info.is_exported;
         if (format == FormatType::Signatures) extract_signature_only(hr);
     } else if (ref.has_line_range) {
-        // Case 2: Only line range
+        // Case 2: Only line range. Literal current-index lines, with no
+        // semantic stability across edits — flagged so consumers know.
+        if (!ref.file.empty() && index_.path_to_id(file_path) == 0) {
+            return {{}, 0, "file not found: " + ref.file,
+                    RefResolution::MissingFile};
+        }
         auto [source, err] = extract_source_by_lines(
             file_path, ref.line_range.start, ref.line_range.end);
         if (!err.empty()) {
-            return {{}, 0, err};
+            return {{}, 0, err, RefResolution::InvalidRef};
         }
         hr.source = std::move(source);
         hr.lines = ref.line_range;
+        hr.is_line_range_literal = true;
     } else {
-        return {{}, 0, "reference must have either symbol name or line range"};
+        return {{}, 0, "reference must have either symbol name or line range",
+                RefResolution::InvalidRef};
     }
 
     int tokens = static_cast<int>(hr.source.size()) / 4;
-    return {std::move(hr), tokens, {}};
+    return {std::move(hr), tokens, {}, RefResolution::Resolved};
+}
+
+ExpansionEngine::HydrateResult ExpansionEngine::hydrate_symbol_id(
+    SymbolID id, FormatType format) {
+    auto& tracker = index_.ref_tracker();
+    auto rt_snap = tracker.pin();
+    auto sym = rt_snap->get_enhanced_symbol(id);
+    if (!sym) {
+        return {{}, 0, "expansion target symbol id not found",
+                RefResolution::MissingSymbol};
+    }
+    auto file_path = get_file_path(sym->symbol.file_id);
+    if (file_path.empty()) {
+        return {{}, 0, "expansion target file not found",
+                RefResolution::MissingFile};
+    }
+
+    HydratedRef hr;
+    hr.file = file_path;
+    hr.symbol = sym->symbol.name;
+    int start = sym->symbol.line;
+    int end = sym->symbol.end_line;
+    if (end < start) end = start;
+    hr.lines = {start, end};
+    hr.symbol_type = std::string(to_string(sym->symbol.type));
+    hr.is_exported = sym->is_exported;
+    hr.signature = sym->signature;
+
+    auto [source, err] = extract_source_by_lines(file_path, start, end);
+    if (!err.empty()) {
+        return {std::move(hr), 0, err, RefResolution::Resolved};
+    }
+    hr.source = std::move(source);
+    if (hr.signature.empty()) {
+        auto nl = hr.source.find('\n');
+        auto line = (nl != std::string::npos) ? hr.source.substr(0, nl)
+                                              : hr.source;
+        auto first = line.find_first_not_of(" \t");
+        hr.signature = (first != std::string::npos) ? line.substr(first) : line;
+    }
+    if (format == FormatType::Signatures) extract_signature_only(hr);
+
+    int tokens = static_cast<int>(hr.source.size()) / 4;
+    return {std::move(hr), tokens, {}, RefResolution::Resolved};
 }
 
 // -- apply_expansions ---------------------------------------------------------
@@ -338,34 +437,24 @@ ExpansionEngine::ExpansionResult ExpansionEngine::apply_expansions(
 
 namespace {
 
-/// Helper to hydrate a list of symbol IDs into HydratedRefs.
+/// Helper to hydrate a list of symbol IDs into HydratedRefs. Each target is
+/// resolved by its exact SymbolID (never re-derived by name), so an expansion
+/// sibling cannot be substituted by, or made ambiguous against, a same-name
+/// symbol in another file.
 std::vector<HydratedRef> hydrate_symbol_ids(
     ExpansionEngine& engine, const std::vector<SymbolID>& ids,
-    ReferenceTracker& tracker, MasterIndex& index, int remaining_tokens,
-    const std::string& project_root, FormatType format,
-    absl::flat_hash_set<SymbolID>& visited) {
+    ReferenceTracker& /*tracker*/, MasterIndex& /*index*/,
+    int remaining_tokens, const std::string& /*project_root*/,
+    FormatType format, absl::flat_hash_set<SymbolID>& visited) {
     std::vector<HydratedRef> results;
     int total_tokens = 0;
-    auto rt_snap = tracker.pin();
 
     for (auto id : ids) {
         if (total_tokens >= remaining_tokens) break;
         if (visited.contains(id)) continue;
         visited.insert(id);
 
-        auto sym = rt_snap->get_enhanced_symbol(id);
-        if (!sym) continue;
-
-        auto file_path = index.get_file_path(sym->symbol.file_id);
-        if (file_path.empty()) continue;
-
-        ContextRef cr;
-        cr.file = file_path;
-        cr.symbol = sym->symbol.name;
-        cr.line_range = {sym->symbol.line, sym->symbol.end_line};
-        cr.has_line_range = true;
-
-        auto result = engine.hydrate_reference(cr, format, project_root);
+        auto result = engine.hydrate_symbol_id(id, format);
         if (!result.error.empty()) continue;
 
         total_tokens += result.tokens;
@@ -382,9 +471,12 @@ std::vector<HydratedRef> ExpansionEngine::expand_callers(
     const std::string& project_root, FormatType format) {
     if (ref.symbol.empty()) return {};
 
+    auto rs = resolve_start(resolve_path(ref.file, project_root), ref.symbol);
+    if (rs.status != RefResolution::Resolved) return {};
+
     auto& tracker = index_.ref_tracker();
     auto rt_snap = tracker.pin();
-    auto sym = rt_snap->find_symbol_by_name(ref.symbol);
+    auto sym = rt_snap->get_enhanced_symbol(rs.id);
     if (!sym) return {};
 
     // Level-order walk up to `depth` hops, deduped, so "callers:2" reaches
@@ -416,9 +508,12 @@ std::vector<HydratedRef> ExpansionEngine::expand_callees(
     const std::string& project_root, FormatType format) {
     if (ref.symbol.empty()) return {};
 
+    auto rs = resolve_start(resolve_path(ref.file, project_root), ref.symbol);
+    if (rs.status != RefResolution::Resolved) return {};
+
     auto& tracker = index_.ref_tracker();
     auto rt_snap = tracker.pin();
-    auto sym = rt_snap->find_symbol_by_name(ref.symbol);
+    auto sym = rt_snap->get_enhanced_symbol(rs.id);
     if (!sym) return {};
 
     absl::flat_hash_set<SymbolID> seen;
@@ -447,14 +542,21 @@ std::vector<HydratedRef> ExpansionEngine::expand_implementations(
     const std::string& project_root, FormatType format) {
     if (ref.symbol.empty()) return {};
 
+    auto file_path = resolve_path(ref.file, project_root);
+    bool file_scoped = !file_path.empty();
+    FileID fid = file_scoped ? index_.path_to_id(file_path) : 0;
+    if (file_scoped && fid == 0) return {};
+
     auto& tracker = index_.ref_tracker();
     auto rt_snap = tracker.pin();
     auto symbols = rt_snap->find_symbols_by_name(ref.symbol);
     if (symbols.empty()) return {};
 
-    // Prefer interface symbols
+    // Prefer interface symbols; resolve strictly within the named file so a
+    // same-name type in another file is never chosen.
     const EnhancedSymbol* target = nullptr;
     for (const auto& s : symbols) {
+        if (file_scoped && s->symbol.file_id != fid) continue;
         if (s->symbol.type == SymbolType::Interface) {
             target = s.get();
             break;
@@ -465,7 +567,14 @@ std::vector<HydratedRef> ExpansionEngine::expand_implementations(
             if (!target) target = s.get();
         }
     }
-    if (!target) target = symbols[0].get();
+    if (!target) {
+        for (const auto& s : symbols) {
+            if (file_scoped && s->symbol.file_id != fid) continue;
+            target = s.get();
+            break;
+        }
+    }
+    if (!target) return {};
 
     auto impl_ids = tracker.get_implementors(target->id);
     auto derived_ids = tracker.get_derived_types(target->id);
@@ -488,14 +597,20 @@ std::vector<HydratedRef> ExpansionEngine::expand_interface(
     const std::string& project_root, FormatType format) {
     if (ref.symbol.empty()) return {};
 
+    auto file_path = resolve_path(ref.file, project_root);
+    bool file_scoped = !file_path.empty();
+    FileID fid = file_scoped ? index_.path_to_id(file_path) : 0;
+    if (file_scoped && fid == 0) return {};
+
     auto& tracker = index_.ref_tracker();
     auto rt_snap = tracker.pin();
     auto symbols = rt_snap->find_symbols_by_name(ref.symbol);
     if (symbols.empty()) return {};
 
-    // Prefer concrete types
+    // Prefer concrete types, resolved within the named file.
     const EnhancedSymbol* target = nullptr;
     for (const auto& s : symbols) {
+        if (file_scoped && s->symbol.file_id != fid) continue;
         if (s->symbol.type == SymbolType::Class ||
             s->symbol.type == SymbolType::Struct ||
             s->symbol.type == SymbolType::Type) {
@@ -503,7 +618,14 @@ std::vector<HydratedRef> ExpansionEngine::expand_interface(
             break;
         }
     }
-    if (!target) target = symbols[0].get();
+    if (!target) {
+        for (const auto& s : symbols) {
+            if (file_scoped && s->symbol.file_id != fid) continue;
+            target = s.get();
+            break;
+        }
+    }
+    if (!target) return {};
 
     auto iface_ids = tracker.get_implemented_interfaces(target->id);
     auto base_ids = tracker.get_base_types(target->id);
@@ -525,9 +647,12 @@ std::vector<HydratedRef> ExpansionEngine::expand_siblings(
     const std::string& project_root, FormatType format) {
     if (ref.symbol.empty()) return {};
 
+    auto rs = resolve_start(resolve_path(ref.file, project_root), ref.symbol);
+    if (rs.status != RefResolution::Resolved) return {};
+
     auto& tracker = index_.ref_tracker();
     auto rt_snap = tracker.pin();
-    auto sym = rt_snap->find_symbol_by_name(ref.symbol);
+    auto sym = rt_snap->get_enhanced_symbol(rs.id);
     if (!sym) return {};
     if (sym->symbol.type != SymbolType::Method) return {};
 
@@ -573,17 +698,20 @@ std::vector<HydratedRef> ExpansionEngine::expand_tests(
     }
 
     // Strategy 2: find callers that are test functions
-    auto sym = rt_snap->find_symbol_by_name(ref.symbol);
-    if (sym) {
-        auto caller_ids = tracker.get_caller_symbols(sym->id);
-        for (auto cid : caller_ids) {
-            auto caller = rt_snap->get_enhanced_symbol(cid);
-            if (!caller) continue;
-            if (caller->symbol.name.substr(0, 4) != "Test") continue;
-            auto path = get_file_path(caller->symbol.file_id);
-            if (path.find("_test.") != std::string::npos ||
-                path.find("test_") != std::string::npos) {
-                test_ids.push_back(cid);
+    auto rs = resolve_start(resolve_path(ref.file, project_root), ref.symbol);
+    if (rs.status == RefResolution::Resolved) {
+        auto sym = rt_snap->get_enhanced_symbol(rs.id);
+        if (sym) {
+            auto caller_ids = tracker.get_caller_symbols(sym->id);
+            for (auto cid : caller_ids) {
+                auto caller = rt_snap->get_enhanced_symbol(cid);
+                if (!caller) continue;
+                if (caller->symbol.name.substr(0, 4) != "Test") continue;
+                auto path = get_file_path(caller->symbol.file_id);
+                if (path.find("_test.") != std::string::npos ||
+                    path.find("test_") != std::string::npos) {
+                    test_ids.push_back(cid);
+                }
             }
         }
     }

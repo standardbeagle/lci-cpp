@@ -231,13 +231,34 @@ nlohmann::json hydrated_context_to_json(const HydratedContext& ctx) {
         if (!r.signature.empty()) rj["signature"] = r.signature;
         if (r.is_exported) rj["is_exported"] = true;
         if (r.is_external) rj["is_external"] = true;
+        if (r.is_line_range_literal) rj["line_range_literal"] = true;
         refs.push_back(std::move(rj));
+    }
+
+    // Structured unresolved entries: the original selector + role + reason,
+    // so a caller can act on what failed without parsing warning prose.
+    if (!ctx.unresolved.empty()) {
+        auto& un = j["unresolved"];
+        un = nlohmann::json::array();
+        for (const auto& u : ctx.unresolved) {
+            nlohmann::json uj;
+            uj["file"] = u.file;
+            if (!u.symbol.empty()) uj["symbol"] = u.symbol;
+            if (!u.role.empty()) uj["role"] = u.role;
+            if (!u.note.empty()) uj["note"] = u.note;
+            if (u.has_line_range) {
+                uj["lines"] = {{"start", u.lines.start}, {"end", u.lines.end}};
+            }
+            uj["reason"] = to_string(u.reason);
+            un.push_back(std::move(uj));
+        }
     }
 
     j["stats"] = {{"refs_loaded", ctx.stats.refs_loaded},
                   {"symbols_hydrated", ctx.stats.symbols_hydrated},
                   {"tokens_approx", ctx.stats.tokens_approx},
                   {"expansions_applied", ctx.stats.expansions_applied},
+                  {"unresolved_count", ctx.stats.unresolved_count},
                   {"truncated", ctx.stats.truncated}};
 
     if (!ctx.warnings.empty()) j["warnings"] = ctx.warnings;
@@ -559,6 +580,15 @@ ToolResult handle_context_load(const nlohmann::json& params,
         }
     }
 
+    // Version gate: a well-formed manifest with an unsupported schema version
+    // must fail explicitly (reason unsupported_version), never be hydrated
+    // under a misread of the format. An absent version is the default "1.0".
+    if (!manifest.version.empty() && manifest.version != "1.0") {
+        return make_error_response(
+            "context", "unsupported manifest version '" + manifest.version +
+                           "' (supported: 1.0); reason=unsupported_version");
+    }
+
     // Check index availability
     if (indexer.is_indexing()) {
         return make_unavailable_response(
@@ -604,7 +634,20 @@ ToolResult handle_context_load(const nlohmann::json& params,
         }
 
         auto hr = engine.hydrate_reference(ref, format, project_root);
-        if (!hr.error.empty()) {
+        if (!hr.error.empty() || hr.reason != RefResolution::Resolved) {
+            // Record the structured unresolved entry with the original
+            // selector and role; keep the legacy warning for continuity.
+            UnresolvedRef ue;
+            ue.file = ref.file;
+            ue.symbol = ref.symbol;
+            ue.role = ref.role;
+            ue.note = ref.note;
+            ue.lines = ref.line_range;
+            ue.has_line_range = ref.has_line_range;
+            ue.reason = hr.reason == RefResolution::Resolved
+                            ? RefResolution::InvalidRef
+                            : hr.reason;
+            result.unresolved.push_back(std::move(ue));
             result.warnings.push_back("Failed to hydrate " + ref.file + ":" +
                                       ref.symbol + ": " + hr.error);
             continue;
@@ -615,6 +658,14 @@ ToolResult handle_context_load(const nlohmann::json& params,
         // A line-range-only ref hydrates no symbol.
         if (!ref.symbol.empty()) {
             result.stats.symbols_hydrated++;
+        }
+        if (hr.ref.is_line_range_literal) {
+            result.warnings.push_back(
+                "line-range ref " + ref.file + ":" +
+                std::to_string(ref.line_range.start) + "-" +
+                std::to_string(ref.line_range.end) +
+                " uses literal current-index line numbers; positions are not "
+                "stable across edits");
         }
 
         // Apply expansions. The admitted ref may overshoot the budget by its
@@ -646,6 +697,7 @@ ToolResult handle_context_load(const nlohmann::json& params,
     }
 
     result.stats.tokens_approx = total_tokens;
+    result.stats.unresolved_count = static_cast<int>(result.unresolved.size());
 
     return make_json_response(hydrated_context_to_json(result));
 }

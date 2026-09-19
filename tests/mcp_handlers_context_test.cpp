@@ -625,6 +625,285 @@ TEST_F(ContextHandlerFixture, HydrateReferenceOutlineFormatListsFileSymbols) {
         << result.ref.source;
 }
 
+// =============================================================================
+// Identity resolution of saved references (task 01M2VE7HE4R66ZFB007ZHP1SYW)
+//
+// A saved file+symbol must resolve INSIDE that named file on every load. A
+// stale line hint must never take precedence over the symbol identity, a
+// same-name symbol in another file must never be substituted, and a
+// same-file overload set must be reported as ambiguous rather than silently
+// picking the first entry. Unresolved refs surface as structured entries
+// carrying the original selector + role + a reason, while well-formed-but-
+// unmatched input still keeps the successful refs.
+// =============================================================================
+
+class ContextResolutionFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_ctx_resolve_");
+        std::filesystem::create_directories(temp_dir_);
+
+        // Dup() is defined in two files with distinguishable bodies.
+        write_file(temp_dir_ / "dup_a.go",
+                   "package p\n"
+                   "\n"
+                   "func Dup() int { return 1 }\n");
+        write_file(temp_dir_ / "dup_b.go",
+                   "package p\n"
+                   "\n"
+                   "func Dup() int { return 2 }\n");
+        // ghost.go is indexed but has NO Dup — a ref to ghost.go/Dup must
+        // NOT borrow the other files' Dup source.
+        write_file(temp_dir_ / "ghost.go",
+                   "package p\n"
+                   "\n"
+                   "func GhostOnly() int { return 7 }\n");
+        // Two same-file overloads: ambiguous by name.
+        write_file(temp_dir_ / "over.cpp",
+                   "int compute(int a) { return a; }\n"
+                   "int compute(int a, int b) { return a + b; }\n");
+        // Target() now lives on line 5; a stale hint at lines 1-2 would
+        // return the unrelated package header.
+        write_file(temp_dir_ / "shift.go",
+                   "package p\n"
+                   "\n"
+                   "func Filler() int { return 0 }\n"
+                   "\n"
+                   "func Target() int { return 99 }\n");
+
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+    }
+
+    void TearDown() override {
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+
+    static void write_file(const std::filesystem::path& path,
+                           const std::string& content) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream out(path);
+        out << content;
+    }
+
+    nlohmann::json load(nlohmann::json manifest) {
+        nlohmann::json params = {{"operation", "load"},
+                                 {"from_string", manifest.dump()}};
+        auto result = handle_context(params, *indexer_, temp_dir_.string());
+        if (result.is_error) {
+            return nlohmann::json{{"__error__", result.text}};
+        }
+        return nlohmann::json::parse(result.text);
+    }
+
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+// A ref naming a file that does not contain the symbol must NOT substitute a
+// same-name symbol from another file: it is unresolved with reason
+// missing_symbol, and no other file's source leaks into the response.
+TEST_F(ContextResolutionFixture, MissingSymbolInNamedFileIsNotSubstituted) {
+    auto j = load({{"r", {{{"f", "ghost.go"}, {"s", "Dup"}, {"role", "contract"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_EQ(j["refs"].size(), 0u)
+        << "ghost.go has no Dup; the other files' Dup must not be borrowed: "
+        << j.dump();
+    ASSERT_EQ(j["unresolved"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["file"], "ghost.go");
+    EXPECT_EQ(j["unresolved"][0]["symbol"], "Dup");
+    EXPECT_EQ(j["unresolved"][0]["role"], "contract");
+    EXPECT_EQ(j["unresolved"][0]["reason"], "missing_symbol");
+    // The substituted bodies from dup_a/dup_b must not appear anywhere.
+    auto dumped = j.dump();
+    EXPECT_EQ(dumped.find("return 1"), std::string::npos);
+    EXPECT_EQ(dumped.find("return 2"), std::string::npos);
+}
+
+// A ref to a file that is not in the index at all: missing_file.
+TEST_F(ContextResolutionFixture, MissingFileIsReportedNotSubstituted) {
+    auto j = load({{"r", {{{"f", "gone.go"}, {"s", "Dup"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_EQ(j["refs"].size(), 0u) << j.dump();
+    ASSERT_EQ(j["unresolved"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["file"], "gone.go");
+    EXPECT_EQ(j["unresolved"][0]["symbol"], "Dup");
+    EXPECT_EQ(j["unresolved"][0]["reason"], "missing_file");
+    auto dumped = j.dump();
+    EXPECT_EQ(dumped.find("return 1"), std::string::npos);
+    EXPECT_EQ(dumped.find("return 2"), std::string::npos);
+}
+
+// A same-name overload set inside one file must be reported ambiguous; the
+// engine must not silently return the first candidate.
+TEST_F(ContextResolutionFixture, OverloadedSymbolIsAmbiguousNotFirstMatch) {
+    auto j = load({{"r", {{{"f", "over.cpp"}, {"s", "compute"}, {"role", "pattern"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_EQ(j["refs"].size(), 0u)
+        << "compute is overloaded in over.cpp; picking either is a guess: "
+        << j.dump();
+    ASSERT_EQ(j["unresolved"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["reason"], "ambiguous_symbol");
+    EXPECT_EQ(j["unresolved"][0]["file"], "over.cpp");
+    EXPECT_EQ(j["unresolved"][0]["role"], "pattern");
+}
+
+// A symbol ref with a stale line hint resolves by name (identity), ignoring
+// the hint; the returned source/lines are the symbol's current position.
+TEST_F(ContextResolutionFixture, StaleLineHintIsIgnoredForSymbolRef) {
+    auto j = load({{"r",
+                    {{{"f", "shift.go"},
+                      {"s", "Target"},
+                      {"l", {{"s", 1}, {"e", 2}}}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_EQ(j["unresolved"].size(), 0u) << j.dump();
+    ASSERT_EQ(j["refs"].size(), 1u) << j.dump();
+    const auto& r = j["refs"][0];
+    EXPECT_EQ(r["file"], "shift.go");
+    EXPECT_NE(r["source"].get<std::string>().find("return 99"), std::string::npos)
+        << "must resolve Target's current body, not the stale lines 1-2: "
+        << r.dump();
+    EXPECT_EQ(r["source"].get<std::string>().find("package"),
+              std::string::npos)
+        << "stale hint leaked the file header: " << r.dump();
+    EXPECT_EQ(r["lines"]["start"], 5) << r.dump();
+}
+
+// A pure line-range ref (no symbol) keeps literal current-index line
+// semantics and identifies that limitation, but still hydrates.
+TEST_F(ContextResolutionFixture, PureLineRangeRefIsFlaggedLiteral) {
+    auto j = load({{"r", {{{"f", "shift.go"}, {"l", {{"s", 3}, {"e", 3}}}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_EQ(j["unresolved"].size(), 0u) << j.dump();
+    ASSERT_EQ(j["refs"].size(), 1u) << j.dump();
+    EXPECT_TRUE(j["refs"][0].contains("line_range_literal")) << j.dump();
+    EXPECT_EQ(j["refs"][0]["line_range_literal"], true) << j.dump();
+}
+
+// A well-formed manifest with an unsupported version fails explicitly.
+TEST_F(ContextResolutionFixture, UnsupportedVersionFailsExplicitly) {
+    auto j = load({{"v", "9.9"},
+                   {"r", {{{"f", "dup_a.go"}, {"s", "Dup"}}}}});
+    ASSERT_TRUE(j.contains("__error__"))
+        << "v=9.9 must not be silently hydrated: " << j.dump();
+    EXPECT_NE(j["__error__"].get<std::string>().find("version"),
+              std::string::npos)
+        << j["__error__"];
+}
+
+// v1.0 (and the default empty version) remain supported.
+TEST_F(ContextResolutionFixture, VersionOneZeroIsSupported) {
+    auto j = load({{"v", "1.0"}, {"r", {{{"f", "dup_a.go"}, {"s", "Dup"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_EQ(j["unresolved"].size(), 0u) << j.dump();
+    ASSERT_EQ(j["refs"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["refs"][0]["file"], "dup_a.go");
+    EXPECT_NE(j["refs"][0]["source"].get<std::string>().find("return 1"),
+              std::string::npos);
+}
+
+// Malformed top-level input fails explicitly (never an empty success).
+TEST_F(ContextResolutionFixture, MalformedTopLevelFailsExplicitly) {
+    nlohmann::json notjson = {{"operation", "load"}, {"from_string", "not json"}};
+    auto r1 = handle_context(notjson, *indexer_, temp_dir_.string());
+    EXPECT_TRUE(r1.is_error) << r1.text;
+
+    nlohmann::json arr = {{"operation", "load"}, {"from_string", "[1,2,3]"}};
+    auto r2 = handle_context(arr, *indexer_, temp_dir_.string());
+    EXPECT_TRUE(r2.is_error) << r2.text;
+
+    nlohmann::json norefs = {{"operation", "load"},
+                             {"from_string", R"({"v":"1.0"})"}};
+    auto r3 = handle_context(norefs, *indexer_, temp_dir_.string());
+    EXPECT_TRUE(r3.is_error) << r3.text;
+}
+
+// One response can carry resolved refs and structured unresolved entries,
+// with selectors and roles preserved for both sides.
+TEST_F(ContextResolutionFixture, MixedResolvedAndUnresolvedRefs) {
+    auto j = load({{"r",
+                    {{{"f", "dup_a.go"}, {"s", "Dup"}, {"role", "primary"}},
+                     {{"f", "dup_b.go"}, {"s", "Dup"}, {"role", "alt"}},
+                     {{"f", "ghost.go"}, {"s", "Dup"}, {"role", "broken"}},
+                     {{"f", "over.cpp"}, {"s", "compute"}, {"role", "amb"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    // Both named-file Dups resolve to their own bodies.
+    ASSERT_EQ(j["refs"].size(), 2u) << j.dump();
+    EXPECT_EQ(j["refs"][0]["file"], "dup_a.go");
+    EXPECT_NE(j["refs"][0]["source"].get<std::string>().find("return 1"),
+              std::string::npos);
+    EXPECT_EQ(j["refs"][1]["file"], "dup_b.go");
+    EXPECT_NE(j["refs"][1]["source"].get<std::string>().find("return 2"),
+              std::string::npos);
+    // ghost/Dup -> missing_symbol, over.cpp/compute -> ambiguous_symbol.
+    ASSERT_EQ(j["unresolved"].size(), 2u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["reason"], "missing_symbol");
+    EXPECT_EQ(j["unresolved"][0]["role"], "broken");
+    EXPECT_EQ(j["unresolved"][1]["reason"], "ambiguous_symbol");
+    EXPECT_EQ(j["unresolved"][1]["role"], "amb");
+    EXPECT_EQ(j["stats"]["unresolved_count"], 2) << j.dump();
+    EXPECT_EQ(j["stats"]["refs_loaded"], 2) << j.dump();
+}
+
+// -- Resolver-level (ExpansionEngine) identity tests --------------------------
+
+TEST_F(ContextResolutionFixture, ResolverRejectsCrossFileSubstitution) {
+    ExpansionEngine engine(*indexer_);
+    ContextRef ref;
+    ref.file = "ghost.go";
+    ref.symbol = "Dup";
+    auto result =
+        engine.hydrate_reference(ref, FormatType::Full, temp_dir_.string());
+    EXPECT_FALSE(result.error.empty())
+        << "ghost.go has no Dup; must not borrow another file's symbol";
+    EXPECT_TRUE(result.ref.source.empty()) << result.ref.source;
+}
+
+TEST_F(ContextResolutionFixture, ResolverReportsSameFileAmbiguity) {
+    ExpansionEngine engine(*indexer_);
+    ContextRef ref;
+    ref.file = "over.cpp";
+    ref.symbol = "compute";
+    auto result =
+        engine.hydrate_reference(ref, FormatType::Full, temp_dir_.string());
+    EXPECT_FALSE(result.error.empty())
+        << "over.cpp/compute is overloaded; must not return the first match";
+}
+
+TEST_F(ContextResolutionFixture, ResolverIgnoresLineHintForSymbol) {
+    ExpansionEngine engine(*indexer_);
+    ContextRef ref;
+    ref.file = "shift.go";
+    ref.symbol = "Target";
+    ref.line_range = {1, 2};
+    ref.has_line_range = true;
+    auto result =
+        engine.hydrate_reference(ref, FormatType::Full, temp_dir_.string());
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.ref.lines.start, 5)
+        << "stale hint {1,2} must be ignored; Target is at line 5";
+    EXPECT_NE(result.ref.source.find("return 99"), std::string::npos);
+}
+
+// A ref with no selector at all is a per-ref invalid_ref unresolved entry;
+// it must NOT fail the whole load (unlike malformed top-level input) and the
+// other refs still hydrate.
+TEST_F(ContextResolutionFixture, SelectorlessRefBecomesInvalidRefEntry) {
+    auto j = load({{"r",
+                    {{{"f", "dup_a.go"}, {"s", "Dup"}, {"role", "primary"}},
+                     {{"role", "junk"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    ASSERT_EQ(j["refs"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["refs"][0]["file"], "dup_a.go");
+    ASSERT_EQ(j["unresolved"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["reason"], "invalid_ref");
+    EXPECT_EQ(j["unresolved"][0]["role"], "junk");
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci

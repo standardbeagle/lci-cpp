@@ -63,6 +63,10 @@ struct HydratedRef {
     bool is_exported{};
     bool is_generated{};
     bool is_external{};
+    // A ref resolved purely from a literal line range (no symbol identity):
+    // the line numbers are current-index positions and carry no semantic
+    // stability guarantee across edits.
+    bool is_line_range_literal{};
     PurityInfo purity;
     bool has_purity{};
 };
@@ -73,13 +77,50 @@ struct HydrationStats {
     int symbols_hydrated{};
     int tokens_approx{};
     int expansions_applied{};
+    int unresolved_count{};
     bool truncated{};
+};
+
+/// Outcome of resolving a reference's identity against the current index.
+/// A saved file+symbol resolves only inside that file; a saved object id is
+/// never persistent identity.
+enum class RefResolution : uint8_t {
+    Resolved = 0,
+    InvalidRef,       // no file, symbol, or line range to select on
+    MissingFile,      // named file is not in the index
+    MissingSymbol,    // file present, symbol absent (never cross-file match)
+    AmbiguousSymbol,  // >1 same-name symbol in the named file
+};
+
+inline const char* to_string(RefResolution r) {
+    switch (r) {
+        case RefResolution::Resolved: return "resolved";
+        case RefResolution::InvalidRef: return "invalid_ref";
+        case RefResolution::MissingFile: return "missing_file";
+        case RefResolution::MissingSymbol: return "missing_symbol";
+        case RefResolution::AmbiguousSymbol: return "ambiguous_symbol";
+    }
+    return "unknown";
+}
+
+/// A saved reference that could not be hydrated, reported with the original
+/// selector and role so the caller knows exactly what was asked for and why
+/// it failed — never a silent drop.
+struct UnresolvedRef {
+    std::string file;
+    std::string symbol;
+    std::string role;
+    std::string note;
+    LineRange lines;
+    bool has_line_range{};
+    RefResolution reason{};
 };
 
 /// Expanded context with full source code and relationships.
 struct HydratedContext {
     std::string task;
     std::vector<HydratedRef> refs;
+    std::vector<UnresolvedRef> unresolved;
     HydrationStats stats;
     std::vector<std::string> warnings;
 };

@@ -41,15 +41,22 @@ class ExpansionEngine {
     explicit ExpansionEngine(MasterIndex& index);
 
     /// Hydrates a single reference into source code.
-    /// Returns the hydrated ref, approximate token count, and error string
-    /// (empty on success).
+    /// Returns the hydrated ref, approximate token count, error string
+    /// (empty on success), and the identity-resolution outcome.
     struct HydrateResult {
         HydratedRef ref;
         int tokens{};
         std::string error;
+        RefResolution reason{RefResolution::Resolved};
     };
     HydrateResult hydrate_reference(const ContextRef& ref, FormatType format,
                                     const std::string& project_root);
+
+    /// Hydrates a reference already identified by its SymbolID, using that
+    /// symbol's own current file+line range. Identity is exact (never re-
+    /// resolved by name), so an expansion target cannot be substituted by, or
+    /// made ambiguous against, a same-name sibling.
+    HydrateResult hydrate_symbol_id(SymbolID id, FormatType format);
 
     /// Applies expansion directives (callers, callees, etc.) to a reference.
     /// Returns additional token count consumed, the hydrated expansion refs
@@ -69,16 +76,29 @@ class ExpansionEngine {
   private:
     MasterIndex& index_;
 
-    /// Extracts source for a symbol by name, optionally using a line hint.
+    /// Resolves a saved file+symbol to exactly one symbol in the named file.
+    /// Never substitutes a same-name symbol from another file, and reports a
+    /// same-file overload set as ambiguous rather than picking the first
+    /// candidate. Empty `file_path` falls back to a global name match
+    /// (legacy symbol-only refs); a same-name collision then resolves to the
+    /// first indexed candidate by (file, line) order.
+    struct ResolveStart {
+        SymbolID id{};
+        RefResolution status{RefResolution::Resolved};
+    };
+    ResolveStart resolve_start(const std::string& file_path,
+                               const std::string& symbol_name);
+
+    /// Extracts source for a symbol resolved by identity within its file.
     struct ExtractResult {
         std::string source;
         LineRange lines;
         SymbolInfo info;
         std::string error;
+        RefResolution reason{RefResolution::Resolved};
     };
     ExtractResult extract_symbol_source(const std::string& file_path,
                                         const std::string& symbol_name,
-                                        const LineRange* line_hint,
                                         FormatType format);
 
     /// Extracts source lines from a file by line range.
