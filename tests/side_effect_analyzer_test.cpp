@@ -432,6 +432,28 @@ TEST(CalleeWordBoundary, LeadingCamelStdlibCompoundsKeepTheirCategory) {
     for (const char* callee : {"ListenAndServe", "DialContext"}) {
         EXPECT_NE(categories_of(callee) & side_effect::kNetwork, 0u) << callee;
     }
+    for (const char* callee : {"QueryContext"}) {
+        EXPECT_NE(categories_of(callee) & side_effect::kDatabase, 0u) << callee;
+    }
+}
+
+// The decoration-suffix stem re-match must reach only the stem's LEADING word,
+// never a camel-tail word. Otherwise `<x>RequestContext` -> stem `<x>Request` ->
+// tail word `request` -> kNetwork (getBuiltinRequestContext false-positive class,
+// review attempt 2 of S11). Under the pre-task tree (e190aa7) these were kNone.
+TEST(CalleeWordBoundary, StemRematchDoesNotReadmitCamelTailWords) {
+    auto categories_of = [](const char* callee) {
+        SideEffectAnalyzer sa("javascript");
+        sa.begin_function("f", "f.js", 1, 5);
+        sa.record_function_call(callee, {}, false, 2, 1);
+        return sa.end_function().categories;
+    };
+    for (const char* callee :
+         {"getBuiltinRequestContext", "injectRequestContext",
+          "createLocalRequestContext", "withRequestContext",
+          "TestRecordQueryAll"}) {
+        EXPECT_EQ(categories_of(callee), side_effect::kNone) << callee;
+    }
 }
 
 // The decoration-suffix path must not decay into prefix matching: one negative
