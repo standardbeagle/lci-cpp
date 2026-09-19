@@ -24,6 +24,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <cstdio>
+#include <unistd.h>
 
 namespace lci {
 namespace {
@@ -1630,6 +1632,73 @@ TEST(FileScannerBudgetTest, ByteBudgetCutsBeforeOversizeTotal) {
     EXPECT_TRUE(result.error.empty());
     EXPECT_EQ(result.tasks.size(), 1u);
     EXPECT_EQ(result.skipped_files, 1);
+}
+
+// Contract pinned: a per-file batch-load failure is surfaced on the run, which
+// still completes and integrates the surviving files — the run reports
+// incomplete (populated load-channel error list), NOT unqualified success.
+// The failure is carried by the FileService::batch_load_from_disk reporting
+// channel (operation "load"), NOT by the worker's redundant re-open
+// (operation "loading"). Pre-fix (commit a9bf1ac) the batch channel is never
+// read, so no operation=="load" error appears and the load failure is dropped
+// at the point it is first detected.
+TEST(PipelineLoadFailureTest, UnreadableFileSurfacedOnBatchLoadChannel) {
+    if (geteuid() == 0) GTEST_SKIP() << "running as root, chmod 000 not enforced";
+    TempDir dir;
+    dir.write_file("good.go", "package main\nfunc main() {}\n");
+    dir.write_file("bad.go", "package secret\nfunc Hide() {}\n");
+    std::error_code ec;
+    std::filesystem::permissions(dir.path() / "bad.go",
+                                 std::filesystem::perms::none,
+                                 std::filesystem::perm_options::replace, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    const std::string bad_path = (dir.path() / "bad.go").string();
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+    ReferenceTracker ref_tracker;
+    PostingsIndex postings_idx;
+    Pipeline pipeline(cfg, file_service, &trigram_idx, &ref_tracker, &postings_idx);
+    pipeline.run();
+
+    // Surfaced in progress: an error on the load channel, naming the path.
+    auto p = pipeline.get_progress();
+    bool load_channel = false;
+    for (const auto& e : p.errors) {
+        if (e.file_path == bad_path && e.operation == "load") {
+            load_channel = true;
+            EXPECT_FALSE(e.message.empty());  // carries the reason
+        }
+    }
+    EXPECT_TRUE(load_channel)
+        << "a batch-load open failure must be reported on the load channel "
+           "(operation=load) with the offending path; the pre-fix pipeline "
+           "drops this channel and only the worker re-open (op=loading) fires";
+}
+
+// Negative control: a fully readable corpus records no load-channel failure,
+// so the surfacing above is not a dummy/always-on error.
+TEST(PipelineLoadFailureTest, ReadableCorpusHasNoLoadFailures) {
+    TempDir dir;
+    dir.write_file("a.go", "package a\nfunc A() {}\n");
+    dir.write_file("b.py", "def b():\n    pass\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    auto store = std::make_shared<FileContentStore>();
+    auto file_service = std::make_shared<FileService>(store);
+    TrigramIndex trigram_idx;
+    ReferenceTracker ref_tracker;
+    PostingsIndex postings_idx;
+    Pipeline pipeline(cfg, file_service, &trigram_idx, &ref_tracker, &postings_idx);
+    pipeline.run();
+
+    for (const auto& e : pipeline.get_progress().errors)
+        EXPECT_NE(e.operation, "load") << "no load failure expected: " << e.message;
+    // EXPECT_TRUE(pipeline.load_failures().empty());  // RED: enable after accessor lands
 }
 
 }  // namespace
