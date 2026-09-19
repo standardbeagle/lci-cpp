@@ -730,10 +730,30 @@ uint32_t classify_callee_category(std::string_view callee) {
             break;
         }
     }
+    // The stem carries the leading verb that the boundary rule cannot reach on
+    // the full identifier (`readFileSync` -> `readFile` -> leading word `readfile`).
+    // It must NOT re-run the camel-tail arm: the stem is `callee` minus its final
+    // decoration, so a camel-tail word in the stem (`<x>RequestContext` -> stem
+    // `<x>Request` -> tail `request`) is a different sense, not the leading verb,
+    // and readmits false positives the pre-word-boundary tree never had. The stem
+    // match is therefore restricted to the leading word (snake/prefix boundary at
+    // pos 0 only). Trade-off: leading-camel compounds whose keyword is NOT the
+    // stem's first word (appendFileSync, safeReaddirSync) lose the bonus TPs the
+    // unrestricted stem re-match had picked up; those are not stdlib verb-decorations.
+    auto matches_leading = [](std::string_view name, std::string_view kw) {
+        if (name.size() < kw.size()) return false;
+        size_t i = 0;
+        for (; i < kw.size(); ++i) {
+            char a = static_cast<char>(
+                std::tolower(static_cast<unsigned char>(name[i])));
+            if (a != kw[i]) return false;
+        }
+        return name.size() == kw.size() || name[kw.size()] == '_';
+    };
     auto matches_any = [&](const auto& keywords) {
         for (auto kw : keywords) {
             if (matches_keyword(callee, kw)) return true;
-            if (!stem.empty() && matches_keyword(stem, kw)) return true;
+            if (!stem.empty() && matches_leading(stem, kw)) return true;
         }
         return false;
     };

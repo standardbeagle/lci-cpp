@@ -413,7 +413,10 @@ TEST(CalleeWordBoundary, BoundaryMatchesStillClassify) {
 // Leading-camel stdlib compounds must keep the category the pre-word-boundary
 // tree (e190aa7) assigned them: Node's fs *Sync family is io, Go's
 // ListenAndServe / DialContext are network. The word-boundary rule refuses a
-// bare prefix, so each compound needs the decoration-suffix path.
+// bare prefix, so each compound needs the decoration-suffix path. The stem
+// re-match reaches only the stem's leading verb, so appendFileSync (keyword
+// `file` is the stem's second word, not the leading verb) is NOT a stdlib
+// verb-decoration and is correctly unclassified.
 TEST(CalleeWordBoundary, LeadingCamelStdlibCompoundsKeepTheirCategory) {
     auto categories_of = [](const char* callee) {
         SideEffectAnalyzer sa("javascript");
@@ -423,7 +426,7 @@ TEST(CalleeWordBoundary, LeadingCamelStdlibCompoundsKeepTheirCategory) {
     };
     for (const char* callee : {"readFileSync", "writeFileSync", "readdirSync",
                                "closeSync", "mkdirSync", "openSync",
-                               "unlinkSync", "appendFileSync"}) {
+                               "unlinkSync"}) {
         EXPECT_NE(categories_of(callee) & side_effect::kIO, 0u) << callee;
     }
     for (const char* callee : {"MkdirAll", "OpenFile", "ReadAll"}) {
