@@ -1962,22 +1962,32 @@ TEST(ServerLifecycleTest, PingAnswersWhileMcpCallsParkedOnWarmup) {
     const int parked = entered.load(std::memory_order_acquire);
 
     // The BROKEN pool queues /ping behind the parked bridge calls until the
-    // latch releases; the releaser bounds that wait so the pre-fix run also
-    // terminates (latency ~= 2s, over the 1s bound). The fixed pool has
-    // workers free and answers immediately.
+    // latch releases. Record when the releaser fires warmup.finish; /ping
+    // must return BEFORE that instant, proving a dedicated worker answered it
+    // rather than the request draining off the queue once the parked workers
+    // woke. This is a relative ordering bound, not a wall-clock threshold.
+    std::atomic<int64_t> finish_at_ns{0};
     std::thread releaser([&] {
         std::this_thread::sleep_for(std::chrono::seconds(2));
+        finish_at_ns.store(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count(),
+            std::memory_order_release);
         warmup.finish({});
     });
-    const auto t0 = std::chrono::steady_clock::now();
     int ping_status = -1;
+    int64_t ping_returned_at_ns = 0;
     {
         auto cli = test::make_test_http_client(addr);
         cli.set_read_timeout(std::chrono::seconds{30});
         auto res = cli.Post("/ping", "{}", "application/json");
         if (res) ping_status = res->status;
+        ping_returned_at_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count();
     }
-    const auto elapsed = std::chrono::steady_clock::now() - t0;
     releaser.join();
 
     for (auto& t : bridges) {
@@ -1986,8 +1996,8 @@ TEST(ServerLifecycleTest, PingAnswersWhileMcpCallsParkedOnWarmup) {
     EXPECT_TRUE(server.shutdown());
 
     EXPECT_EQ(ping_status, 200);
-    EXPECT_LT(elapsed, std::chrono::seconds(1))
-        << "/ping must not wait behind " << parked
+    EXPECT_LT(ping_returned_at_ns, finish_at_ns.load(std::memory_order_acquire))
+        << "/ping must be answered before warmup releases " << parked
         << " /mcp bridge calls parked on warmup";
 }
 
