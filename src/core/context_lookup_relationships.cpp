@@ -50,16 +50,15 @@
 // ordering it is a no-op in the common case (index 0 is folder/file, not the
 // object's own scope).
 //
-// Divergence NOT a named trap: get_caller_functions/get_called_functions
-// reuse ReferenceTracker::get_caller_symbols/get_callee_symbols (already
-// RefTypeCall-filtered and deduplicated by target/source symbol id — see
-// context_lookup_semantic.cpp's is_performance_critical/get_affected_
-// components for the established precedent of calling straight through the
-// live tracker rather than re-deriving from the pinned snapshot's raw
-// outgoing_refs). Go's getCalledFunctions does not deduplicate multiple call
-// sites to the same callee; this port's dedup-by-symbol-id is an accepted
-// divergence for reusing the existing helper rather than hand-rolling a
-// second call-graph scan.
+// Divergence NOT a named trap: get_caller_functions/get_called_functions read
+// the PINNED snapshot's incoming/outgoing Call edges by resolved SymbolID
+// (RefTypeCall-filtered and deduplicated by peer symbol id — the same filter
+// the ReferenceTracker live helpers apply, but on this request's generation
+// instead of a second live pin whose ids could be absent from the snapshot
+// and silently drop rows mid-reindex). Go's getCalledFunctions does not
+// deduplicate multiple call sites to the same callee; this port's
+// dedup-by-symbol-id is an accepted divergence for reusing the tracker's
+// edge shape rather than hand-rolling a second call-graph scan.
 
 #include <lci/core/context_lookup.h>
 
@@ -173,10 +172,26 @@ std::vector<ObjectReference> get_outgoing_references(const Snapshot& snap,
 }
 
 // -- getCallerFunctions (context_lookup_relationships.go:240) --------------
-// Reuses ReferenceTracker::get_caller_symbols (already RefTypeCall-filtered
-// and deduplicated by source symbol id).
+// Walks the PINNED snapshot's incoming Call refs by resolved SymbolID
+// (same filter + dedup-by-source-id the live-tracker helper applies, but on
+// the generation this request pinned — see file-level snapshot rule).
+template <class EmitFn>
+void for_each_call_peer(const Snapshot& snap, SymbolID symbol_id,
+                        bool incoming, EmitFn&& emit) {
+    const auto& edges = incoming ? snap.incoming_refs : snap.outgoing_refs;
+    auto it = edges.find(symbol_id);
+    if (it == edges.end()) return;
+    absl::flat_hash_set<SymbolID> seen;
+    for (uint64_t ref_id : it->second) {
+        const StoredRef* ref = snap.find_ref(ref_id);
+        if (ref == nullptr || ref->type != ReferenceType::Call) continue;
+        SymbolID peer = incoming ? ref->source_symbol : ref->target_symbol;
+        if (peer == 0 || !seen.insert(peer).second) continue;
+        emit(peer);
+    }
+}
+
 std::vector<ObjectReference> get_caller_functions(const Snapshot& snap,
-                                                  ReferenceTracker& tracker,
                                                   const CodeObjectID& oid,
                                                   double threshold) {
     std::vector<ObjectReference> callers;
@@ -186,12 +201,13 @@ std::vector<ObjectReference> get_caller_functions(const Snapshot& snap,
     auto target = find_by_file(snap, oid);
     if (target == nullptr) return callers;
 
-    for (SymbolID caller_id : tracker.get_caller_symbols(target->id)) {
+    for_each_call_peer(snap, target->id, /*incoming=*/true,
+                       [&](SymbolID caller_id) {
         auto source = snap.get_enhanced_symbol(caller_id);
-        if (source == nullptr) continue;
+        if (source == nullptr) return;
         if (source->symbol.type != SymbolType::Function &&
             source->symbol.type != SymbolType::Method) {
-            continue;
+            return;
         }
 
         ObjectReference obj;
@@ -205,19 +221,18 @@ std::vector<ObjectReference> get_caller_functions(const Snapshot& snap,
         obj.context = "function_call";
         obj.confidence = 0.95;
         callers.push_back(std::move(obj));
-    }
+    });
 
     ContextLookupEngine::sort_by_confidence_desc(callers);
     return ContextLookupEngine::filter_high_confidence(callers, threshold);
 }
 
 // -- getCalledFunctions (context_lookup_relationships.go:311) --------------
-// Reuses ReferenceTracker::get_callee_symbols (already RefTypeCall-filtered
-// and deduplicated by target symbol id).
+// Walks the PINNED snapshot's outgoing Call refs by resolved SymbolID
+// (dedup-by-target-id, as the previous live-tracker helper did).
 std::vector<ObjectReference> get_called_functions(const Snapshot& snap,
-                                                   ReferenceTracker& tracker,
-                                                   const CodeObjectID& oid,
-                                                   double threshold) {
+                                                  const CodeObjectID& oid,
+                                                  double threshold) {
     std::vector<ObjectReference> called;
     if (oid.type != SymbolType::Function && oid.type != SymbolType::Method) {
         return called;
@@ -225,12 +240,13 @@ std::vector<ObjectReference> get_called_functions(const Snapshot& snap,
     auto target = find_by_file(snap, oid);
     if (target == nullptr) return called;
 
-    for (SymbolID callee_id : tracker.get_callee_symbols(target->id)) {
+    for_each_call_peer(snap, target->id, /*incoming=*/false,
+                       [&](SymbolID callee_id) {
         auto callee = snap.get_enhanced_symbol(callee_id);
-        if (callee == nullptr) continue;
+        if (callee == nullptr) return;
         if (callee->symbol.type != SymbolType::Function &&
             callee->symbol.type != SymbolType::Method) {
-            continue;
+            return;
         }
 
         ObjectReference obj;
@@ -244,7 +260,7 @@ std::vector<ObjectReference> get_called_functions(const Snapshot& snap,
         obj.context = "function_call";
         obj.confidence = 0.95;
         called.push_back(std::move(obj));
-    }
+    });
 
     ContextLookupEngine::sort_by_confidence_desc(called);
     return ContextLookupEngine::filter_high_confidence(called, threshold);
@@ -569,21 +585,21 @@ std::vector<ModuleReference> get_imported_modules(const Snapshot& snap,
 }  // namespace
 
 // Populates ctx.direct_relationships. Mirrors Go's fillDirectRelationships
-// dispatch, reading ctx.object_id (refreshed by fill_basic_info).
-// `tracker` is the engine's live ReferenceTracker (needed for
-// get_caller_symbols/get_callee_symbols); `threshold` is the engine's
+// dispatch, reading ctx.object_id (refreshed by fill_basic_info). EVERY read
+// goes through the pinned `snap` — including the call-graph edges (the
+// previous fill mixed tracker.get_caller_symbols/get_callee_symbols ids,
+// live-pinned per call, with the snapshot's ids and silently dropped rows
+// when the generations straddled a reindex). `threshold` is the engine's
 // confidence_threshold() at call time.
 void fill_direct_relationships(CodeObjectContext& ctx, const Snapshot& snap,
-                               ReferenceTracker& tracker, double threshold) {
+                               double threshold) {
     const CodeObjectID& oid = ctx.object_id;
     DirectRelationships& dr = ctx.direct_relationships;
 
     dr.incoming_references = get_incoming_references(snap, oid, threshold);
     dr.outgoing_references = get_outgoing_references(snap, oid, threshold);
-    dr.caller_functions =
-        get_caller_functions(snap, tracker, oid, threshold);
-    dr.called_functions =
-        get_called_functions(snap, tracker, oid, threshold);
+    dr.caller_functions = get_caller_functions(snap, oid, threshold);
+    dr.called_functions = get_called_functions(snap, oid, threshold);
     dr.parent_objects = get_parent_objects(snap, oid);
     dr.child_objects = get_child_objects(snap, oid);
 

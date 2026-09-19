@@ -27,11 +27,11 @@
 //
 // Divergence NOT replicated (not a named trap): Go's getEntryPointDependencies
 // gates its entire body behind `cle.graphPropagator != nil`
-// (context_lookup_semantic.go:76) even though findAllEntryPoints /
-// canEntryPointReachObject only ever read the ref tracker / symbol index —
-// graphPropagator is never touched by that path. Replicating the gate would
-// silently zero out entry_point_dependencies for any caller that wires only
-// a SemanticAnnotator (a supported, independent optional collaborator per
+// (context_lookup_semantic.go:76) even though entry-point resolution only
+// ever reads the ref tracker / symbol index — graphPropagator is never
+// touched by that path. Replicating the gate would silently zero out
+// entry_point_dependencies for any caller that wires only a
+// SemanticAnnotator (a supported, independent optional collaborator per
 // this task's spec), so this port does not condition entry-point resolution
 // on graph_propagator presence.
 
@@ -44,6 +44,7 @@
 #include <string_view>
 #include <utility>
 
+#include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
 
 #include <lci/core/graph_propagator.h>
@@ -80,95 +81,32 @@ SymbolHandle find_target(const Snapshot& snap, const CodeObjectID& oid) {
     return nullptr;
 }
 
-// -- findAllEntryPoints (context_lookup_semantic.go:325) ---------------------
-// Pattern 1: every "main" function. Pattern 2: function/method names
-// containing a handler/endpoint keyword (case-insensitive substring — Go's
-// symbolIndex.FindDefinitions fuzzy search has no live-index equivalent here,
-// so every indexed function/method name is scanned directly instead).
-// Pattern 3: symbols annotated @lci:category[entry-point] via the (optional)
-// SemanticAnnotator. Dedup'd by (file_id, line), mirroring Go's LocationKey.
-std::vector<CodeObjectID> find_all_entry_points(const Snapshot& snap,
-                                                MasterIndex& indexer,
-                                                SemanticAnnotator* annotator) {
-    std::vector<CodeObjectID> entry_points;
-    absl::flat_hash_set<uint64_t> seen;
-    auto mark = [&](FileID file_id, int line) {
-        uint64_t key =
-            (static_cast<uint64_t>(file_id) << 32) | static_cast<uint32_t>(line);
-        return seen.insert(key).second;
-    };
-
-    auto files = indexer.load_snapshot();
-    for (const auto& [path, file_id] : files->file_map) {
-        for (const auto& sym : snap.get_file_enhanced_symbols(file_id)) {
-            if (sym->symbol.type != SymbolType::Function &&
-                sym->symbol.type != SymbolType::Method) {
-                continue;
+// Case-insensitive substring test without allocating a lowercase copy —
+// the entry-name patterns on the BFS hot path.
+bool icontains(std::string_view hay, std::string_view needle) {
+    if (needle.size() > hay.size()) return false;
+    for (size_t i = 0; i + needle.size() <= hay.size(); ++i) {
+        size_t j = 0;
+        for (; j < needle.size(); ++j) {
+            if (std::tolower(static_cast<unsigned char>(hay[i + j])) !=
+                needle[j]) {
+                break;
             }
-            std::string name_lower = lower(sym->symbol.name);
-            bool is_main = sym->symbol.name == "main";
-            bool is_handler = name_lower.find("handler") != std::string::npos ||
-                              name_lower.find("endpoint") != std::string::npos;
-            if (!is_main && !is_handler) continue;
-            if (!mark(file_id, sym->symbol.line)) continue;
-
-            CodeObjectID oid;
-            oid.file_id = file_id;
-            oid.symbol_id = encode_symbol_id(sym->id);
-            oid.name = std::string(sym->symbol.name);
-            oid.type = sym->symbol.type;
-            entry_points.push_back(std::move(oid));
         }
-    }
-
-    if (annotator != nullptr) {
-        for (const auto* annotated :
-            annotator->get_symbols_by_category("entry-point")) {
-            if (!mark(annotated->file_id, annotated->line)) continue;
-
-            CodeObjectID oid;
-            oid.file_id = annotated->file_id;
-            oid.symbol_id = encode_symbol_id(annotated->symbol_id);
-            oid.name = annotated->name;
-            // AnnotatedSymbol does not carry the underlying symbol's type;
-            // resolve it from the index (Go copies annotated.Symbol.Type
-            // verbatim from its already-typed struct).
-            if (auto handle = snap.get_enhanced_symbol(annotated->symbol_id)) {
-                oid.type = handle->symbol.type;
-            } else {
-                oid.type = SymbolType::Function;
-            }
-            entry_points.push_back(std::move(oid));
-        }
-    }
-
-    return entry_points;
-}
-
-// -- canEntryPointReachObject (context_lookup_semantic.go:400) --------------
-// BFS forward from entry via callee names (call-graph edges), checking
-// equality against target_name at dequeue time.
-bool can_entry_point_reach(const Snapshot& snap, ReferenceTracker& tracker,
-                           const std::string& entry_name,
-                           const std::string& target_name) {
-    if (snap.find_symbols_by_name(entry_name).empty()) return false;
-
-    absl::flat_hash_set<std::string> visited;
-    std::vector<std::string> queue{entry_name};
-    size_t head = 0;
-    while (head < queue.size()) {
-        std::string current = std::move(queue[head++]);
-        if (current == target_name) return true;
-        if (!visited.insert(current).second) continue;
-
-        auto current_syms = snap.find_symbols_by_name(current);
-        if (current_syms.empty()) continue;
-        for (const auto& callee :
-            tracker.get_callee_names(current_syms.front()->id)) {
-            if (!visited.contains(callee)) queue.push_back(callee);
-        }
+        if (j == needle.size()) return true;
     }
     return false;
+}
+
+// Entry-point name patterns (Go's findAllEntryPoints 1+2): a "main"
+// function, or a function/method whose name case-insensitively contains a
+// handler/endpoint keyword.
+bool is_entry_point_name(std::string_view name, SymbolType type) {
+    if (type != SymbolType::Function && type != SymbolType::Method) {
+        return false;
+    }
+    if (name == "main") return true;
+    return icontains(name, "handler") || icontains(name, "endpoint");
 }
 
 std::string determine_entry_point_type(const CodeObjectID& entry) {
@@ -217,32 +155,117 @@ std::string extract_path_from_doc_comment(const std::string& doc_comment) {
     return "";
 }
 
-std::string get_entry_point_path(const Snapshot& snap,
-                                 const CodeObjectID& entry) {
-    auto target = find_target(snap, entry);
-    if (target == nullptr) return "";
-    return extract_path_from_doc_comment(target->doc_comment);
-}
-
 // -- getEntryPointDependencies (context_lookup_semantic.go:72) --------------
+// E reaches the target in the call graph iff E sits in the target's reverse
+// Call-edge closure, so the closure is walked ONCE from the resolved target
+// id on the pinned snapshot (incoming Call refs by SymbolID, O(in-degree)
+// per hop). No corpus-wide entry-point scan, no per-entry-point name BFS.
+// Nodes are reported when they match the entry-point name patterns or the
+// @lci:category[entry-point] annotation set, dedup'd by (file_id, line),
+// and the result is sorted — emission order is a total order, never a
+// hash-iteration artifact.
+// Divergence from Go: Go's getEntryPointDependencies BFSes forward by NAME
+// (find_symbols_by_name(...).front()), traversing unresolved call sites and
+// picking an arbitrary same-named symbol per hop; this port requires every
+// edge to be a RESOLVED Call reference, which is both faster and the
+// semantically honest reading of "entry point dependencies".
 std::vector<EntryPointRef> get_entry_point_dependencies(
-    const Snapshot& snap, ReferenceTracker& tracker, MasterIndex& indexer,
-    SemanticAnnotator* annotator, const CodeObjectID& oid) {
+    const Snapshot& snap, SemanticAnnotator* annotator,
+    const CodeObjectID& oid) {
     std::vector<EntryPointRef> result;
-    for (const auto& ep : find_all_entry_points(snap, indexer, annotator)) {
-        if (!can_entry_point_reach(snap, tracker, ep.name, oid.name)) continue;
+    auto target = find_target(snap, oid);
+    if (target == nullptr) return result;
 
-        EntryPointRef ref;
-        ref.entry_point_id = ep;
-        ref.type = determine_entry_point_type(ep);
-        ref.path = get_entry_point_path(snap, ep);
-        ref.confidence = 0.8;
-        result.push_back(std::move(ref));
+    // Pattern 3 set: annotated entry points keyed by (file_id, line) so a
+    // closure node matches in O(1). The old code emitted AnnotatedSymbol's
+    // OWN fields (its synthetic map id and stored name), not the visited
+    // symbol's — preserved below bug-for-bug.
+    absl::flat_hash_map<uint64_t, const AnnotatedSymbol*> annotated_at;
+    if (annotator != nullptr) {
+        for (const auto* a :
+            annotator->get_symbols_by_category("entry-point")) {
+            annotated_at.emplace(
+                (static_cast<uint64_t>(a->file_id) << 32) |
+                    static_cast<uint32_t>(a->line),
+                a);
+        }
     }
-    std::stable_sort(result.begin(), result.end(),
-                     [](const EntryPointRef& a, const EntryPointRef& b) {
-                         return a.confidence > b.confidence;
-                     });
+
+    auto loc_key = [](FileID file_id, int line) {
+        return (static_cast<uint64_t>(file_id) << 32) |
+               static_cast<uint32_t>(line);
+    };
+    absl::flat_hash_set<uint64_t> seen_loc;
+
+    std::vector<SymbolID> queue;
+    queue.push_back(target->id);
+    absl::flat_hash_set<SymbolID> visited;
+    visited.insert(target->id);
+    for (size_t head = 0; head < queue.size(); ++head) {
+        // Name patterns win over the annotation at the same location, as in
+        // the previous port's pattern order.
+        if (const EnhancedSymbol* node = snap.symbols.get(queue[head])) {
+            uint64_t key = loc_key(node->symbol.file_id, node->symbol.line);
+            bool named =
+                is_entry_point_name(node->symbol.name, node->symbol.type);
+            auto annotated = annotated_at.find(key);
+            if ((named || annotated != annotated_at.end()) &&
+                seen_loc.insert(key).second) {
+                EntryPointRef ref;
+                ref.entry_point_id.file_id = node->symbol.file_id;
+                ref.entry_point_id.symbol_id = encode_symbol_id(node->id);
+                ref.entry_point_id.name = std::string(node->symbol.name);
+                ref.entry_point_id.type = node->symbol.type;
+                if (!named) {
+                    // Annotated emission keeps AnnotatedSymbol's fields
+                    // (synthetic map id as symbol_id, stored name; type from
+                    // the index if the synthetic id ever resolves, else
+                    // Function) — as the previous implementation emitted it.
+                    const AnnotatedSymbol* a = annotated->second;
+                    ref.entry_point_id.symbol_id =
+                        encode_symbol_id(a->symbol_id);
+                    ref.entry_point_id.name = a->name;
+                    auto synthetic_handle =
+                        snap.get_enhanced_symbol(a->symbol_id);
+                    ref.entry_point_id.type = synthetic_handle
+                        ? synthetic_handle->symbol.type
+                        : SymbolType::Function;
+                }
+                ref.type = determine_entry_point_type(ref.entry_point_id);
+                ref.path = extract_path_from_doc_comment(node->doc_comment);
+                ref.confidence = 0.8;
+                result.push_back(std::move(ref));
+            }
+        }
+
+        auto it = snap.incoming_refs.find(queue[head]);
+        if (it == snap.incoming_refs.end()) continue;
+        for (uint64_t ref_id : it->second) {
+            const StoredRef* ref = snap.find_ref(ref_id);
+            if (ref == nullptr || ref->type != ReferenceType::Call) continue;
+            if (ref->source_symbol != 0 && visited.insert(ref->source_symbol).second) {
+                queue.push_back(ref->source_symbol);
+            }
+        }
+    }
+
+    // Total order: confidence desc, then (name, file_id, symbol_id) — the
+    // equal-confidence rows the previous stable_sort left in hash order.
+    std::sort(result.begin(), result.end(),
+              [](const EntryPointRef& a, const EntryPointRef& b) {
+                  if (a.confidence != b.confidence) {
+                      return a.confidence > b.confidence;
+                  }
+                  if (a.entry_point_id.name != b.entry_point_id.name) {
+                      return a.entry_point_id.name < b.entry_point_id.name;
+                  }
+                  if (a.entry_point_id.file_id != b.entry_point_id.file_id) {
+                      return a.entry_point_id.file_id <
+                             b.entry_point_id.file_id;
+                  }
+                  return a.entry_point_id.symbol_id <
+                         b.entry_point_id.symbol_id;
+              });
     return result;
 }
 
@@ -583,7 +606,7 @@ void fill_semantic_context(CodeObjectContext& ctx, const Snapshot& snap,
     ReferenceTracker& tracker = indexer.ref_tracker();
 
     sc.entry_point_dependencies =
-        get_entry_point_dependencies(snap, tracker, indexer, annotator, oid);
+        get_entry_point_dependencies(snap, annotator, oid);
     sc.service_dependencies = get_service_dependencies(snap, oid);
     sc.propagation_labels =
         get_propagation_labels(snap, oid, propagator, annotator);
