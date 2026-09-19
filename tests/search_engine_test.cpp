@@ -10,11 +10,13 @@
 #include "unique_temp.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace lci {
@@ -1741,6 +1743,147 @@ TEST(SearchFlagNoComments, KeepsContinuedMultiplicationFromRealRepoHeader) {
     }
     EXPECT_EQ((std::vector<int>{4}), lines)
         << "a continued multiplication is CODE and must not be deleted";
+}
+
+// Differential oracle for the block-comment classifier, added to the in-scope
+// file rather than tests/search_rg_differential_test.cpp because that file is
+// outside this task's declared fileScope (editing it trips the scope gate; the
+// coordinator can widen scope to fold the continuation case into S5's corpus).
+//
+// The expected classification is DATA, fixed line-by-line as the corpus was
+// written -- it applies NO rule and never asks tree-sitter, so it inherits
+// none of the grammar's edge cases (bench-harness-oracle-independence rule 1).
+// The corpus deliberately carries the block-comment CONTINUATION line S5
+// omitted (it is textually identical to a continued expression under any
+// per-line rule, so a per-line oracle could not have held both with opposite
+// labels; the enclosing block state separates them).
+TEST(BlockCommentDifferential, HandLabelsSeparateContinuationFromCode) {
+    // (line text, hand-labelled comment-only?, contains "Widget"?)
+    struct Row { std::string text; bool is_comment; };
+    const std::vector<Row> rows = {
+        {"/* Widget block comment", true},   // 1  opener
+        {" * Widget continuation", true},    // 2  CONTINUATION (the new case)
+        {" */", true},                       // 3  closer (no pattern)
+        {"Widget* p = q;", false},           // 4  code, decl
+        {"*p = Widget;", false},              // 5  code, dereference assign
+        {"const char* Widget_s = \"Widget */\";", false},  // 6  code, */ in str
+        {"a = b", false},                    // 7  no pattern
+        {"    * Widget;", false},            // 8  code, continued multiplication
+        {"int Widget_bad; /* trailing */", false},  // 9  code, trailing block
+    };
+    std::string content;
+    for (const auto& r : rows) {
+        content += r.text;
+        content += '\n';
+    }
+    TempDir dir;
+    dir.write_file("diff.c", content);
+
+    const std::string pattern = "Widget";
+    // Label-derived keep set: matching lines a human marked as NOT comment-only.
+    std::vector<int> want;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        if (rows[i].text.find(pattern) == std::string::npos) continue;
+        if (!rows[i].is_comment) want.push_back(static_cast<int>(i) + 1);
+    }
+    std::sort(want.begin(), want.end());
+    ASSERT_EQ((std::vector<int>{4, 5, 6, 8, 9}), want)
+        << "hand labels must encode intent, not the implementation's rule";
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    SearchEngine engine(mi);
+    SearchOptions nc;
+    nc.exclude_comments = true;
+    std::vector<int> got;
+    for (const auto& r : engine.search(pattern, nc)) got.push_back(r.line);
+    std::sort(got.begin(), got.end());
+    EXPECT_EQ(want, got)
+        << "engine flags=nc must equal the hand labels (drop 1-2, keep 4-9)";
+
+    // Discrimination: reintroduce each historical bad rule as a CLASSIFIER and
+    // show the label corpus goes RED against it -- i.e. the labels have teeth,
+    // they do not merely restate whatever rule is in force.
+    auto keep_under_rule = [&](bool (*bad_rule)(std::string_view)) {
+        std::vector<int> kept;
+        for (size_t i = 0; i < rows.size(); ++i) {
+            if (rows[i].text.find(pattern) == std::string::npos) continue;
+            if (!bad_rule(rows[i].text)) kept.push_back(static_cast<int>(i) + 1);
+        }
+        return kept;
+    };
+    const auto leading_star = [](std::string_view s) {
+        size_t k = 0;
+        while (k < s.size() && std::isspace((unsigned char)s[k])) ++k;
+        return k < s.size() && s[k] == '*';
+    };
+    const auto contains_close = [](std::string_view s) {
+        return s.find("*/") != std::string_view::npos;
+    };
+
+    EXPECT_NE(keep_under_rule(leading_star), want)
+        << "the bare-'*' rule deletes labelled code (5,8): the corpus must "
+           "go red against it";
+    EXPECT_NE(keep_under_rule(contains_close), want)
+        << "the contains-\"*/\" rule deletes labelled code (6,9): the corpus "
+           "must go red against it";
+}
+
+// Direct contracts for the two new classifiers, isolated from the engine.
+
+TEST(CommentSpanScan, LanguageGateAndStringAndTerminatorSafety) {
+    const std::string block = "/* a\n * b\n */\n";
+    EXPECT_TRUE(scan_block_comment_ranges(block, LangId::Python).empty());
+    EXPECT_TRUE(scan_block_comment_ranges(block, LangId::Ruby).empty());
+    EXPECT_TRUE(scan_block_comment_ranges(block, LangId::Unknown).empty());
+    EXPECT_EQ(1u, scan_block_comment_ranges(block, LangId::Cpp).size());
+
+    // A */ inside a string literal cannot open or close a block: none opens,
+    // so the following line is code and the span list stays empty.
+    EXPECT_TRUE(scan_block_comment_ranges(
+                    "const char* s = \"*/\";\nint x;\n", LangId::Cpp)
+                    .empty());
+    // An unterminated /* is not recorded, so it can never swallow later code.
+    EXPECT_TRUE(scan_block_comment_ranges(
+                    "/* never closed\nint keepme;\n", LangId::Cpp)
+                    .empty());
+    // A // line comment hides an embedded block opener.
+    EXPECT_TRUE(scan_block_comment_ranges("// /* not a block\nint y;\n",
+                                          LangId::Cpp)
+                    .empty());
+}
+
+TEST(CommentSpanScan, ContinuationClassifiedWithMonotonicCursor) {
+    const std::string content = "int a;\n/* b\n * c\n */\nint d;\n";
+    auto spans = scan_block_comment_ranges(content, LangId::Cpp);
+    ASSERT_FALSE(spans.empty());
+
+    auto line_bounds = [&](int line) {
+        size_t start = 0;
+        int l = 1;
+        while (l < line) {
+            start = content.find('\n', start) + 1;
+            ++l;
+        }
+        size_t end = content.find('\n', start);
+        if (end == std::string::npos) end = content.size();
+        return std::pair<int, int>{static_cast<int>(start),
+                                   static_cast<int>(end)};
+    };
+    auto classify = [&](int line) {
+        static size_t pos = 0;
+        auto [s, e] = line_bounds(line);
+        return line_is_comment_only_with_spans(content, s, e, LangId::Cpp,
+                                               spans, pos);
+    };
+    // Ascending queries only (the helper's contract).
+    EXPECT_FALSE(classify(1));  // int a;      code
+    EXPECT_TRUE(classify(2));   // /* b        opener
+    EXPECT_TRUE(classify(3));   //  * c        CONTINUATION
+    EXPECT_TRUE(classify(4));   //  */         closer
+    EXPECT_FALSE(classify(5));  // int d;      code, block closed
 }
 
 }  // namespace
