@@ -7,7 +7,15 @@ ProgressTracker::ProgressTracker()
 
 void ProgressTracker::set_total(int total) {
     total_files_.store(total, std::memory_order_release);
-    is_scanning_.store(0, std::memory_order_release);
+    // is_scanning stays 1 for a non-empty corpus: set_total only names the
+    // corpus size, and the scan phase (producer batch-loads,
+    // increment_scanned) is still running at this point. Flipping the flag
+    // here — before a single file was scanned — meant /status never showed
+    // a live scan count: readers saw "indexing" with files_scanned=0 for
+    // the whole discovery phase. The transition belongs on the first
+    // processed file (increment_processed), not on the total. An empty
+    // corpus has no first processed file, so it leaves scanning here.
+    if (total <= 0) is_scanning_.store(0, std::memory_order_release);
 }
 
 void ProgressTracker::increment_scanned() {
@@ -16,6 +24,7 @@ void ProgressTracker::increment_scanned() {
 
 void ProgressTracker::increment_processed(const std::string& current_file) {
     processed_files_.fetch_add(1, std::memory_order_relaxed);
+    is_scanning_.store(0, std::memory_order_release);
     {
         std::lock_guard lock(current_file_mu_);
         current_file_ = current_file;

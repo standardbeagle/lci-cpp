@@ -19,8 +19,12 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <fstream>
+#include <map>
+#include <numeric>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -806,14 +810,22 @@ TEST(ProgressTrackerTest, StartsInScanningPhase) {
     EXPECT_EQ(p.indexing_progress, 0.0);
 }
 
-TEST(ProgressTrackerTest, SetTotalTransitionsToIndexing) {
+TEST(ProgressTrackerTest, ProcessedTransitionNotSetTotalEndsScanningPhase) {
+    // set_total() names the corpus size but the producer's batch-loads
+    // (increment_scanned) are still running: the scan phase must stay live
+    // — with is_scanning pinned off at set_total the /status reader never
+    // saw a live scan count. The first processed file ends it.
     ProgressTracker tracker;
     tracker.set_total(100);
     auto p = tracker.get_progress();
-    EXPECT_FALSE(p.is_scanning);
+    EXPECT_TRUE(p.is_scanning);
     EXPECT_EQ(p.total_files, 100);
-    EXPECT_EQ(p.scanning_progress, 100.0);
-    EXPECT_EQ(p.indexing_progress, 0.0);
+
+    tracker.increment_processed("a.go");
+    auto q = tracker.get_progress();
+    EXPECT_FALSE(q.is_scanning);
+    EXPECT_EQ(q.scanning_progress, 100.0);
+    EXPECT_EQ(q.indexing_progress, 1.0);
 }
 
 TEST(ProgressTrackerTest, ScanningProgressEstimate) {
@@ -1709,6 +1721,37 @@ TEST(PipelineLoadFailureTest, ReadableCorpusHasNoLoadFailures) {
     for (const auto& e : pipeline.get_progress().errors)
         EXPECT_NE(e.operation, "load") << "no load failure expected: " << e.message;
     EXPECT_TRUE(pipeline.load_failures().empty());
+}
+
+// ---------------------------------------------------------------------------
+// ReorderFileBuffer: bounded in-order release. The old drain loop held the
+// WHOLE corpus's ProcessedFile payloads and sorted them, so peak transient
+// memory was proportional to the corpus and the integrator idled through the
+// entire parse phase. The reorder buffer releases the contiguous ascending
+// prefix as soon as the next expected file_id arrives.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Progress: the scan count must be observable while the scan phase is still
+// live. set_total() used to flip is_scanning=0 immediately (pipeline.cpp
+// calls it before the producer loads a single file), so /status showed a
+// dead "indexing" state with files_scanned stuck at 0 for all of discovery.
+// ---------------------------------------------------------------------------
+
+TEST(ProgressTrackerTest, ScannedCountVisibleWhileIsScanningStillTrue) {
+    ProgressTracker tracker;
+    tracker.increment_scanned();
+    tracker.increment_scanned();
+    auto p = tracker.get_progress();
+    EXPECT_TRUE(p.is_scanning)
+        << "set_total must not end the scan phase before any file is processed";
+    EXPECT_EQ(p.files_scanned, 2)
+        << "scan count must be live during discovery, not 0 until processing";
+    // First processed file is what ends the scanning phase.
+    tracker.increment_processed("x.go");
+    EXPECT_FALSE(tracker.get_progress().is_scanning);
+    EXPECT_EQ(tracker.get_progress().files_scanned, 2)
+        << "ending the scan phase must not erase the count it accumulated";
 }
 
 }  // namespace
