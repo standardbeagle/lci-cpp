@@ -30,7 +30,8 @@ struct McpRuntime {
     CodebaseIntelligenceEngine ci_engine;
 
     explicit McpRuntime(MasterIndex& index)
-        : propagator(&index.ref_tracker()) {}
+        : propagator(&index.ref_tracker()),
+          ci_engine(&index.attr_registry()) {}
 
     /// Runs the post-index analysis phases: annotation extraction, the
     /// side-effect AST pass, the callee-name heuristic, transitive

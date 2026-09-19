@@ -349,9 +349,10 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_statistics(
         HealthAnalyzer::calculate_quality_from_complexity(complexity);
     // The cc-distribution debt ignored long functions and hot fan-in
     // entirely (audits: debt=0.00 beside 85 long functions); the files-based
-    // ratio prices all three.
+    // ratio prices all three. Reuse the engine's registry-aware `ha` so a
+    // project's `.lci.kdl` test attributes gate the debt numerator too.
     report.quality.technical_debt_ratio =
-        HealthAnalyzer().calculate_tech_debt_ratio_from_files(files);
+        ha.calculate_tech_debt_ratio_from_files(files);
     report.purity_ratio = purity_ratio;
     response.statistics_report = std::move(report);
 
