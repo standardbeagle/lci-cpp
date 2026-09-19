@@ -17,8 +17,67 @@
 #include <fstream>
 #include <string>
 
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <limits>
+#include <new>
+
 #include <sys/wait.h>
 #include <unistd.h>
+
+// =============================================================================
+// Scoped heap-allocation counter.
+//
+// lci_tests ships no other operator new override, so replacing it process-wide
+// here is safe: every override below just forwards to malloc/free and bumps a
+// counter when counting is armed (off by default). The list_symbols scaling
+// test arms it around one handler call to prove the filter loop allocates
+// nothing per symbol (P3: allocations per call must not scale with index size).
+// =============================================================================
+
+namespace {
+std::atomic<bool> g_count_allocs{false};
+std::atomic<long long> g_alloc_count{0};
+
+void record_alloc_if_armed() {
+    if (g_count_allocs.load(std::memory_order_relaxed)) {
+        g_alloc_count.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+}  // namespace
+
+void* operator new(std::size_t n) {
+    record_alloc_if_armed();
+    void* p = std::malloc(n ? n : 1);
+    if (!p) throw std::bad_alloc();
+    return p;
+}
+void* operator new[](std::size_t n) {
+    record_alloc_if_armed();
+    void* p = std::malloc(n ? n : 1);
+    if (!p) throw std::bad_alloc();
+    return p;
+}
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+    record_alloc_if_armed();
+    return std::malloc(n ? n : 1);
+}
+void* operator new[](std::size_t n, const std::nothrow_t&) noexcept {
+    record_alloc_if_armed();
+    return std::malloc(n ? n : 1);
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete[](void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+void operator delete(void* p, const std::nothrow_t&) noexcept {
+    std::free(p);
+}
+void operator delete[](void* p, const std::nothrow_t&) noexcept {
+    std::free(p);
+}
 
 namespace lci {
 namespace mcp {
@@ -322,6 +381,141 @@ TEST_F(ExploreIndexTestFixture, ListSymbolsFilterSemanticsPinned) {
                         {"exported", false},
                         {"max", 500}}),
               (std::vector<std::string>{"processPath"}));
+}
+
+// =============================================================================
+// list_symbols read-path scaling (P3 perf).
+//
+// The filter loop walks EVERY indexed symbol on each list_symbols call. Two
+// properties are pinned:
+//   1. allocations per call do not grow with symbol count (1k vs 10k, same
+//      file count): the loop may not copy or lower anything per symbol.
+//   2. latency stays linear in symbol count: a 10x index costs < 12x time
+//      (best-of-5 interleaved — relative, never absolute ns).
+// Corpora share a file count so the measured dimension is symbols, and file
+// paths exceed SSO so a per-symbol path copy would hit the heap and be
+// counted.
+// =============================================================================
+
+class ListSymbolsScalingFixture : public ::testing::Test {
+  protected:
+    static void SetUpTestSuite() {
+        small_ = make_scaled_corpus(4, 250);   // 1 000 functions
+        big_ = make_scaled_corpus(4, 2500);    // 10 000 functions
+    }
+    static void TearDownTestSuite() {
+        std::filesystem::remove_all(small_->dir);
+        std::filesystem::remove_all(big_->dir);
+        small_.reset();
+        big_.reset();
+    }
+
+    struct ScaledCorpus {
+        std::filesystem::path dir;
+        std::unique_ptr<MasterIndex> indexer;
+    };
+
+    // Root-relative path deliberately longer than the 15-char SSO buffer.
+    static std::string scaled_file_path(int file) {
+        return "deeply/nested/source/dirs/beyond/short/string/opt/pkg" +
+               std::to_string(file) + "/file_" + std::to_string(file) +
+               ".go";
+    }
+
+    static std::unique_ptr<ScaledCorpus> make_scaled_corpus(
+        int files, int syms_per_file) {
+        auto corpus = std::make_unique<ScaledCorpus>();
+        corpus->dir = lci::test::unique_temp_dir("lci_ls_scale_");
+        std::filesystem::remove_all(corpus->dir);
+        std::filesystem::create_directories(corpus->dir);
+        for (int f = 0; f < files; ++f) {
+            auto path = corpus->dir / scaled_file_path(f);
+            std::filesystem::create_directories(path.parent_path());
+            std::string content = "package pkg" + std::to_string(f) + "\n";
+            content.reserve(content.size() +
+                            static_cast<size_t>(syms_per_file) * 30);
+            for (int i = 0; i < syms_per_file; ++i) {
+                content += "func fn" + std::to_string(i) + "() { _ = 1 }\n";
+            }
+            std::ofstream out(path);
+            out << content;
+        }
+        Config config;
+        config.project.root = corpus->dir.string();
+        corpus->indexer = std::make_unique<MasterIndex>(config);
+        corpus->indexer->index_directory(corpus->dir.string());
+        return corpus;
+    }
+
+    inline static std::unique_ptr<ScaledCorpus> small_;
+    inline static std::unique_ptr<ScaledCorpus> big_;
+};
+
+// The filter loop walks every indexed symbol on each call. Allocations per
+// call must not grow with symbol count: 10k symbols may not allocate ~10x
+// what 1k allocates (the old loop copied the file path into every row — a
+// malloc per symbol, invisible to a latency-only check but the defect the
+// task names). Counted via the process-wide operator new hook above, armed
+// only around the handler call.
+TEST_F(ListSymbolsScalingFixture,
+       ListSymbolsAllocationsDoNotScaleWithSymbolCount) {
+    auto allocs_for_list = [](MasterIndex& idx) {
+        nlohmann::json params = nlohmann::json::object();
+        params["max"] = 10;
+        (void)handle_list_symbols(params, idx);  // warm-up (allocates freely)
+        const long long before =
+            g_alloc_count.load(std::memory_order_relaxed);
+        g_count_allocs.store(true, std::memory_order_relaxed);
+        auto result = handle_list_symbols(params, idx);
+        g_count_allocs.store(false, std::memory_order_relaxed);
+        EXPECT_FALSE(result.is_error) << result.text;
+        auto j = nlohmann::json::parse(result.text);
+        EXPECT_GT(j["total"].get<int>(), 0);
+        return g_alloc_count.load(std::memory_order_relaxed) - before;
+    };
+    long long allocs_1k = allocs_for_list(*small_->indexer);
+    long long allocs_10k = allocs_for_list(*big_->indexer);
+    std::printf("[ ListSymbolsAlloc ] 1k=%lld 10k=%lld\n", allocs_1k,
+                allocs_10k);
+    EXPECT_LT(allocs_10k, allocs_1k * 2)
+        << "allocations per list_symbols scale with symbol count: "
+        << allocs_1k << " @1k vs " << allocs_10k << " @10k";
+    EXPECT_LT(allocs_10k - allocs_1k, 200)
+        << "filter loop allocates per symbol: " << allocs_1k
+        << " @1k vs " << allocs_10k << " @10k";
+}
+
+// Linear-latency guard: 10x symbols must cost < 12x wall time, best-of-5
+// interleaved (relative assertion only — never absolute ns).
+TEST_F(ListSymbolsScalingFixture,
+       ListSymbolsTenfoldSymbolsUnderTwelvefoldTime) {
+    auto time_list_once = [](MasterIndex& idx) {
+        nlohmann::json params = nlohmann::json::object();
+        params["max"] = 10;
+        auto start = std::chrono::steady_clock::now();
+        auto result = handle_list_symbols(params, idx);
+        auto ns = static_cast<long long>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - start)
+                .count());
+        EXPECT_FALSE(result.is_error) << result.text;
+        return ns;
+    };
+    (void)time_list_once(*small_->indexer);  // warm-up
+    (void)time_list_once(*big_->indexer);
+    long long best_small = std::numeric_limits<long long>::max();
+    long long best_big = std::numeric_limits<long long>::max();
+    for (int round = 0; round < 5; ++round) {  // interleave: equal exposure
+        best_small = std::min(best_small, time_list_once(*small_->indexer));
+        best_big = std::min(best_big, time_list_once(*big_->indexer));
+    }
+    double ratio = static_cast<double>(best_big) /
+                   static_cast<double>(std::max<long long>(best_small, 1));
+    std::printf("[ ListSymbolsLatency ] 1k=%.3fus 10k=%.3fus ratio=%.2f\n",
+                best_small / 1e3, best_big / 1e3, ratio);
+    EXPECT_LT(ratio, 12.0)
+        << "10x symbols cost " << ratio << "x time (1k=" << best_small
+        << "ns 10k=" << best_big << "ns)";
 }
 
 // =============================================================================

@@ -258,7 +258,10 @@ void append_refs_section(nlohmann::json& j, const EnhancedSymbol& sym,
 
 struct SymbolWithFile {
     const EnhancedSymbol* sym;
-    std::string file_path;
+    // View into the per-file interned path held by the collect loop; rows
+    // must not own a std::string each (that copy was one malloc+free per
+    // symbol per list_symbols call — see handle_list_symbols).
+    std::string_view file_path;
 };
 
 void attach_source_excerpt(nlohmann::json& j, const EnhancedSymbol& sym,
@@ -298,7 +301,7 @@ void attach_source_excerpt(nlohmann::json& j, const EnhancedSymbol& sym,
 
 /// Builds a JSON object for a symbol in explore responses.
 nlohmann::json build_explore_symbol(const EnhancedSymbol& sym,
-                                    const std::string& file_path,
+                                    std::string_view file_path,
                                     const std::vector<std::string>& includes,
                                     ReferenceTracker& tracker) {
     nlohmann::json j;
@@ -307,7 +310,7 @@ nlohmann::json build_explore_symbol(const EnhancedSymbol& sym,
     // Empty file_path = caller already names the file once at the response
     // header (browse_file); repeating it per symbol cost ~230 chars/row on
     // deep absolute paths.
-    if (!file_path.empty()) j["file"] = file_path;
+    if (!file_path.empty()) j["file"] = std::string(file_path);
     j["line"] = sym.symbol.line;
     if (sym.is_exported) j["is_exported"] = true;
 
@@ -681,9 +684,18 @@ ToolResult handle_list_symbols(const nlohmann::json& params,
 
     // Collect matching symbols. Paths are emitted root-relative; the glob
     // filter accepts both forms (agents paste either).
+    //
+    // The root-relative path is interned ONCE per file (path_store) and each
+    // row carries a std::string_view into it. The previous shape copied the
+    // `rel` std::string into every SymbolWithFile row — one malloc+free per
+    // indexed symbol per call (the alloc test measured +1 alloc/symbol). With
+    // one pass over the symbol table the only per-symbol work left is the
+    // allocation-free predicate and a 16-byte view push_back. (karpathy #2.)
     const std::string& proj_root = indexer.config().project.root;
     auto file_ids = indexer.get_all_file_ids();
     std::vector<SymbolWithFile> all_symbols;
+    std::vector<std::string> path_store;
+    path_store.reserve(file_ids.size());
 
     for (auto fid : file_ids) {
         auto file_path = indexer.get_file_path(fid);
@@ -696,10 +708,13 @@ ToolResult handle_list_symbols(const nlohmann::json& params,
             continue;
         }
 
+        path_store.push_back(std::move(rel));
+        const std::string_view rel_view = path_store.back();
+
         auto symbols = rt_snap->get_file_enhanced_symbols(fid);
         for (const auto& sym : symbols) {
             if (sym && matches_list_filters(*sym, filters)) {
-                all_symbols.push_back({sym.get(), rel});
+                all_symbols.push_back({sym.get(), rel_view});
             }
         }
     }
