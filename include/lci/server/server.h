@@ -24,6 +24,7 @@ namespace lci {
 
 class MasterIndex;
 class SearchEngine;
+class WatchPipeline;
 
 // -- Socket path helpers ------------------------------------------------------
 
@@ -551,6 +552,19 @@ class IndexServer {
     void cancel_indexing_thread();
     bool shutdown_locked();
     void stop_listener_once();
+
+    // -- Watch path -----------------------------------------------------------
+    // Per-server watch pipeline, started once a built index is live and
+    // stopped (destroyed, joining the efsw worker and debounce timer) on
+    // shutdown. Lifecycle-only: never touched from a request path.
+    // Concurrency: set_search_engine/start/teardown are owner-thread
+    // operations, and the one non-owner caller — the start-up indexing
+    // thread — is joined by cancel_indexing_thread() before
+    // shutdown_locked() stops the pipeline, so no lock guards the member.
+    // No-op when watch_mode is off or a pipeline is already running.
+    void start_watch_pipeline();
+    void stop_watch_pipeline();
+    std::unique_ptr<WatchPipeline> watch_pipeline_;
 
     // Cancels any in-flight indexing run, joins its thread, and
     // installs `new_thread` as the active indexing thread. Atomic with

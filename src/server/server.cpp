@@ -30,7 +30,6 @@
 #include <lci/server/request_decode.h>
 #include <lci/version.h>
 
-#include <absl/container/flat_hash_map.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -221,45 +220,6 @@ std::string language_from_extension(const std::string& path) {
     return std::string(to_string(info.language));
 }
 
-// -- Watch pipeline registry ---------------------------------------------------
-// server.h is outside this change's editable scope, so the per-server
-// WatchPipeline cannot be a member; it lives in this registry keyed by
-// server instance. Lifecycle only (start/teardown), never on a request
-// path, so the plain mutex is fine.
-std::mutex g_watch_pipelines_mu;
-absl::flat_hash_map<IndexServer*, std::unique_ptr<WatchPipeline>>
-    g_watch_pipelines;
-
-/// Starts the watch path for `server` once the index is built and live
-/// (search engine published). No-op when watch_mode is off or a pipeline
-/// is already running for this server. Never starts while a bulk index
-/// run is in flight — the WatchPipeline itself defers rebuilds during a
-/// bulk window, but starting one mid-run would serve no purpose.
-void start_watch_pipeline(IndexServer* server, const Config& config,
-                          MasterIndex& index) {
-    if (!config.index.watch_mode) return;
-    std::lock_guard lock(g_watch_pipelines_mu);
-    if (g_watch_pipelines.contains(server)) return;
-    auto pipeline = std::make_unique<WatchPipeline>(config, index);
-    if (!pipeline->start()) return;
-    g_watch_pipelines[server] = std::move(pipeline);
-}
-
-/// Stops and destroys the server's watch pipeline, if any. Destruction
-/// (which joins the efsw worker and the debounce timer) runs outside the
-/// registry lock.
-void stop_watch_pipeline(IndexServer* server) {
-    std::unique_ptr<WatchPipeline> pipeline;
-    {
-        std::lock_guard lock(g_watch_pipelines_mu);
-        auto it = g_watch_pipelines.find(server);
-        if (it != g_watch_pipelines.end()) {
-            pipeline = std::move(it->second);
-            g_watch_pipelines.erase(it);
-        }
-    }
-}
-
 }  // namespace
 
 // -- IndexServer construction -------------------------------------------------
@@ -278,6 +238,26 @@ IndexServer::IndexServer(const Config& config,
 
 IndexServer::~IndexServer() {
     shutdown();
+}
+
+// -- Watch pipeline ------------------------------------------------------------
+
+/// Starts the watch path once the index is built and live (search engine
+/// published). No-op when watch_mode is off or a pipeline is already
+/// running. Never starts while a bulk index run is in flight — the
+/// WatchPipeline itself defers rebuilds during a bulk window, but starting
+/// one mid-run would serve no purpose.
+void IndexServer::start_watch_pipeline() {
+    if (!config_.index.watch_mode) return;
+    if (watch_pipeline_) return;
+    auto pipeline = std::make_unique<WatchPipeline>(config_, *indexer_);
+    if (!pipeline->start()) return;
+    watch_pipeline_ = std::move(pipeline);
+}
+
+/// Stops and destroys the watch pipeline, if any.
+void IndexServer::stop_watch_pipeline() {
+    watch_pipeline_.reset();
 }
 
 // -- Configuration ------------------------------------------------------------
@@ -309,7 +289,7 @@ void IndexServer::set_search_engine(SearchEngine* engine) {
     if (engine != nullptr) {
         // External build just went live: the watch path starts now (and
         // only now — incremental writes must never race the build).
-        start_watch_pipeline(this, config_, *indexer_);
+        start_watch_pipeline();
     }
 }
 
@@ -528,7 +508,7 @@ bool IndexServer::start() {
             // file changes are served without a manual /reindex. The
             // pipeline defers its own rebuilds while any bulk run (a
             // /reindex) is in flight.
-            start_watch_pipeline(this, config_, *indexer_);
+            start_watch_pipeline();
         }));
     } else if (search_engine_.load(std::memory_order_acquire) == nullptr) {
         // Externally-owned index with no engine yet: the owner is building
@@ -539,7 +519,7 @@ bool IndexServer::start() {
     } else {
         // Externally-managed index, already built: the watch path can
         // start immediately.
-        start_watch_pipeline(this, config_, *indexer_);
+        start_watch_pipeline();
     }
 
     // Publish the registry entry BEFORE the listener starts accepting:
@@ -704,7 +684,7 @@ bool IndexServer::shutdown_locked() {
     // until the bulk window closes on its own; cancelling first lets the
     // timer thread (and the indexing thread) drain immediately.
     cancel_indexing_thread();
-    stop_watch_pipeline(this);
+    stop_watch_pipeline();
 
     stop_listener_once();
 
