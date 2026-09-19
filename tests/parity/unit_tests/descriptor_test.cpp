@@ -49,6 +49,11 @@ TEST(Descriptor, RejectsUnknownMode) {
     EXPECT_THROW(parse_descriptor(bad), std::runtime_error);
 }
 
+TEST(Descriptor, RejectsRetiredIndexMode) {
+    std::string bad = R"({"id":"x","mode":"index","corpus":"c","invocation":{"args":[]}})";
+    EXPECT_THROW(parse_descriptor(bad), std::runtime_error);
+}
+
 TEST(Descriptor, MissingIdFieldThrows) {
     std::string bad = R"({"mode":"cli","corpus":"c","invocation":{"args":[]}})";
     EXPECT_THROW(parse_descriptor(bad), std::runtime_error);
