@@ -64,11 +64,16 @@ class ToolSurfaceTest(unittest.TestCase):
             live = session.rpc("tools/list")["tools"]
         finally:
             session.close()
-        committed = {t["name"]: t["description"] for t in self.manifest["tools"]}
         self.assertEqual(
-            {t["name"]: t.get("description", "") for t in live}, committed,
+            {t["name"]: t.get("description", "") for t in live},
+            {t["name"]: t["description"] for t in self.manifest["tools"]},
             "committed tool-surface manifest no longer matches the live tools/list; "
             "re-run scripts/enumerate_tool_surface.py")
+        self.assertEqual(
+            {t["name"]: t.get("inputSchema") for t in live},
+            {t["name"]: t["input_schema"] for t in self.manifest["tools"]},
+            "committed tool-surface input schemas no longer match the live "
+            "tools/list; re-run scripts/enumerate_tool_surface.py")
 
     def test_manifest_is_canonical_and_byte_stable(self):
         self.assertEqual(MANIFEST.read_text(), surface.canonical_json(self.manifest))
