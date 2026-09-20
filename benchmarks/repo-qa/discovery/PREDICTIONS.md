@@ -32,6 +32,14 @@ The treatment cannot fall back to grep. That is what gives
 `control_literal_string_search` real teeth: it probes a task shape where the
 baseline holds the natively-correct tool and the treatment does not.
 
+The treatment's reference set comes from `mcp__lci__get_context` (relationships
+mode), **not** a dedicated `references` tool — no such tool is on the live
+`lci mcp` `tools/list` surface. `mcp__lci__callers` *is* on the surface and is a
+registered arm tool. An earlier draft listed a phantom `mcp__lci__references`; it
+was removed pre-run (see `registry_findings.phantom_reference_tool`), and
+`tests/test_predictions_registry.py` now pins every `mcp__lci__*` arm name to the
+committed tool-surface manifest so the registry cannot drift from the product.
+
 Population is **functions and methods only** (all 48 cells are `kind=func`;
 methods appear as funcs with a receiver). Types and `init`/`main` are excluded.
 

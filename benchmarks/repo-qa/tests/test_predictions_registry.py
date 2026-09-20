@@ -39,6 +39,14 @@ DISCOVERY = os.path.join(
 )
 REGISTRY_PATH = os.path.join(DISCOVERY, "predictions.json")
 COHORTS_PATH = os.path.join(DISCOVERY, "cohorts", "cohorts.json")
+# The committed, curated snapshot of the live lci MCP tools/list surface. It is
+# the same manifest test_tool_surface.py polices against the binary; the registry
+# must be checked against it so the treatment arm cannot name a tool the product
+# never exposed (schema_version 2 shipped mcp__lci__references, which is absent).
+SURFACE_MANIFEST_PATH = os.path.join(
+    os.path.dirname(DISCOVERY), "comprehension", "surface", "tool-surface.json"
+)
+MCP_PREFIX = "mcp__lci__"
 
 VALID_OUTCOMES = {"lci_wins", "parity", "grep_wins"}
 VALID_POWER_STATUS = {"powered", "underpowered", "untestable_at_this_n"}
@@ -81,6 +89,34 @@ AXIS_EXEMPT_TASK_SHAPES = {"literal_string_search", "budget_constrained_variant"
 # Shapes graded on call sites but cohorted on another axis: allowed only with a
 # declared confound, since the axis and the answer set disagree by construction.
 CONFOUND_ALLOWED_TASK_SHAPES = {"transitive_callers_depth2"}
+
+
+def live_tool_names():
+    """The curated, committed set of tool names the live lci MCP server exposes.
+
+    Sourced from the same manifest test_tool_surface.py keeps fresh against the
+    binary, so the registry is pinned to the product's real surface rather than
+    to a hand-copied list that could itself drift.
+    """
+    with open(SURFACE_MANIFEST_PATH, encoding="utf-8") as handle:
+        manifest = json.load(handle)
+    return {t["name"] for t in manifest["tools"]}
+
+
+def phantom_treatment_tools(tools, live):
+    """`mcp__lci__*` names the treatment arm claims but the surface does not have.
+
+    D5 attributes each cell result to the tool that produced it; a name here that
+    the arm could never call makes that attribution fiction. Native entries (Read)
+    and non-lci MCP prefixes are out of scope for this gate.
+    """
+    phantoms = []
+    for tool in tools:
+        if tool.startswith(MCP_PREFIX):
+            bare = tool[len(MCP_PREFIX):]
+            if bare not in live:
+                phantoms.append(tool)
+    return phantoms
 
 
 def _load(path):
@@ -728,6 +764,67 @@ class AmendmentPolicyTest(unittest.TestCase):
         self.assertIn("callers_high_fan_in", findings["families_considered_and_not_registered"])
 
 
+class TreatmentArmSurfaceTest(unittest.TestCase):
+    """Every `mcp__lci__*` tool the treatment arm names must exist on the product.
+
+    This is the gate that the phantom `mcp__lci__references` bypassed. The arm
+    list is read verbatim by D5 when attributing a cell result to a tool; a name
+    the live surface never exposed would credit the result to a call that could
+    not have happened. It checks the COMMITTED manifest test_tool_surface.py
+    keeps pinned to the binary, so the registry cannot drift from the product
+    again without failing here.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.reg = _load(REGISTRY_PATH)
+        cls.live = live_tool_names()
+        cls.treatment = cls.reg["arms"]["treatment"]["tools"]
+
+    def test_the_committed_surface_actually_lists_callers_and_get_context(self):
+        # The gate is only meaningful if the manifest reflects the live surface
+        # the D4 review enumerated. Sanity-pin the two tools the reference arm
+        # depends on: callers EXISTS, get_context EXISTS, references does NOT.
+        self.assertIn("callers", self.live)
+        self.assertIn("get_context", self.live)
+        self.assertNotIn("references", self.live)
+
+    def test_every_treatment_mcp_tool_exists_on_the_committed_surface(self):
+        self.assertEqual(
+            phantom_treatment_tools(self.treatment, self.live),
+            [],
+            "treatment arm names an mcp__lci__ tool the lci MCP surface does not "
+            "expose; D5 would mis-attribute a cell result to an uncalled tool",
+        )
+
+    def test_reference_set_is_delivered_by_get_context_not_a_phantom_references_tool(self):
+        # The amendment must not merely delete the phantom and strand the
+        # reference capability: get_context (which carries include_all_references)
+        # has to be on the arm so the production_reference_partition family's
+        # mechanism has a real tool behind it, and callers (which the D4
+        # implementer wrongly said did not exist) must be kept.
+        self.assertIn("mcp__lci__get_context", self.treatment)
+        self.assertIn("mcp__lci__callers", self.treatment)
+        self.assertNotIn("mcp__lci__references", self.treatment)
+
+    def test_no_mechanism_text_names_references_as_a_tool(self):
+        # The arm list is not the only place the phantom can leak: mechanism prose
+        # that says "the treatment's references returns ..." attributes a result
+        # to a tool the arm cannot call. Reject the possessive-tool reading while
+        # leaving the legitimate nouns ("true references", "gopls references",
+        # "symbol references", "partition references by") untouched.
+        bad = []
+        for fam in self.reg["families"]:
+            text = fam["prediction"]["mechanism"]
+            if "treatment's references" in text or "treatment references" in text:
+                bad.append(fam["id"])
+        self.assertEqual(
+            bad,
+            [],
+            f"mechanism text names `references` as a treatment tool: {bad}",
+        )
+
+
 class DiscriminationTest(unittest.TestCase):
     """Prove the gates FAIL on the bad registries they exist to catch.
 
@@ -740,6 +837,30 @@ class DiscriminationTest(unittest.TestCase):
 
     def _real(self):
         return _load(REGISTRY_PATH)
+
+    # --- arm / surface drift: THE phantom tool that shipped to review --------
+
+    def test_surface_gate_rejects_the_phantom_references_tool(self):
+        # THE ACTUAL DEFECT. schema_version 2's arms.treatment named
+        # mcp__lci__references, which the live MCP surface never exposed (the
+        # reference set comes from get_context with include_all_references). A
+        # gate only ever observed passing is unverified, so re-inject the phantom
+        # into a copy of the live arm list and confirm the SAME function the live
+        # assertion calls flags it -- and still passes on the corrected registry.
+        live = live_tool_names()
+        reg = self._real()
+        self.assertEqual(phantom_treatment_tools(reg["arms"]["treatment"]["tools"], live), [])
+        drifted = copy.deepcopy(reg["arms"]["treatment"]["tools"])
+        drifted.append("mcp__lci__references")
+        flagged = phantom_treatment_tools(drifted, live)
+        self.assertEqual(flagged, ["mcp__lci__references"])
+
+    def test_surface_gate_flags_a_rename_of_a_real_tool_to_a_nonexistent_one(self):
+        # The gate keys off the manifest, not a hardcoded allow-list, so a tool
+        # the product drops must be caught the same way a never-existing one is.
+        live = live_tool_names()
+        drifted = ["mcp__lci__get_context", "mcp__lci__find_definition"]
+        self.assertEqual(phantom_treatment_tools(drifted, live), ["mcp__lci__find_definition"])
 
     # --- axis grounding: THE defect that shipped to review -----------------
 
