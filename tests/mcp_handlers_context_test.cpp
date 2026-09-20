@@ -857,6 +857,68 @@ TEST_F(ContextResolutionFixture, WrongTypedFileSelectorIsInvalidRefNotGlobal) {
     EXPECT_EQ(j["unresolved"][0]["role"], "contract");
 }
 
+// A ref whose only selector keys are verbose `file`/`symbol` carries no
+// honoured selector (f/s are compact-only on the ref level). At the resolver it
+// must be classified invalid_ref and must NOT be pushed into refs as an empty
+// accepted ref, and its raw selector strings must survive in the report. This
+// is the pre-f1d0996 rejection contract, now surfaced per-ref rather than as a
+// top-level error.
+TEST(ContextManifestParse, VerboseSelectorRefIsInvalidRefNotEmptyRef) {
+    nlohmann::json j = {
+        {"r", {{{"file", "dup_a.go"}, {"symbol", "Dup"}, {"role", "contract"}}}}};
+    ContextManifest out;
+    std::vector<UnresolvedRef> invalid;
+    auto err = manifest_from_json(j, out, invalid);
+    EXPECT_TRUE(err.empty()) << "per-ref problems must not abort the load";
+    EXPECT_TRUE(out.refs.empty())
+        << "a selector-less ref must never enter refs as an empty accepted ref";
+    ASSERT_EQ(invalid.size(), 1u);
+    EXPECT_EQ(invalid[0].reason, RefResolution::InvalidRef);
+    EXPECT_EQ(invalid[0].file, "dup_a.go") << "raw verbose file selector preserved";
+    EXPECT_EQ(invalid[0].symbol, "Dup") << "raw verbose symbol selector preserved";
+    EXPECT_EQ(invalid[0].role, "contract");
+}
+
+// A bare `{}` ref likewise yields no honoured selector: it is invalid_ref, not
+// an empty accepted ref. Asserted at the resolver because the load path's
+// hydrate step masks an empty ref into an identically-shaped unresolved entry,
+// so only a direct parse distinguishes "never entered refs" from "entered refs
+// and was rejected during hydration".
+TEST(ContextManifestParse, BareObjectRefIsInvalidRefNotEmptyRef) {
+    nlohmann::json j = {
+        {"r", nlohmann::json::array({nlohmann::json::object()})}};
+    ContextManifest out;
+    std::vector<UnresolvedRef> invalid;
+    auto err = manifest_from_json(j, out, invalid);
+    EXPECT_TRUE(err.empty()) << "a bad ref must not abort the load";
+    EXPECT_TRUE(out.refs.empty())
+        << "a bare {} ref must never enter refs as an empty accepted ref";
+    ASSERT_EQ(invalid.size(), 1u);
+    EXPECT_EQ(invalid[0].reason, RefResolution::InvalidRef);
+}
+
+// End-to-end through the load handler: a selector-less verbose ref never counts
+// as a resolved ref, yet a well-formed sibling still hydrates and the load
+// returns no top-level error. The verbose selectors survive in the unresolved
+// entry (which the hydrate-mask path would have lost).
+TEST_F(ContextResolutionFixture,
+       VerboseSelectorRefIsInvalidRefAndIsolatesValidSibling) {
+    auto j = load({{"r",
+                    {{{"f", "dup_a.go"}, {"s", "Dup"}, {"role", "primary"}},
+                     {{"file", "ghost.go"},
+                      {"symbol", "GhostOnly"},
+                      {"role", "contract"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    ASSERT_EQ(j["refs"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["refs"][0]["file"], "dup_a.go");
+    ASSERT_EQ(j["unresolved"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["reason"], "invalid_ref");
+    EXPECT_EQ(j["unresolved"][0]["file"], "ghost.go");
+    EXPECT_EQ(j["unresolved"][0]["symbol"], "GhostOnly");
+    EXPECT_EQ(j["unresolved"][0]["role"], "contract");
+    EXPECT_EQ(j["stats"]["refs_loaded"], 1) << j.dump();
+}
+
 // -- format=outline must not bypass symbol identity resolution (B1) ----------
 
 TEST_F(ContextResolutionFixture, OutlineIgnoresSymbolThatIsNotInFile) {

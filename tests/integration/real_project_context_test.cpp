@@ -376,8 +376,12 @@ TEST_F(RealProjectContextManifestTest, SaveAndLoadCompactKeysFileRoundTrip) {
               "ServeHTTP");
 
     // Negative case: a manifest written with verbose `{file, symbol}` ref
-    // keys must be rejected when loaded — surfacing the contract per
-    // karpathy rule 6 (no silent fallback to a forgiving alias).
+    // keys carries no honoured selector (the ref-level contract is compact
+    // `{f, s}`) — no silent fallback to a forgiving alias. Since the load path
+    // isolates malformed refs per-ref rather than aborting, the rejection is
+    // surfaced as a structured unresolved entry, not a top-level `error`: this
+    // ref must produce zero resolved refs and exactly one `invalid_ref`
+    // unresolved entry that preserves its raw selector strings.
     auto bad_manifest_abs = tmp_dir / ".lci-manifest-iter13-verbose.json";
     nlohmann::json bad;
     bad["t"] = "verbose";
@@ -396,10 +400,22 @@ TEST_F(RealProjectContextManifestTest, SaveAndLoadCompactKeysFileRoundTrip) {
     bad_load["operation"] = "load";
     bad_load["from_file"] = bad_manifest_abs.string();
     auto bad_load_result = ctx.context_manifest(bad_load);
-    EXPECT_TRUE(bad_load_result.contains("error"))
-        << "verbose `{file, symbol}` ref keys must be rejected — the "
-           "contract is compact `{f, s}`. Silent acceptance would let "
-           "agents write the wrong shape and lose data on round-trip.";
+    EXPECT_FALSE(bad_load_result.contains("error"))
+        << "per-ref rejection is isolated, not a whole-load abort: "
+        << bad_load_result.dump();
+    EXPECT_EQ(bad_load_result.value("refs", nlohmann::json::array()).size(), 0u)
+        << "a verbose `{file, symbol}` ref must never be accepted as a resolved "
+           "ref: "
+        << bad_load_result.dump();
+    ASSERT_EQ(bad_load_result["unresolved"].size(), 1u)
+        << bad_load_result.dump();
+    EXPECT_EQ(bad_load_result["unresolved"][0]["reason"], "invalid_ref")
+        << "the contract is compact `{f, s}`; verbose ref keys are an "
+           "invalid_ref, not a silent no-op: "
+        << bad_load_result.dump();
+    EXPECT_EQ(bad_load_result["unresolved"][0]["symbol"], "ServeHTTP")
+        << "the raw selector must survive in the report: "
+        << bad_load_result.dump();
 
     fs::remove_all(tmp_dir);
 }

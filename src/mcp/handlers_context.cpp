@@ -251,6 +251,31 @@ std::string manifest_from_json(const nlohmann::json& j, ContextManifest& out,
                 }
             }
         }
+        // A ref must carry at least one honoured selector: a compact `f`, a
+        // compact `s`, or a valid line range. A ref whose only selector keys
+        // are verbose `file`/`symbol` (never honoured at the ref level — see
+        // save-verbose-keys-rejected.parity.json) and a bare `{}` carry none.
+        // Such a ref is an invalid_ref, never an empty accepted ref: it must
+        // not enter refs nor count as a resolved ref, and it must not be left
+        // for hydrate to mask (which would silently drop the raw selectors).
+        // Preserve the well-typed raw selector strings (compact, else verbose),
+        // role and note in the unresolved report.
+        if (r.file.empty() && r.symbol.empty() && !r.has_line_range) {
+            UnresolvedRef bad;
+            bad.reason = RefResolution::InvalidRef;
+            bad.file = r.file;
+            bad.symbol = r.symbol;
+            bad.role = r.role;
+            bad.note = r.note;
+            if (bad.file.empty()) {
+                if (auto v = opt_string("file")) bad.file = std::move(*v);
+            }
+            if (bad.symbol.empty()) {
+                if (auto v = opt_string("symbol")) bad.symbol = std::move(*v);
+            }
+            invalid_out.push_back(std::move(bad));
+            continue;
+        }
         out.refs.push_back(std::move(r));
     }
 

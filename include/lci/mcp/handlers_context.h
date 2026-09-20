@@ -34,6 +34,13 @@ nlohmann::json manifest_to_json(const ContextManifest& manifest);
 std::string manifest_from_json(const nlohmann::json& j,
                                ContextManifest& out);
 
+/// Overload that reports each selector-less or wrong-typed ref in `invalid_out`
+/// (reason invalid_ref, original selectors preserved) instead of only keeping
+/// the well-typed refs. Returns empty error on success; a fatal error aborts
+/// before any ref is inspected. Exposed for testing.
+std::string manifest_from_json(const nlohmann::json& j, ContextManifest& out,
+                               std::vector<UnresolvedRef>& invalid_out);
+
 /// Validates a ContextManifest. Returns empty string if valid.
 std::string validate_manifest(const ContextManifest& manifest);
 
