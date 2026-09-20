@@ -191,7 +191,6 @@ std::string manifest_from_json(const nlohmann::json& j, ContextManifest& out,
             if (!rj["l"].is_object()) {
                 lines_bad = true;
             } else {
-                has_lines = true;
                 const auto& lj = rj["l"];
                 auto num = [&](const char* k, const char* vk, int& dst) -> bool {
                     const char* use = lj.contains(k) ? k
@@ -201,6 +200,11 @@ std::string manifest_from_json(const nlohmann::json& j, ContextManifest& out,
                     dst = lj[use].get<int>();
                     return true;
                 };
+                // A `l` object must carry at least one honoured integer bound
+                // (s/start or e/end). A bound-less `l: {}` yields no valid line
+                // range, so it must not be treated as an honoured selector.
+                has_lines = lj.contains("s") || lj.contains("start") ||
+                            lj.contains("e") || lj.contains("end");
                 if (!num("s", "start", lstart) || !num("e", "end", lend)) {
                     lines_bad = true;
                 }

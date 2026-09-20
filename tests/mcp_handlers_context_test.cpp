@@ -897,6 +897,24 @@ TEST(ContextManifestParse, BareObjectRefIsInvalidRefNotEmptyRef) {
     EXPECT_EQ(invalid[0].reason, RefResolution::InvalidRef);
 }
 
+// An `l` object that carries no honoured bound (a bare `{}` line range) yields
+// no valid line range, so — like a selector-less ref — it must be classified
+// invalid_ref at the resolver and must NOT enter refs as an empty accepted ref.
+TEST(ContextManifestParse, EmptyLineRangeObjectRefIsInvalidRefNotEmptyRef) {
+    nlohmann::json j = {
+        {"r", nlohmann::json::array(
+                  {{{"l", nlohmann::json::object()}}})}};
+    ContextManifest out;
+    std::vector<UnresolvedRef> invalid;
+    auto err = manifest_from_json(j, out, invalid);
+    EXPECT_TRUE(err.empty()) << "a bad ref must not abort the load";
+    EXPECT_TRUE(out.refs.empty())
+        << "a ref whose only selector is an empty {} line range must never "
+           "enter refs as an accepted ref";
+    ASSERT_EQ(invalid.size(), 1u);
+    EXPECT_EQ(invalid[0].reason, RefResolution::InvalidRef);
+}
+
 // End-to-end through the load handler: a selector-less verbose ref never counts
 // as a resolved ref, yet a well-formed sibling still hydrates and the load
 // returns no top-level error. The verbose selectors survive in the unresolved
@@ -917,6 +935,56 @@ TEST_F(ContextResolutionFixture,
     EXPECT_EQ(j["unresolved"][0]["symbol"], "GhostOnly");
     EXPECT_EQ(j["unresolved"][0]["role"], "contract");
     EXPECT_EQ(j["stats"]["refs_loaded"], 1) << j.dump();
+}
+
+// End-to-end (MCP dispatch): a ref whose only selector is an empty `{}` line
+// range carries no honoured selector. The load path must report it as an
+// invalid_ref unresolved entry, NOT let it enter refs and be masked by hydrate
+// into a misleading `missing_file` (the shape seen when has_line_range was set
+// from a bound-less `l` object).
+TEST_F(ContextResolutionFixture, EmptyLineRangeObjectIsInvalidRefNotMissingFile) {
+    auto j = load({{"r", {{{"l", nlohmann::json::object()}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_EQ(j["refs"].size(), 0u)
+        << "an empty {} line range must never be accepted as a resolved ref: "
+        << j.dump();
+    ASSERT_EQ(j["unresolved"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["reason"], "invalid_ref")
+        << "no honoured selector is invalid_ref, not the hydration-masking "
+           "missing_file: "
+        << j.dump();
+    EXPECT_EQ(j["stats"]["refs_loaded"], 0) << j.dump();
+}
+
+// A pure line-range ref (file + line range, no symbol) keeps literal
+// current-index line semantics in EVERY format. format=outline must not widen
+// it into a whole-file listing that drops the saved range and the
+// line_range_literal marker; it slices the named lines and flags them literal.
+TEST_F(ContextResolutionFixture, OutlineHonoursLiteralLineRangeForPureLineRef) {
+    nlohmann::json manifest = {
+        {"r", {{{"f", "shift.go"}, {"l", {{"s", 3}, {"e", 3}}}}}}};
+    nlohmann::json params = {{"operation", "load"},
+                             {"format", "outline"},
+                             {"from_string", manifest.dump()}};
+    auto result = handle_context(params, *indexer_, temp_dir_.string());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+    ASSERT_EQ(j["refs"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"].size(), 0u) << j.dump();
+    const auto& r = j["refs"][0];
+    EXPECT_TRUE(r.contains("line_range_literal"))
+        << "a pure line-range ref must identify the literal-line limitation "
+           "in outline format too: "
+        << r.dump();
+    EXPECT_EQ(r["line_range_literal"], true) << r.dump();
+    EXPECT_EQ(r["lines"], (nlohmann::json{{"start", 3}, {"end", 3}}))
+        << "the saved literal range must be preserved, not zeroed by a "
+           "whole-file outline: "
+        << r.dump();
+    EXPECT_NE(r["source"].get<std::string>().find("Filler"), std::string::npos)
+        << "must return the literal line 3 body, not the whole-file symbol "
+           "listing: "
+        << r.dump();
 }
 
 // -- format=outline must not bypass symbol identity resolution (B1) ----------

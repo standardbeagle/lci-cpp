@@ -282,7 +282,12 @@ ExpansionEngine::HydrateResult ExpansionEngine::hydrate_reference(
 
     auto file_path = resolve_path(ref.file, project_root);
 
-    if (format == FormatType::Outline) {
+    // A pure line-range ref (no symbol) keeps literal current-index line
+    // semantics in every format; outline is a file-level listing for symbol
+    // refs only, so it must not widen a bound-only ref into a whole-file
+    // outline that drops the saved range and the line_range_literal marker.
+    if (format == FormatType::Outline &&
+        !(ref.symbol.empty() && ref.has_line_range)) {
         // Outline is a file-level listing, but a saved file+symbol still has to
         // resolve by identity inside that file first: a missing file, an absent
         // symbol, or a same-file overload set is reported unresolved, never
