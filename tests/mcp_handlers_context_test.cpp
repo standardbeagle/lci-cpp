@@ -498,6 +498,78 @@ TEST_F(ContextHandlerFixture, AppendToCorruptManifestErrorsAndLeavesFile) {
     EXPECT_EQ(content, corrupt) << "append must not overwrite a corrupt file";
 }
 
+// Appending an invalid ref must fail the whole save explicitly and leave the
+// existing manifest byte-for-byte unchanged (the load path isolates invalid
+// refs, but a save that persisted them would write an un-hydratable manifest).
+// An invalid appended ref is any of: a verbose-only `{file, symbol}` ref, a
+// bare `{}`, or a present-but-wrong-typed selector — each carries no honoured
+// compact selector, so it is never a legitimate ref to store. A valid sibling
+// in the same batch must not let the invalid one through, and none of the new
+// refs may reach the file.
+TEST_F(ContextHandlerFixture, AppendRejectsInvalidRefsAndLeavesFile) {
+    const std::string manifest_name = "append_invalid.json";
+    auto manifest_path = temp_dir_ / manifest_name;
+
+    // Seed a valid one-ref manifest.
+    nlohmann::json seed = {
+        {"operation", "save"},
+        {"to_file", manifest_name},
+        {"task", "seed"},
+        {"refs", {{{"f", "main.go"}, {"s", "main"}}}}};
+    auto seeded = handle_context(seed, *indexer_, temp_dir_.string());
+    ASSERT_FALSE(seeded.is_error) << seeded.text;
+
+    std::ifstream before(manifest_path, std::ios::binary);
+    const std::string original((std::istreambuf_iterator<char>(before)),
+                               std::istreambuf_iterator<char>());
+    ASSERT_FALSE(original.empty());
+
+    // A well-formed sibling that would merge cleanly if it stood alone.
+    const nlohmann::json valid = {{"f", "handler.go"}, {"s", "handleRequest"}};
+    const std::vector<nlohmann::json> invalid = {
+        nlohmann::json{{"file", "main.go"}, {"symbol", "main"}},  // verbose-only
+        nlohmann::json::object(),                                  // bare {}
+        nlohmann::json{{"f", 123}, {"s", "main"}},                 // wrong-typed
+        nlohmann::json{{"f", "main.go"},
+                       {"l", {{"s", "not-an-int"}}}},              // bad bound
+    };
+
+    for (size_t i = 0; i < invalid.size(); ++i) {
+        nlohmann::json refs = nlohmann::json::array();
+        refs.push_back(valid);
+        refs.push_back(invalid[i]);
+        nlohmann::json attempt = {
+            {"operation", "save"},
+            {"to_file", manifest_name},
+            {"append", true},
+            {"refs", refs}};
+        auto r = handle_context(attempt, *indexer_, temp_dir_.string());
+        EXPECT_TRUE(r.is_error)
+            << "appending invalid ref #" << i << " must fail: " << r.text;
+
+        std::ifstream after(manifest_path, std::ios::binary);
+        const std::string now((std::istreambuf_iterator<char>(after)),
+                              std::istreambuf_iterator<char>());
+        EXPECT_EQ(now, original)
+            << "appending invalid ref #" << i
+            << " must leave the existing file byte-for-byte unchanged: "
+            << now;
+    }
+
+    // The valid sibling did not sneak in either: the manifest still holds the
+    // single seed ref.
+    nlohmann::json load = {{"operation", "load"},
+                           {"from_file", manifest_name}};
+    auto loaded = handle_context(load, *indexer_, temp_dir_.string());
+    ASSERT_FALSE(loaded.is_error) << loaded.text;
+    auto lj = nlohmann::json::parse(loaded.text);
+    EXPECT_EQ(lj.value("stats", nlohmann::json::object())
+                  .value("refs_loaded", -1),
+              1)
+        << "a failed append must not add any ref to the manifest: "
+        << loaded.text;
+}
+
 // apply_expansions used to hydrate callers/callees and then discard them
 // ((void)expanded), charging tokens for content that never reached the
 // response. A 'callers' directive must surface the caller's source in the
@@ -1214,6 +1286,43 @@ TEST_F(ContextWireFixture, WireUnsupportedVersionStructured) {
     ASSERT_EQ(r.payload["unresolved"].size(), 1u);
     EXPECT_EQ(r.payload["unresolved"][0]["reason"], "unsupported_version");
     EXPECT_EQ(r.payload["unresolved"][0]["role"], "p");
+}
+
+// Through the real tools/call wire, a save-append of a wrong-typed selector ref
+// must return an isError envelope whose text is an explicit validation error,
+// not a generic "Internal error" (which is what an uncaught nlohmann type_error
+// produced), and the on-disk manifest must be untouched.
+TEST_F(ContextWireFixture, WireAppendWrongTypedRefFailsExplicitlyAndLeavesFile) {
+    auto seed = call({{"operation", "save"},
+                      {"to_file", "wire_append.json"},
+                      {"task", "seed"},
+                      {"refs", {{{"f", "dup_a.go"}, {"s", "Dup"}}}}});
+    ASSERT_FALSE(seed.is_error) << seed.payload.dump();
+
+    std::ifstream before(temp_dir_ / "wire_append.json", std::ios::binary);
+    const std::string original((std::istreambuf_iterator<char>(before)),
+                               std::istreambuf_iterator<char>());
+    ASSERT_FALSE(original.empty());
+
+    auto bad = call({{"operation", "save"},
+                     {"to_file", "wire_append.json"},
+                     {"append", true},
+                     {"refs", {{{"f", "dup_b.go"}, {"s", "Dup"}},
+                               {{"f", 42}, {"s", "Dup"}}}}});
+    ASSERT_TRUE(bad.is_error) << bad.payload.dump();
+    // The call() helper packs an isError envelope as ["__error__", text].
+    const std::string msg = bad.payload[1].get<std::string>();
+    EXPECT_EQ(msg.find("Internal error"), std::string::npos)
+        << "an uncaught type_error is an internal error, not an explicit "
+           "validation failure: "
+        << msg;
+    EXPECT_TRUE(msg.find("ref[") != std::string::npos)
+        << "expected a ref-indexed validation message: " << msg;
+
+    std::ifstream after(temp_dir_ / "wire_append.json", std::ios::binary);
+    const std::string now((std::istreambuf_iterator<char>(after)),
+                          std::istreambuf_iterator<char>());
+    EXPECT_EQ(now, original) << "failed append must not touch the file: " << now;
 }
 
 // v1.0 (and the default empty version) remain supported.

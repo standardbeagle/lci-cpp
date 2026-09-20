@@ -556,18 +556,71 @@ ToolResult handle_context_save(const nlohmann::json& params,
     ContextManifest manifest;
     manifest.task = params.value("task", "");
     manifest.project_root = project_root;
-    for (const auto& rj : params["refs"]) {
+    // Parse each ref with explicit type checks. The refs argument is the
+    // save tool's compact input shape {f, s, l{s,e}, role, n, x} (verbose
+    // start/end/note tolerated for input ergonomics, like the load path).
+    // A present-but-wrong-typed selector must fail the whole save with a
+    // ref-indexed message rather than throw out of the handler: an append
+    // that fails must leave the existing manifest file untouched, and an
+    // uncaught nlohmann type_error would surface as a generic "Internal
+    // error" (or abort the unit call) instead of an explicit rejection. A
+    // selector-less ref (verbose-only, bare, or an all-empty ref) carries no
+    // honoured f/s/l and is caught below by validate_manifest.
+    const std::string prefix = "invalid manifest: ref[";
+    for (size_t i = 0; i < params["refs"].size(); ++i) {
+        const auto& rj = params["refs"][i];
+        const std::string where = prefix + std::to_string(i) + "]";
+        if (!rj.is_object()) {
+            return make_error_response("context", where + " must be an object");
+        }
         ContextRef r;
-        r.file = rj.value("f", "");
-        r.symbol = rj.value("s", "");
-        if (rj.contains("l") && rj["l"].is_object()) {
+        auto read_str = [&](const char* k, std::string& dst) -> bool {
+            if (!rj.contains(k)) return true;
+            if (!rj[k].is_string()) {
+                return false;
+            }
+            dst = rj[k].get<std::string>();
+            return true;
+        };
+        if (!read_str("f", r.file) || !read_str("s", r.symbol) ||
+            !read_str("role", r.role)) {
+            return make_error_response(
+                "context", where + " selector must be a string");
+        }
+        // note: compact `n` preferred, verbose `note` as input fallback
+        // (matches the load-only aliasing in manifest_from_json).
+        std::string note;
+        if (!read_str("n", note) ||
+            (note.empty() && !read_str("note", note))) {
+            return make_error_response(
+                "context", where + " note must be a string");
+        }
+        r.note = note;
+        if (rj.contains("l")) {
+            if (!rj["l"].is_object()) {
+                return make_error_response(
+                    "context", where + " line range must be an object");
+            }
             const auto& lj = rj["l"];
-            r.line_range.start = lj.value("s", lj.value("start", 0));
-            r.line_range.end = lj.value("e", lj.value("end", 0));
+            auto read_int = [&](const char* k, const char* vk,
+                                int& dst) -> bool {
+                const char* use = lj.contains(k) ? k
+                              : (lj.contains(vk) ? vk : nullptr);
+                if (!use) return true;
+                if (!lj[use].is_number_integer()) return false;
+                dst = lj[use].get<int>();
+                return true;
+            };
+            LineRange lr;
+            if (!read_int("s", "start", lr.start) ||
+                !read_int("e", "end", lr.end)) {
+                return make_error_response(
+                    "context",
+                    where + " line range bounds must be integers");
+            }
+            r.line_range = lr;
             r.has_line_range = true;
         }
-        r.role = rj.value("role", "");
-        r.note = rj.value("n", rj.value("note", ""));
         if (rj.contains("x") && rj["x"].is_array()) {
             for (const auto& x : rj["x"]) {
                 if (x.is_string()) {
