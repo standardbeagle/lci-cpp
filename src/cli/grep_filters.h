@@ -2,11 +2,7 @@
 // unit tests in tests/cli_test.cpp can exercise the pure logic without going
 // through the full CLI/server pipeline. Not part of the public API.
 //
-// Three filters are exposed:
-//
-//   - `line_looks_like_comment(line)` — Go parity heuristic from
-//     internal/search/engine.go:1804. Returns true if the trimmed line
-//     starts with `//`, `#`, or `/*`, or contains `*/` anywhere.
+// Two filters are exposed:
 //
 //   - `path_is_test(path)` — Returns true if the path matches any test-file
 //     convention (`_test.`, `.test.`, `.spec.`, `test_*`, trailing `Test`/
@@ -29,15 +25,6 @@
 namespace lci {
 namespace cli {
 namespace grep_filters {
-
-/// Returns true if the trimmed `line` looks like it starts inside or contains
-/// a comment token. Mirrors Go's `Engine.isInComment` logic
-/// (internal/search/engine.go:1804): a line is considered "in a comment" if,
-/// after trimming leading/trailing whitespace, it starts with `//`, `#`, or
-/// `/*`, or anywhere contains `*/`. A deliberately cheap heuristic that
-/// matches Go bit-for-bit so `--exclude-comments` produces the same drop-set
-/// across both binaries.
-bool line_looks_like_comment(std::string_view line);
 
 /// Returns true if `path` looks like a test file. Recognizes the basename
 /// patterns handled by `lci::is_test_file` (`_test.`, `.test.`, `.spec.`,

@@ -2416,15 +2416,37 @@ TEST(AstFiltersString, BlockCommentSameLineNotString) {
 
 TEST(AstFiltersComment, LineLeadingSlashSlash) {
     // `// comment` — every column is in a comment, including leading ws.
-    EXPECT_TRUE(af::match_is_in_comment("// hello", 0));
-    EXPECT_TRUE(af::match_is_in_comment("// hello", 4));
-    EXPECT_TRUE(af::match_is_in_comment("    // indented", 3));
-    EXPECT_TRUE(af::match_is_in_comment("    // indented", 8));
+    EXPECT_TRUE(af::match_is_in_comment("// hello", 0, LangId::Cpp));
+    EXPECT_TRUE(af::match_is_in_comment("// hello", 4, LangId::Cpp));
+    EXPECT_TRUE(af::match_is_in_comment("    // indented", 3, LangId::Cpp));
+    EXPECT_TRUE(af::match_is_in_comment("    // indented", 8, LangId::Cpp));
 }
 
 TEST(AstFiltersComment, LineLeadingHash) {
-    EXPECT_TRUE(af::match_is_in_comment("# python comment", 0));
-    EXPECT_TRUE(af::match_is_in_comment("# python comment", 9));
+    EXPECT_TRUE(af::match_is_in_comment("# python comment", 0, LangId::Python));
+    EXPECT_TRUE(af::match_is_in_comment("# python comment", 9, LangId::Python));
+}
+
+TEST(AstFiltersComment, HashIsLanguageGatedNotUngated) {
+    // The deleted `rest.front() == '#'` copy classified EVERY leading-#
+    // line as a comment. The shared predicate gates it: a C/C++
+    // preprocessor line is CODE at any column, while a Python `#` line is a
+    // comment at any column.
+    EXPECT_FALSE(af::match_is_in_comment("#include <vector>", 0, LangId::Cpp));
+    EXPECT_FALSE(af::match_is_in_comment("#include <vector>", 10,
+                                         LangId::Cpp));
+    EXPECT_FALSE(af::match_is_in_comment("#pragma once", 0, LangId::Cpp));
+    EXPECT_FALSE(af::match_is_in_comment("#endif", 0, LangId::C));
+    EXPECT_TRUE(af::match_is_in_comment("# note", 0, LangId::Python));
+    EXPECT_TRUE(af::match_is_in_comment("# note", 5, LangId::Python));
+}
+
+TEST(AstFiltersComment, InlineHashGatedOnCodeLine) {
+    // Trailing `# comment` on a code line: comment from the `#` opener for
+    // Python, but a mid-line `#` in C/C++ is not a comment opener.
+    EXPECT_TRUE(af::match_is_in_comment("code()  # tail", 9, LangId::Python));
+    EXPECT_FALSE(af::match_is_in_comment("code()  # tail", 4, LangId::Python));
+    EXPECT_FALSE(af::match_is_in_comment("a # b", 3, LangId::Cpp));
 }
 
 TEST(AstFiltersComment, InlineSlashSlashSplitsLine) {
@@ -2433,9 +2455,9 @@ TEST(AstFiltersComment, InlineSlashSlashSplitsLine) {
     std::string line = "int x = 1; // tail";
     // i(0) n(1) t(2) space(3) x(4) space(5) =(6) space(7) 1(8) ;(9)
     // space(10) /(11) /(12) space(13) t(14)
-    EXPECT_FALSE(af::match_is_in_comment(line, 4));   // 'x' in code
-    EXPECT_TRUE(af::match_is_in_comment(line, 11));   // first '/' of `//`
-    EXPECT_TRUE(af::match_is_in_comment(line, 14));   // 't' of tail
+    EXPECT_FALSE(af::match_is_in_comment(line, 4, LangId::Cpp));  // 'x' in code
+    EXPECT_TRUE(af::match_is_in_comment(line, 11, LangId::Cpp));  // first '/' of `//`
+    EXPECT_TRUE(af::match_is_in_comment(line, 14, LangId::Cpp));  // 't' of tail
 }
 
 TEST(AstFiltersComment, SlashSlashInsideStringNotComment) {
@@ -2445,7 +2467,7 @@ TEST(AstFiltersComment, SlashSlashInsideStringNotComment) {
     std::string line = "s = \"https://example.com\";";
     // s(0) space(1) =(2) space(3) "(4) h(5) t(6) t(7) p(8) s(9)
     // :(10) /(11) /(12) e(13)
-    EXPECT_FALSE(af::match_is_in_comment(line, 13));
+    EXPECT_FALSE(af::match_is_in_comment(line, 13, LangId::Cpp));
 }
 
 TEST(AstFiltersComment, BlockCommentCloserOnLine) {
@@ -2453,18 +2475,18 @@ TEST(AstFiltersComment, BlockCommentCloserOnLine) {
     // comment, columns after are code.
     std::string line = "body */ rest";
     // b(0) o(1) d(2) y(3) space(4) *(5) /(6) space(7) r(8) e(9) s(10) t(11)
-    EXPECT_TRUE(af::match_is_in_comment(line, 0));   // 'b' inside comment tail
-    EXPECT_TRUE(af::match_is_in_comment(line, 6));   // closing '/'
-    EXPECT_FALSE(af::match_is_in_comment(line, 8));  // 'r' of rest -> code
+    EXPECT_TRUE(af::match_is_in_comment(line, 0, LangId::Cpp));   // 'b' inside comment tail
+    EXPECT_TRUE(af::match_is_in_comment(line, 6, LangId::Cpp));   // closing '/'
+    EXPECT_FALSE(af::match_is_in_comment(line, 8, LangId::Cpp));  // 'r' of rest -> code
 }
 
 TEST(AstFiltersComment, BlockCommentOpenerWithoutCloser) {
     // `code /* tail` — every column from the `/*` opener is comment.
     std::string line = "x = 1 /* tail";
     // x(0) space(1) =(2) space(3) 1(4) space(5) /(6) *(7) space(8) t(9)
-    EXPECT_FALSE(af::match_is_in_comment(line, 0));
-    EXPECT_TRUE(af::match_is_in_comment(line, 6));
-    EXPECT_TRUE(af::match_is_in_comment(line, 9));
+    EXPECT_FALSE(af::match_is_in_comment(line, 0, LangId::Cpp));
+    EXPECT_TRUE(af::match_is_in_comment(line, 6, LangId::Cpp));
+    EXPECT_TRUE(af::match_is_in_comment(line, 9, LangId::Cpp));
 }
 
 TEST(AstFiltersComment, BlockCommentSameLineWithCode) {
@@ -2472,20 +2494,23 @@ TEST(AstFiltersComment, BlockCommentSameLineWithCode) {
     std::string line = "int x = /* note */ 42;";
     // ...space(7) /(8) *(9) space(10) n(11) o(12) t(13) e(14) space(15)
     // *(16) /(17) space(18) 4(19)
-    EXPECT_TRUE(af::match_is_in_comment(line, 11));   // 'n' of note
-    EXPECT_FALSE(af::match_is_in_comment(line, 19));  // '4' of 42
+    EXPECT_TRUE(af::match_is_in_comment(line, 11, LangId::Cpp));   // 'n' of note
+    EXPECT_FALSE(af::match_is_in_comment(line, 19, LangId::Cpp));  // '4' of 42
 }
 
 TEST(AstFiltersComment, UnknownColumnFallsBackToLineHeuristic) {
     // kColumnUnknown (-1) -> line-level classification: a leading `//` line
     // reports comment, a code line reports not-comment.
-    EXPECT_TRUE(af::match_is_in_comment("// only", -1));
-    EXPECT_FALSE(af::match_is_in_comment("int x = 1;", -1));
+    EXPECT_TRUE(af::match_is_in_comment("// only", -1, LangId::Cpp));
+    EXPECT_FALSE(af::match_is_in_comment("int x = 1;", -1, LangId::Cpp));
+    // Language still gates the fallback: `#include` with no column is code.
+    EXPECT_FALSE(af::match_is_in_comment("#include <vector>", -1, LangId::Cpp));
+    EXPECT_TRUE(af::match_is_in_comment("# note", -1, LangId::Python));
 }
 
 TEST(AstFiltersComment, EmptyOrWhitespaceLine) {
-    EXPECT_FALSE(af::match_is_in_comment("", 0));
-    EXPECT_FALSE(af::match_is_in_comment("   ", 0));
+    EXPECT_FALSE(af::match_is_in_comment("", 0, LangId::Cpp));
+    EXPECT_FALSE(af::match_is_in_comment("   ", 0, LangId::Cpp));
 }
 
 // -- ast_filters JSON transform tests ----------------------------------------
@@ -2567,6 +2592,40 @@ TEST(AstFiltersApplyCodeOnly, DropsCommentAndStringRows) {
     auto kept = af::apply_code_only(results);
     ASSERT_EQ(kept.size(), 1u);
     EXPECT_EQ(kept[0]["line"].get<int>(), 2);
+}
+
+TEST(AstFiltersApply, KeepsCppIncludeDropsPyHash) {
+    // The AST `--code-only` / `--comments-only` path must classify a
+    // leading `#` by LANGUAGE, not unconditionally. `match_is_in_comment`
+    // used to carry a third, language-UNGATED copy of the `rest.front() ==
+    // '#'` rule, so `apply_code_only` silently deleted every C/C++
+    // preprocessor row (2,345 such lines under src/ + include/ in this
+    // repo). Now it delegates whole-line classification to the shared
+    // predicate lci::line_is_comment_only with the row's language resolved
+    // from its path.
+    nlohmann::json cpp_inc;
+    cpp_inc["path"] = "/no/such/x.cpp";
+    cpp_inc["line"] = 1;
+    cpp_inc["column"] = 10;  // byte offset of `v` in `vector`
+    cpp_inc["context"] = {{"start_line", 1}, {"lines", {"#include <vector>"}}};
+    auto kept_cpp = af::apply_code_only(nlohmann::json::array({cpp_inc}));
+    EXPECT_EQ(kept_cpp.size(), 1u)
+        << "C/C++ #include must SURVIVE --code-only (it is code)";
+    auto comment_cpp = af::apply_comments_only(nlohmann::json::array({cpp_inc}));
+    EXPECT_EQ(comment_cpp.size(), 0u)
+        << "C/C++ #include must NOT be reported by --comments-only";
+
+    nlohmann::json py_note;
+    py_note["path"] = "/no/such/x.py";
+    py_note["line"] = 1;
+    py_note["column"] = 2;  // byte offset of `n` in `note`
+    py_note["context"] = {{"start_line", 1}, {"lines", {"# note"}}};
+    auto kept_py = af::apply_code_only(nlohmann::json::array({py_note}));
+    EXPECT_EQ(kept_py.size(), 0u)
+        << "Python '# note' must be DROPPED by --code-only (it is a comment)";
+    auto comment_py = af::apply_comments_only(nlohmann::json::array({py_note}));
+    EXPECT_EQ(comment_py.size(), 1u)
+        << "Python '# note' must be kept by --comments-only";
 }
 
 TEST(AstFiltersApply, EmptyInputProducesEmpty) {
@@ -2989,8 +3048,8 @@ TEST(ColumnContract, WordBoundaryAfterRegexRowIsNotOffByOne) {
 TEST(ColumnContract, AstCommentClassifierIsZeroBased) {
     // "int y; // c": the `//` opener is at byte offset 7 (0-based). The
     // classifier used to treat the column as 1-based and inspected offset 6.
-    EXPECT_TRUE(af::match_is_in_comment("int y; // c", 7));
-    EXPECT_FALSE(af::match_is_in_comment("int y; // c", 4));  // 'y'
+    EXPECT_TRUE(af::match_is_in_comment("int y; // c", 7, LangId::Cpp));
+    EXPECT_FALSE(af::match_is_in_comment("int y; // c", 4, LangId::Cpp));  // 'y'
 }
 
 TEST(ColumnContract, AstStringClassifierIsZeroBased) {
@@ -3004,7 +3063,7 @@ TEST(ColumnContract, UnknownColumnSentinelIsMinusOne) {
     // -1 means "position not recorded"; 0 is a real (first-byte) position.
     EXPECT_FALSE(af::match_is_in_string_literal("x = \"foo\";", -1));
     // Column 0 on a comment line: first byte of `// x` IS in a comment.
-    EXPECT_TRUE(af::match_is_in_comment("// x", 0));
+    EXPECT_TRUE(af::match_is_in_comment("// x", 0, LangId::Cpp));
 }
 
 // -- S12.4: meta-regex full-scan filters, flag effects, result paging --------

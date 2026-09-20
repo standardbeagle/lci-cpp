@@ -383,18 +383,6 @@ nlohmann::json files_with_matches_rows(const nlohmann::json& results) {
     return out;
 }
 
-/// Compatibility shim for the remaining out-of-scope caller
-/// (ast_filters.cpp's column-unknown fallback). The classification rule
-/// itself lives in ONE place: lci::line_is_comment_only (declared in
-/// include/lci/search/search_options.h), shared with the MCP path so the
-/// two cannot drift. LangId::Unknown is the honest choice here — the
-/// caller supplies no path, and an unknown language must classify as
-/// "not a comment" (the allow-list in the shared predicate is deliberate:
-/// a false negative keeps a comment line, a false positive deletes code).
-bool line_looks_like_comment(std::string_view line) {
-    return lci::line_is_comment_only(line, LangId::Unknown);
-}
-
 /// Reads the line text for `(path, line_no)` from the result's embedded
 /// `context` block when possible (avoids a disk read), falling back to the
 /// file system. The server returns a 1-line window by default, so the context

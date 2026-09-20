@@ -414,7 +414,9 @@ PartitionedReferences partition_references(
             in_docstring ||
             (!r.context.empty() &&
              (ast_filters::match_is_in_string_literal(r.context, r.column) ||
-              ast_filters::match_is_in_comment(r.context, r.column)));
+              ast_filters::match_is_in_comment(
+                  r.context, r.column,
+                  language_info_for_path(r.file_path).language)));
         (lexical ? out.lexical : out.code).push_back(r);
     }
     return out;

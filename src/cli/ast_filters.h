@@ -8,10 +8,11 @@
 // header just provides the per-row predicates and JSON transforms):
 //
 //   - `apply_comments_only(results)`  -> keep only matches inside comment
-//     tokens. Reuses `grep_filters::line_looks_like_comment()` so the
-//     classifier matches `--exclude-comments` bit-for-bit (a line that's
-//     dropped by `--exclude-comments` is exactly a line that's KEPT by
-//     `--comments-only`).
+//     tokens. Whole-line comment classification delegates to the shared
+//     predicate `lci::line_is_comment_only()` (include/lci/search/
+//     search_options.h), the same rule that backs `--exclude-comments` and
+//     the MCP `flags=nc` path, so a line dropped by `--exclude-comments` is
+//     exactly a line KEPT by `--comments-only`.
 //
 //   - `apply_strings_only(results)`   -> keep only matches whose match column
 //     falls inside a string literal on the source line. Uses a single-pass
@@ -46,6 +47,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <lci/language_map.h>
+
 namespace lci {
 namespace cli {
 namespace ast_filters {
@@ -74,19 +77,27 @@ namespace ast_filters {
 bool match_is_in_string_literal(std::string_view line, int column);
 
 /// Returns true if the byte at `column` on `line` falls inside a
-/// comment token. Same column contract as above (0-based; kColumnUnknown
-/// when not recorded). A line-leading `//`, `#`, or `/*` makes EVERY column on
-/// the line a comment (the whole line is comment body). When a single-line
-/// comment opens partway through the line (`code(); // tail`), only columns
-/// at or past the comment opener are considered comment bytes — so a match
-/// on `code()` is NOT a comment, but a match on `tail` IS. Same logic for
-/// `/*` openers when no `*/` closes on the same line.
+/// comment token, for a line written in `lang`. Same column contract as
+/// above (0-based; kColumnUnknown when not recorded). Whole-line
+/// classification delegates to the shared predicate
+/// `lci::line_is_comment_only(line, lang)` (include/lci/search/
+/// search_options.h): a line whose trimmed form opens with `//`, `/*`, or
+/// an (language-gated) `#`, or is exactly `*/`, makes EVERY column on the
+/// line a comment. In particular `#` is a comment opener only where the
+/// language says so (Python, Ruby; PHP except `#[` attributes) — so a
+/// C/C++ preprocessor line (`#include`, `#pragma`, ...) is CODE and is
+/// never classified as a comment. When a single-line comment opens partway
+/// through the line (`code(); // tail`), only columns at or past the
+/// comment opener are considered comment bytes — so a match on `code()` is
+/// NOT a comment, but a match on `tail` IS. Same logic for `/*` openers
+/// when no `*/` closes on the same line.
 ///
 /// `*/` ANYWHERE on the line marks every column up to and including the
 /// `*/` as comment (the line crossed a block-comment closer, so its head is
-/// the comment tail). Mirrors the existing `line_looks_like_comment()`
-/// heuristic from grep_filters.h but with column-level granularity.
-bool match_is_in_comment(std::string_view line, int column);
+/// the comment tail). Delegates the whole-line rule to the one shared
+/// predicate instead of carrying a private copy, so the CLI AST filter, the
+/// CLI grep filter, and the MCP search filter cannot drift apart again.
+bool match_is_in_comment(std::string_view line, int column, LangId lang);
 
 /// Filters `results` to keep only rows whose match falls inside a comment
 /// token. Reads the match line via the embedded `context` block (or disk

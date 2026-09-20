@@ -6,6 +6,8 @@
 #include "grep_filters.h"
 
 #include <lci/cli/column.h>
+#include <lci/language_map.h>
+#include <lci/search/search_options.h>
 
 #include <algorithm>
 #include <string>
@@ -35,11 +37,14 @@ namespace ast_filters {
 //     out (returns false for the rest of the line) once a `//` or `#`
 //     opens a single-line comment.
 //
-//   - `match_is_in_comment(line, column)`: column-aware version of the
-//     `line_looks_like_comment` heuristic. A line-leading `//`/`#`/`/*`
-//     makes every column a comment; a tail `// ...` makes columns at or
-//     past the opener comment bytes; `*/` anywhere makes columns up to
-//     and including the closer comment bytes.
+//   - `match_is_in_comment(line, column, lang)`: column-aware classifier
+//     that delegates the WHOLE-LINE rule to the shared predicate
+//     `lci::line_is_comment_only(line, lang)` — no private copy of the
+//     marker test survives here. A comment-only line makes every column a
+//     comment (and, because the shared predicate gates `#` by language, a
+//     C/C++ preprocessor line is NOT a comment-only line); a tail `// ...`
+//     makes columns at or past the opener comment bytes; `*/` anywhere
+//     makes columns up to and including the closer comment bytes.
 //
 // Both helpers follow the one column contract (lci/cli/column.h):
 // `column` is a 0-based byte offset into `line`; kColumnUnknown (-1)
@@ -49,7 +54,7 @@ namespace ast_filters {
 bool match_is_in_string_literal(std::string_view line, int column) {
     // kColumnUnknown: match position not recorded — report false and let
     // callers fall back to line-level heuristics (e.g. tag the whole row
-    // as code or comment based on `line_looks_like_comment`).
+    // as code or comment based on `lci::line_is_comment_only`).
     if (column < 0) return false;
     size_t target = static_cast<size_t>(column);
     if (target >= line.size()) return false;
@@ -221,32 +226,24 @@ bool match_is_in_string_literal(std::string_view line, int column) {
     return false;
 }
 
-bool match_is_in_comment(std::string_view line, int column) {
-    // kColumnUnknown means "no column recorded" — fall back to line-level
-    // heuristic (whole-line classifier).
-    if (column < 0) return line_looks_like_comment(line);
+bool match_is_in_comment(std::string_view line, int column, LangId lang) {
+    // kColumnUnknown means "no column recorded" — fall back to the shared
+    // whole-line classifier (language-gated).
+    if (column < 0) return line_is_comment_only(line, lang);
 
     size_t target = static_cast<size_t>(column);
     if (target >= line.size()) return false;
 
-    // Trim leading whitespace to mirror line_looks_like_comment(): a line
-    // whose first non-whitespace token is `//`, `#`, or `/*` is a comment
-    // line top-to-bottom. The trim excludes the leading whitespace from
-    // the classification — a match column that falls inside the leading
-    // whitespace of a `// foo` line is still considered "in a comment"
-    // because the column is on a comment-only line.
-    size_t first_non_ws = 0;
-    while (first_non_ws < line.size() &&
-           std::isspace(static_cast<unsigned char>(line[first_non_ws]))) {
-        ++first_non_ws;
-    }
-    if (first_non_ws < line.size()) {
-        std::string_view rest = line.substr(first_non_ws);
-        if (rest.substr(0, 2) == "//" || rest.front() == '#' ||
-            rest.substr(0, 2) == "/*") {
-            return true;
-        }
-    }
+    // WHOLE-LINE rule now delegates to the one shared predicate
+    // lci::line_is_comment_only: a line whose trimmed form opens with `//`,
+    // `/*`, an (language-gated) `#`, or is exactly `*/` is comment body
+    // top-to-bottom, so every column on it is a comment. The former inline
+    // `rest.front() == '#'` copy of that test is DELETED — ungated, it
+    // classified every C/C++ preprocessor line (#include/#pragma/#endif/…)
+    // as a comment and `apply_code_only` dropped all 2,345 such lines under
+    // src/ + include/ in this repo. A comment-only line never reaches the
+    // column scanner below.
+    if (line_is_comment_only(line, lang)) return true;
 
     // Scan for inline single-line or block comment openers and a `*/`
     // closer. We respect string literals so a `//` inside `"..."` doesn't
@@ -258,13 +255,23 @@ bool match_is_in_comment(std::string_view line, int column) {
         char c = line[i];
         switch (state) {
             case State::Code: {
-                // Inline `// ...` or `# ...`: every column from `i` to
-                // end-of-line is comment.
+                // Inline `// ...`: every column from `i` to end-of-line is
+                // comment.
                 if (c == '/' && i + 1 < line.size() && line[i + 1] == '/') {
                     return target >= i;
                 }
+                // Inline `# ...` opens a comment ONLY in a language whose
+                // comments start with `#`. We ask the shared predicate on
+                // the tail rather than repeating the allow-list here (no
+                // fourth copy): `#include` in C/C++ is not comment-only, so
+                // its `#` is ordinary code and we skip it; `# note` in
+                // Python is, so the columns from `i` are comment.
                 if (c == '#') {
-                    return target >= i;
+                    if (line_is_comment_only(line.substr(i), lang)) {
+                        return target >= i;
+                    }
+                    ++i;
+                    continue;
                 }
                 // `/* ...`: comment starts at `i`. We continue scanning to
                 // find a same-line `*/`; until we find it (or hit EOL),
@@ -352,7 +359,8 @@ nlohmann::json apply_comments_only(nlohmann::json results) {
         }
         std::string text = read_match_line(r, path, line_no);
         int column = r.value("column", kColumnUnknown);
-        if (!match_is_in_comment(text, column)) continue;
+        const LangId lang = language_info_for_path(path).language;
+        if (!match_is_in_comment(text, column, lang)) continue;
         out.push_back(std::move(r));
     }
     return out;
@@ -393,7 +401,8 @@ nlohmann::json apply_code_only(nlohmann::json results) {
         }
         std::string text = read_match_line(r, path, line_no);
         int column = r.value("column", kColumnUnknown);
-        if (match_is_in_comment(text, column)) continue;
+        const LangId lang = language_info_for_path(path).language;
+        if (match_is_in_comment(text, column, lang)) continue;
         if (match_is_in_string_literal(text, column)) continue;
         out.push_back(std::move(r));
     }
