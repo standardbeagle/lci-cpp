@@ -415,6 +415,25 @@ void IndexServer::handle_reindex(const httplib::Request& req,
         // window and keeps the previously published generation readable
         // for the whole run; a pre-clear publishes empty snapshots up
         // front (the caller-audit defect from karpathy-principles rule 3).
+        //
+        // Two consequences of dropping the pre-clear, both intentional:
+        //   * file_content_store_ is left intact. index_directory() never
+        //     clears it either (it only retains survivors after the new
+        //     generation is live), because queries resolving FileIDs
+        //     against the still-published old generation need content
+        //     for the whole run. A pre-clear would have emptied it and
+        //     made the old generation unreadable — exactly the blackout
+        //     this removes.
+        //   * processed_files_ / total_files_ are NOT reset here. S1 moved
+        //     them off index_directory()'s entry onto the commit path
+        //     (master_index.cpp stores them from pipeline progress), so the
+        //     caller's clear() was the only thing zeroing them on this
+        //     path. Deliberate choice: /status reports the PRIOR
+        //     generation's counts for the run's duration, consistent with
+        //     S1's intent that readers see the old generation coherently
+        //     until the single commit swaps it; the new counts land
+        //     atomically with that commit.
+
         const bool indexed = indexer_->index_directory(root_path);
 
         // Bail out (without clearing indexing_active_) if a successor

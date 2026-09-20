@@ -1,12 +1,14 @@
 #include <gtest/gtest.h>
 
 #include <lci/config.h>
+#include <lci/core/reference_tracker.h>
 #include <lci/indexing/master_index.h>
 #include <lci/search/search_engine.h>
 #include <lci/server/server.h>
 
 #include <unistd.h>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <set>
@@ -413,6 +415,82 @@ TEST_F(ServerLifecycleTest, ConcurrentRequestsDuringOperation) {
 
     EXPECT_EQ(success_count.load(), kNumThreads * kRequestsPerThread);
     EXPECT_EQ(failure_count.load(), 0);
+}
+
+// -- Lifecycle: /reindex keeps the prior generation readable ------------------
+//
+// handle_reindex must NOT clear() the index before index_directory(): a
+// pre-clear publishes an empty generation up front that stays live for the
+// whole run (def/refs/get_context blackout) and bumps the snapshot publish
+// count by two. index_directory() opens its own bulk window, keeps the prior
+// generation readable until it commits exactly one new snapshot, and never
+// touches the caller's clear(). Regression guard for the S1 fix being undone
+// one level up on the HTTP path (01M1PA4DNHVBWX1749E3KQJA5N).
+TEST_F(ServerLifecycleTest, ReindexKeepsPriorGenerationReadableAndPublishesOnce) {
+    // post_parse_hook_ parks the reindex thread between scan_and_parse (which
+    // writes nothing into the live indexes) and the commit path. That makes
+    // the "while it is in flight" window deterministic instead of racing a
+    // microsecond-long index of a three-file corpus.
+    std::atomic<bool> parked{false};
+    std::atomic<bool> release{false};
+    indexer_->set_post_parse_hook([&] {
+        parked.store(true, std::memory_order_release);
+        while (!release.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+
+    const uint64_t publish_before = indexer_->snapshot_publish_count();
+
+    auto ack = post("/reindex", nlohmann::json::object());
+    ASSERT_TRUE(ack.contains("success")) << ack.dump();
+    EXPECT_TRUE(ack["success"].get<bool>());
+
+    const auto park_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (!parked.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < park_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_TRUE(parked.load(std::memory_order_acquire))
+        << "reindex never reached the post-parse hook";
+
+    // The run is parked before commit: the prior generation must still
+    // resolve. Under the old pre-clear this would be an empty index.
+    auto defs = indexer_->search_definitions("Calculator");
+    auto rt_snap = indexer_->ref_tracker().pin();
+    auto by_name = rt_snap->find_symbols_by_name("Calculator");
+    EXPECT_FALSE(defs.empty())
+        << "prior-generation definition vanished mid-reindex (pre-clear bug)";
+    EXPECT_FALSE(by_name.empty())
+        << "prior-generation symbol vanished mid-reindex (pre-clear bug)";
+    EXPECT_EQ(indexer_->file_count(), 3)
+        << "old generation's file set must stay published during the run";
+
+    // Release the run to commit its single new snapshot. Do NOT touch the
+    // hook here: the worker is still returning from the std::function call,
+    // and reassigning it races that read. index_directory() fires it once
+    // per run, and this test issues exactly one /reindex, so leaving it set
+    // is harmless.
+    release.store(true, std::memory_order_release);
+
+    const auto commit_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (indexer_->snapshot_publish_count() == publish_before &&
+           std::chrono::steady_clock::now() < commit_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    // Exactly one snapshot published across the whole /reindex. A pre-clear
+    // would publish an extra empty generation, making the delta two.
+    EXPECT_EQ(indexer_->snapshot_publish_count(), publish_before + 1)
+        << "an empty snapshot was published before the commit (pre-clear bug)";
+
+    // Final state healthy: the symbol still resolves and the server is back.
+    EXPECT_FALSE(indexer_->search_definitions("Calculator").empty());
+    auto status = post("/status");
+    ASSERT_TRUE(status.contains("ready"));
+    EXPECT_TRUE(status["ready"].get<bool>());
 }
 
 // -- Lifecycle: shutdown cleanly cancels in-flight indexing -------------------
