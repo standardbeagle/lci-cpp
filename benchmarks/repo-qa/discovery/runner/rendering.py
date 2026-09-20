@@ -20,9 +20,23 @@ Two rules keep this from becoming a silent adapter:
 location arrives as `{FileID, Line, Column}` with no path (lci task
 01M1VR4TBD7GXAXWBQXV2MCR49). The harness does not work around it; it names it,
 so the sweep reports a broken cell rather than an attributable-looking zero.
+
+`truncated_response` is the reason reserved for a payload that says so itself:
+`search` hard-caps at 100 hits (`src/mcp/handlers_search.cpp` clamps `max` to
+100) and flags it with `truncated: true` + `total_matches`; the `callers` report
+emits `truncated` too. Rendering the capped subset as if it were the whole answer
+records a recall shortfall the harness KNEW was a product cap, and the baseline
+grep is uncapped -- so the two arms go asymmetric exactly where parity was
+claimed. Raising the reason routes it through the executor's existing broken-cell
+path, so it reaches the report as a named outcome, never as a scored loss. The
+harness does not page or re-query to dodge the cap at tool level: one call is
+one call.
 """
 
 import json
+
+
+REASON_TRUNCATED = "truncated_response"
 
 
 class UncitableToolResponse(ValueError):
@@ -85,6 +99,21 @@ def _require_path(record, reason_detail):
     return path
 
 
+def _reject_truncated(payload, tool, rendered):
+    """A payload that flags `truncated` is a cap, not the arm's recall: name it."""
+    if not payload.get("truncated"):
+        return
+    reported = next((payload[k] for k in
+                     ("total_matches", "total_call_sites", "total_callers")
+                     if payload.get(k) is not None), "unknown")
+    raise UncitableToolResponse(
+        REASON_TRUNCATED,
+        "%s reported a truncated response: total=%s but only %d location(s) "
+        "rendered -- the tool caps results, so this is a cap, not %s's recall"
+        % (tool, reported, rendered, tool),
+    )
+
+
 def _render_callers(payload, task_shape):
     """`callers`: call sites for the call-site shape, definitions otherwise."""
     lines = []
@@ -103,6 +132,7 @@ def _render_callers(payload, task_shape):
         for definition in payload.get("definitions", []):
             path = _require_path(definition, "definitions entry without a path")
             lines.append(_cite(path, definition["line"]))
+    _reject_truncated(payload, "callers", len(lines))
     return lines
 
 
@@ -138,6 +168,7 @@ def _render_search(payload, task_shape):
         path = _require_path(result, "search result without a path")
         for hit in result.get("hits", []):
             lines.append(_cite(path, hit["line"]))
+    _reject_truncated(payload, "search", len(lines))
     return lines
 
 

@@ -564,6 +564,30 @@ _SEARCH_PAYLOAD = json.dumps({
                           {"line": 594, "match": "IsDev", "sym": "IsDev"}]}],
 })
 
+# A capped search: `search` clamps max to 100 (handlers_search.cpp clamp_int), so
+# a pattern with more matches arrives with exactly 100 hits and the payload
+# admits it. Verified live against pocketbase d438c6a: `search BindFunc max=200`
+# -> 100 hits, truncated=true, total_matches=146. The renderer must not hand
+# these 100 to the grader as if the recall were complete.
+def _capped_search_payload(n_hits, total_matches, truncated):
+    payload = {
+        "results": [{"file": "apis/record.go",
+                     "hits": [{"line": 10 + i, "match": "BindFunc"}
+                              for i in range(n_hits)]}],
+        "total_matches": total_matches,
+    }
+    if truncated is not None:
+        payload["truncated"] = truncated
+    return json.dumps(payload)
+
+
+def _truncated_callers_payload():
+    return json.dumps({
+        "callers": [{"call_count": 1, "call_lines": [616], "caller": "A",
+                     "file_path": "a.go", "line": 94}],
+        "total_call_sites": 409, "total_callers": 300, "truncated": True,
+    })
+
 
 class ToolAnswerRenderingTest(unittest.TestCase):
     def _cited(self, text):
@@ -609,6 +633,33 @@ class ToolAnswerRenderingTest(unittest.TestCase):
             rendering.render_tool_answer(
                 "get_context", "implementations_lookup", payload)
         self.assertEqual(ctx.exception.reason, "uncitable_location")
+
+    def test_truncated_search_is_a_named_outcome_not_a_silent_recall_loss(self):
+        # A capped payload says truncated=true; rendering its 100 hits as if the
+        # answer were complete records a recall shortfall the harness KNEW was a
+        # product cap (search clamps max to 100) and reads it downstream as an
+        # lci capability loss. It must fail loud with a named reason carrying
+        # total_matches vs the rendered count, so the executor's existing
+        # broken-cell path surfaces truncated_response, not a bogus 0.x recall.
+        with self.assertRaises(rendering.UncitableToolResponse) as ctx:
+            rendering.render_tool_answer(
+                "search", "literal_string_search", _capped_search_payload(100, 146, True))
+        self.assertEqual(ctx.exception.reason, "truncated_response")
+        self.assertIn("146", ctx.exception.detail)
+
+    def test_uncapped_search_renders_both_directions(self):
+        # Discrimination test the other way (oracle-independence rule 2): the
+        # SAME payload with `truncated` absent must render all 100 locations --
+        # a blanket downgrade would let the guard decay into never-searching.
+        text = rendering.render_tool_answer(
+            "search", "literal_string_search", _capped_search_payload(100, 146, None))
+        self.assertEqual(len(self._cited(text)), 100)
+
+    def test_truncated_callers_payload_is_a_named_outcome(self):
+        with self.assertRaises(rendering.UncitableToolResponse) as ctx:
+            rendering.render_tool_answer(
+                "callers", "exhaustive_callers", _truncated_callers_payload())
+        self.assertEqual(ctx.exception.reason, "truncated_response")
 
     def test_non_json_payload_fails_loud(self):
         with self.assertRaises(rendering.UncitableToolResponse):
