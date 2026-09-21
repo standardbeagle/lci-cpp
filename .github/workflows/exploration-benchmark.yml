@@ -1,16 +1,17 @@
 name: exploration-benchmark
 
-# INFORMATIONAL ONLY. Stage-1 exploration paired-baseline artifact validator and
-# report regenerator. This workflow is **never** a required status check and is
-# triggered only by hand or on a schedule — it does not run on `pull_request` or
-# block any merge. Its job is to prove the committed stage-1 artifacts
-# (`results/exploration-stage1/*`) stay self-consistent and reproducible, and to
-# surface the LCI-vs-baseline numbers as a report — explicitly WITHOUT turning any
-# performance delta into a merge gate.
+# INFORMATIONAL ONLY. Stage-1 exploration and Stage-2 claim-validation
+# paired-baseline artifact validators and report regenerators. This workflow is
+# **never** a required status check and is triggered only by hand or on a schedule
+# — it does not run on `pull_request` or block any merge. Its job is to prove the
+# committed stage-1 (`results/exploration-stage1/*`) and stage-2
+# (`results/exploration-stage2/*`) artifacts stay self-consistent and
+# reproducible, and to surface the LCI-vs-baseline numbers as a report —
+# explicitly WITHOUT turning any performance delta into a merge gate.
 #
-# It performs NO paid provider runs: it scores the committed run ledger only. It
-# never invokes `exploration_runner.py run`. Losing or failing this job must have
-# zero effect on merging.
+# It performs NO paid provider runs: it scores the committed run ledgers only.
+# It never invokes `exploration_runner.py run`/`claim-run`. Losing or failing this
+# job must have zero effect on merging.
 
 on:
   workflow_dispatch:
@@ -141,6 +142,129 @@ jobs:
           lines.append(f"`deltas` present: {bool(agg.get('deltas'))} "
                        f"(an empty deltas map = no measured LCI-vs-baseline effect; "
                        f"this job reports it, it does NOT gate a merge on it).")
+          print("\n".join(lines))
+          if os.environ.get("VERBOSE") == "true":
+              print("\n```json\n" + json.dumps(agg, indent=2, sort_keys=True) + "\n```")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write("\n".join(lines) + "\n")
+          PY
+
+  validate-stage2-claim-artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Informational: a red run is an observation, never a blocker. It does not
+    # establish or enforce any performance threshold on the LCI-vs-baseline delta.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: benchmarks/repo-qa
+    env:
+        RUN_CONFIG: exploration/run-configs/stage2-baseline.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (validator + hermetic scorer suite)
+        run: python -m pip install --disable-pip-version-check jsonschema pytest
+
+      - name: Structural task-bank validation (hermetic; live layer skips without corpora)
+        run: python scripts/validate_exploration_tasks.py
+
+      - name: Hermetic claim pipeline (fake agent; no provider)
+        run: >-
+          python -m pytest
+          tests/test_claim_validation_scorer.py
+          tests/test_claim_baseline_ledger.py
+          -q
+
+      - name: Regenerate the committed stage-2 ledger + scores + aggregate (deterministic)
+        run: |
+          python scripts/claim_baseline_ledger.py \
+            --config "$RUN_CONFIG" \
+            --tasks-dir exploration/tasks \
+            --records "$RUNNER_TEMP/regen/run-records.jsonl" \
+            --out-dir "$RUNNER_TEMP/regen"
+          diff "$RUNNER_TEMP/regen/run-records.jsonl" results/exploration-stage2/run-records.jsonl
+          diff "$RUNNER_TEMP/regen/aggregate.json" results/exploration-stage2/aggregate.json
+
+      - name: Re-derive scores + aggregate from the committed ledger (no LCI-vs-baseline gate)
+        run: |
+          python scripts/score_claim_validation.py \
+            --tasks-dir exploration/tasks \
+            --records results/exploration-stage2/run-records.jsonl \
+            --out-dir "$RUNNER_TEMP/rescore"
+          diff "$RUNNER_TEMP/rescore/aggregate.json" results/exploration-stage2/aggregate.json
+
+      - name: Validate cell accounting — every (task, arm, rep) present, none omitted
+        run: |
+          python - <<'PY'
+          import json, os
+          cfg = json.load(open(os.environ["RUN_CONFIG"]))
+          tasks = [json.load(open("exploration/tasks/" + n))
+                   for n in sorted(os.listdir("exploration/tasks")) if n.endswith(".json")]
+          recs = [json.loads(l) for l in open("results/exploration-stage2/run-records.jsonl") if l.strip()]
+          reps = cfg["repetitions"]["per_cell"]
+          mode, schema = "claim-validation", "claim_validation_answer_v1"
+          expected = {f"{t['id']}::{arm}::seed-{t['manifest_ref']['seed']}"
+                      f"::mode-{mode}::schema-{schema}"
+                      for t in tasks for arm in ("treatment", "baseline")}
+          got = {r["run_key"] for r in recs}
+          assert not (expected - got), f"OMITTED cells (forbidden): {sorted(expected - got)}"
+          assert not (got - expected), f"cells not in the planned grid: {sorted(got - expected)}"
+          assert len(recs) == len(tasks) * 2 * reps, "cell count != tasks x arms x reps"
+          bad = [r["run_key"] for r in recs if r.get("status") not in
+                 ("answered","timeout","provider_error","tool_violation","config_error","malformed_output","not_executed")]
+          assert not bad, f"cells with a non-machine-readable status: {bad}"
+          print(f"cell accounting OK: {len(recs)} cells, 0 omitted, statuses all machine-readable")
+          PY
+
+      - name: Validate run-config provenance against the committed registry + arms
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          cfg = json.load(open(os.environ["RUN_CONFIG"]))
+          corp = {c["id"]: c for c in json.load(open("exploration/corpora.json"))["corpora"]}
+          for entry in cfg["corpora"]:
+              cid = entry["corpus_id"]; ref = corp[cid]
+              assert entry["source_commit"] == ref["pinned_commit"], f"source_commit drift {cid}"
+              assert entry["reference_tree_hash"] == ref["reference_tree_hash"][f"seed-{entry['seed']}"], f"tree-hash drift {cid}"
+          sys.path.insert(0, "exploration")
+          from runner import toolsets
+          assert cfg["arms"]["treatment"]["allowlist"] == list(toolsets.arm_allowlist("treatment")), "treatment allowlist drift"
+          assert cfg["arms"]["baseline"]["allowlist"] == list(toolsets.arm_allowlist("baseline")), "baseline allowlist drift"
+          assert cfg["provenance"]["task_bank"]["task_count"] == len([n for n in os.listdir("exploration/tasks") if n.endswith(".json")]), "task_count drift"
+          agg = json.load(open("results/exploration-stage2/aggregate.json"))
+          assert agg["compatibility"]["task_bank_digest"] == cfg["task_bank_digest"], "task-bank digest drift"
+          assert agg["compatibility"]["mode"] == "claim-validation"
+          assert cfg["approval"]["status"] == "not_granted" or cfg["execution"]["executed"], \
+              "a granted/missing config must not report a not-executed ledger"
+          print("provenance + allowlists + digest consistent with corpora.json, runner.toolsets, and the aggregate")
+          PY
+
+      - name: Informational summary
+        env:
+          VERBOSE: ${{ github.event.inputs.verbose }}
+        run: |
+          python - <<'PY'
+          import json, os
+          agg = json.load(open("results/exploration-stage2/aggregate.json"))
+          arms = agg["arms"]; pair = agg["pairing"]
+          lines = ["## Stage-2 claim validation — informational report", ""]
+          lines.append("| arm | cells | answered | verdict_acc | grounded_acc | citation F1 | paired |")
+          lines.append("|---|---|---|---|---|---|---|")
+          for name in ("treatment", "baseline"):
+              a = arms.get(name, {})
+              cit = a.get("citation", {}) or {}
+              lines.append(f"| {name} | {a.get('count')} | {a.get('answered')} | "
+                           f"{a.get('verdict_accuracy')} | {a.get('grounded_accuracy')} | "
+                           f"{cit.get('f1')} | {pair['paired_count']} |")
+          lines.append("")
+          lines.append(f"`deltas` present: {bool(agg.get('deltas'))} "
+                       f"(an empty deltas map = no measured LCI-vs-baseline verdict/grounding "
+                       f"effect; this job reports it, it does NOT gate a merge on it).")
           print("\n".join(lines))
           if os.environ.get("VERBOSE") == "true":
               print("\n```json\n" + json.dumps(agg, indent=2, sort_keys=True) + "\n```")

@@ -1,0 +1,1491 @@
+{
+  "arms": {
+    "baseline": {
+      "answered": 0,
+      "categories": {
+        "dead-code": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 5,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 5
+        },
+        "false-premise": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 5,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 5
+        },
+        "misleading-doc": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 5,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 5
+        },
+        "true": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 5,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 5
+        },
+        "unsupported": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 5,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 5
+        },
+        "wrong-layer": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 5,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 5
+        }
+      },
+      "citation": {
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "count": 30,
+      "false_premise_rate": 0.0,
+      "grounded_accuracy": 0.0,
+      "tool_calls": {
+        "max": 0,
+        "mean": 0,
+        "median": 0.0,
+        "min": 0,
+        "n": 30,
+        "total": 0
+      },
+      "unsupported_rate": 0.0,
+      "verdict_accuracy": 0.0
+    },
+    "treatment": {
+      "answered": 0,
+      "categories": {
+        "dead-code": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 5,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 5
+        },
+        "false-premise": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 5,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 5
+        },
+        "misleading-doc": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 5,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 5
+        },
+        "true": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 5,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 5
+        },
+        "unsupported": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 5,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 5
+        },
+        "wrong-layer": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 5,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 5
+        }
+      },
+      "citation": {
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "count": 30,
+      "false_premise_rate": 0.0,
+      "grounded_accuracy": 0.0,
+      "tool_calls": {
+        "max": 0,
+        "mean": 0,
+        "median": 0.0,
+        "min": 0,
+        "n": 30,
+        "total": 0
+      },
+      "unsupported_rate": 0.0,
+      "verdict_accuracy": 0.0
+    }
+  },
+  "attempts": [
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-build-manifest-reading::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-build-manifest-reading::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-client-rewrite-resolution::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-client-rewrite-resolution::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-dynamic-segment-detection::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-dynamic-segment-detection::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-internal-param-stripping::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-internal-param-stripping::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-manifest-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-manifest-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-page-path-canonicalization::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-page-path-canonicalization::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-path-prefix-normalization::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-path-prefix-normalization::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-redirect-status-codes::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-redirect-status-codes::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-rewrite-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-rewrite-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-rewrite-destination-build::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-rewrite-destination-build::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-server-render-abstractions::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-server-render-abstractions::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-buffered-log-writes::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-buffered-log-writes::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-email-delivery-contract::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-email-delivery-contract::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-expression-string-scanner::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-expression-string-scanner::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-generic-slice-membership::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-generic-slice-membership::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-log-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-log-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-password-login-route::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-password-login-route::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-realtime-fanout-hub::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-realtime-fanout-hub::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-record-query-expression::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-record-query-expression::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-signed-token-mint-verify::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "pb-signed-token-mint-verify::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-binned-tree-ensemble::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-binned-tree-ensemble::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-column-gap-fill::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-column-gap-fill::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-conditional-method::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-conditional-method::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-distance-embedding::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-distance-embedding::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-estimator-copy::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-estimator-copy::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-grouping-quality-score::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-grouping-quality-score::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-imputer-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-imputer-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-neighbour-gap-fill::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-neighbour-gap-fill::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-remote-corpus-fetch::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-remote-corpus-fetch::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-staged-tree-ensemble::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "skl-staged-tree-ensemble::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    }
+  ],
+  "compatibility": {
+    "forge_manifest": "1",
+    "mode": "claim-validation",
+    "model": "claude-sonnet-4-5",
+    "run_settings": {
+      "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+      "timeout_seconds": 600
+    },
+    "schema_version": "claim_validation_answer_v1",
+    "scoring_settings": {
+      "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+      "timeout_seconds": 600
+    },
+    "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6"
+  },
+  "deltas": {},
+  "pairing": {
+    "paired_count": 0,
+    "unpaired": [
+      {
+        "arm": "baseline",
+        "run_key": "nx-build-manifest-reading::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-build-manifest-reading"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-build-manifest-reading::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-build-manifest-reading"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "nx-client-rewrite-resolution::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-client-rewrite-resolution"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-client-rewrite-resolution::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-client-rewrite-resolution"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "nx-dynamic-segment-detection::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-dynamic-segment-detection"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-dynamic-segment-detection::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-dynamic-segment-detection"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "nx-internal-param-stripping::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-internal-param-stripping"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-internal-param-stripping::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-internal-param-stripping"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "nx-manifest-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-manifest-claim-boundary"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-manifest-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-manifest-claim-boundary"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "nx-page-path-canonicalization::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-page-path-canonicalization"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-page-path-canonicalization::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-page-path-canonicalization"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "nx-path-prefix-normalization::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-path-prefix-normalization"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-path-prefix-normalization::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-path-prefix-normalization"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "nx-redirect-status-codes::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-redirect-status-codes"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-redirect-status-codes::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-redirect-status-codes"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "nx-rewrite-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-rewrite-claim-boundary"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-rewrite-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-rewrite-claim-boundary"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "nx-rewrite-destination-build::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-rewrite-destination-build"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-rewrite-destination-build::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-rewrite-destination-build"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "nx-server-render-abstractions::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-server-render-abstractions"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-server-render-abstractions::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "nx-server-render-abstractions"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "pb-buffered-log-writes::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-buffered-log-writes"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "pb-buffered-log-writes::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-buffered-log-writes"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "pb-email-delivery-contract::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-email-delivery-contract"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "pb-email-delivery-contract::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-email-delivery-contract"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "pb-expression-string-scanner::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-expression-string-scanner"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "pb-expression-string-scanner::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-expression-string-scanner"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "pb-generic-slice-membership::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-generic-slice-membership"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "pb-generic-slice-membership::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-generic-slice-membership"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "pb-log-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-log-claim-boundary"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "pb-log-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-log-claim-boundary"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "pb-password-login-route::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-password-login-route"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "pb-password-login-route::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-password-login-route"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "pb-realtime-fanout-hub::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-realtime-fanout-hub"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "pb-realtime-fanout-hub::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-realtime-fanout-hub"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "pb-record-query-expression::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-record-query-expression"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "pb-record-query-expression::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-record-query-expression"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "pb-signed-token-mint-verify::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-signed-token-mint-verify"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "pb-signed-token-mint-verify::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "pb-signed-token-mint-verify"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "skl-binned-tree-ensemble::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-binned-tree-ensemble"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "skl-binned-tree-ensemble::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-binned-tree-ensemble"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "skl-column-gap-fill::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-column-gap-fill"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "skl-column-gap-fill::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-column-gap-fill"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "skl-conditional-method::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-conditional-method"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "skl-conditional-method::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-conditional-method"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "skl-distance-embedding::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-distance-embedding"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "skl-distance-embedding::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-distance-embedding"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "skl-estimator-copy::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-estimator-copy"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "skl-estimator-copy::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-estimator-copy"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "skl-grouping-quality-score::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-grouping-quality-score"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "skl-grouping-quality-score::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-grouping-quality-score"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "skl-imputer-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-imputer-claim-boundary"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "skl-imputer-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-imputer-claim-boundary"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "skl-neighbour-gap-fill::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-neighbour-gap-fill"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "skl-neighbour-gap-fill::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-neighbour-gap-fill"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "skl-remote-corpus-fetch::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-remote-corpus-fetch"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "skl-remote-corpus-fetch::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-remote-corpus-fetch"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "skl-staged-tree-ensemble::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-staged-tree-ensemble"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "skl-staged-tree-ensemble::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "not_executed",
+        "task_id": "skl-staged-tree-ensemble"
+      }
+    ],
+    "unpaired_count": 60
+  },
+  "schema": "claim_validation_aggregate_v1"
+}

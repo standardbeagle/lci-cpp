@@ -1,0 +1,211 @@
+{
+  "schema": "claim_validation_run_config_v1",
+  "config_id": "stage2-baseline",
+  "stage": 2,
+  "purpose": "Stage-2 informational paired claim-validation baseline: does LCI's answer hold up? Both arms adjudicate the same structured claims over the pinned corpora and are scored against the independent, schema-versioned claim oracle. Observations only; not a merge gate.",
+  "status": "pinned_not_executed",
+  "provenance": {
+    "harness": {
+      "runner_module": "benchmarks/repo-qa/exploration/runner",
+      "adapter": "runner.adapter.ClaudeCliAdapter",
+      "orchestrator": "benchmarks/repo-qa/scripts/exploration_runner.py",
+      "ledger_generator": "benchmarks/repo-qa/scripts/claim_baseline_ledger.py",
+      "runner_mode": "claim-validation",
+      "answer_schema_version": "claim_validation_answer_v1",
+      "smoke_command": "exploration_runner.py claim-smoke (one claim, both arms)",
+      "grid_command": "exploration_runner.py claim-run (full bank, both arms)",
+      "isolation_gate": "runner.gate.enforce (tool_not_allowed / path_escape / sealed_path)",
+      "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+      "claim_answer_instruction": "Return one JSON object {verdict: true|false|unsupported, evidence: [{path, line}], rationale}; cite only files in the checkout."
+    },
+    "scorer": {
+      "module": "benchmarks/repo-qa/exploration/scoring/claim_validation.py",
+      "entrypoint": "benchmarks/repo-qa/scripts/score_claim_validation.py",
+      "score_schema_version": "claim_validation_score_v1",
+      "score_set_schema_version": "claim_validation_score_set_v1",
+      "aggregate_schema_version": "claim_validation_aggregate_v1",
+      "primary_metric": "verdict accuracy and grounded-verdict accuracy vs the independent, forged-coordinate oracle; citation precision/recall/F1",
+      "judge": "none (no LLM judge; deterministic verdict + evidence-anchor scoring)",
+      "evidence_rule": {
+        "evidence_min_valid": 1,
+        "evidence_min_recall": 0.0
+      }
+    },
+    "task_bank": {
+      "dir": "benchmarks/repo-qa/exploration/tasks",
+      "schema_version": "exploration_task_v1",
+      "schema_file": "benchmarks/repo-qa/exploration/schema/exploration-task.schema.json",
+      "schema_file_sha256": "sha256:cbde51eb3b6b645761534e55ac71b72ca4edf786109b519d87d577a3ac1e444c",
+      "task_count": 30,
+      "claim_fields_required": [
+        "claim",
+        "request",
+        "author.verdict",
+        "author.category",
+        "author.anchor_classification"
+      ],
+      "per_corpus": {
+        "next.js": 11,
+        "pocketbase": 9,
+        "scikit-learn": 10
+      },
+      "per_author_verdict": {
+        "true": 10,
+        "false": 10,
+        "unsupported": 10
+      },
+      "per_category": {
+        "true": 5,
+        "wrong-layer": 5,
+        "misleading-doc": 5,
+        "dead-code": 5,
+        "false-premise": 5,
+        "unsupported": 5
+      },
+      "claim_task_digest_recipe": "runner.run._claim_digest(canonical {schema,id,claim,request,manifest_ref,output_schema})"
+    }
+  },
+  "corpora": [
+    {
+      "corpus_id": "pocketbase",
+      "language": "go",
+      "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+      "seed": 7,
+      "forge_version": "1",
+      "reference_tree_hash": "65119ec1226bdb6e2a45791e41f5a1c099d9bb5baf65200d1ece813bae26840d"
+    },
+    {
+      "corpus_id": "scikit-learn",
+      "language": "python",
+      "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+      "seed": 7,
+      "forge_version": "1",
+      "reference_tree_hash": "2c8e1660624b4aaf6d8288ff7ae000754f33a887b48d1669cf137594de3cee61"
+    },
+    {
+      "corpus_id": "next.js",
+      "language": "typescript",
+      "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+      "seed": 7,
+      "forge_version": "1",
+      "reference_tree_hash": "e3a6fc4e730e68a50db223cfa5205cba7e2d8d25c8283e7d8d98945154742af5"
+    }
+  ],
+  "seeds": [7],
+  "forge": {
+    "script": "benchmarks/repo-qa/scripts/exploration_corpus_forge.py",
+    "registry": "benchmarks/repo-qa/exploration/corpora.json",
+    "registry_schema_version": "exploration_corpora_v1",
+    "registry_sha256": "sha256:0cdc5a3608c13bccfe180f5ffb622ba5274dc511709438120ec195fea2fa4a0a",
+    "forge_version_pinned_by_bank": "1",
+    "reference_forge_version": "1"
+  },
+  "subject_binary": {
+    "name": "lci",
+    "built_from_checkout_commit": "71f0c5892e6041126e6ccfc93cf77fba7c111fc9",
+    "reported_version": "0.10.1",
+    "path": "build/release/src/lci",
+    "invocation": "lci mcp (stdio), registered as server 'lci' via --mcp-config"
+  },
+  "arms": {
+    "treatment": {
+      "description": "LCI MCP semantic-navigation tools + Read; answers structured claims",
+      "allowlist": [
+        "Read",
+        "mcp__lci__browse_file",
+        "mcp__lci__callers",
+        "mcp__lci__find_files",
+        "mcp__lci__get_context",
+        "mcp__lci__inspect_symbol",
+        "mcp__lci__list_symbols",
+        "mcp__lci__references",
+        "mcp__lci__search"
+      ],
+      "denied": ["Bash", "Edit", "Write"]
+    },
+    "baseline": {
+      "description": "Lexical Grep + Glob + Read only; no LCI server attached",
+      "allowlist": ["Glob", "Grep", "Read"],
+      "denied": ["Bash", "Edit", "Write", "mcp__lci__*"]
+    }
+  },
+  "model": {
+    "intended": "claude-sonnet-4-5",
+    "note": "Harness default (exploration_runner.DEFAULT_MODEL). Arm-shared for BOTH arms; the only manipulated variable across arms is the tool surface."
+  },
+  "repetitions": {
+    "per_cell": 1,
+    "note": "Stage-2 pins reps=1 to match stage-1. Variance-powered replication (>=3 seeds, spread, significance) is explicitly deferred to a later task."
+  },
+  "budget": {
+    "proposed_total_cells": 60,
+    "proposed_time_budget_seconds_per_cell": 600,
+    "proposed_time_budget_seconds_total": 36000,
+    "proposed_spending_budget_usd": null,
+    "note": "A spending cap was never set because no paid run was authorized (see approval)."
+  },
+  "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+  "approval": {
+    "status": "not_granted",
+    "granted_by": null,
+    "granted_at": null,
+    "execution_state": "pinned_not_executed",
+    "signoff_fields_recorded": [
+      "model",
+      "repetitions.per_cell",
+      "budget.proposed_time_budget_seconds_per_cell",
+      "budget.proposed_time_budget_seconds_total",
+      "budget.proposed_spending_budget_usd",
+      "task_bank_digest",
+      "provenance.task_bank.schema_file_sha256",
+      "forge.registry_sha256",
+      "corpora[].source_commit",
+      "corpora[].reference_tree_hash",
+      "seeds",
+      "subject_binary.built_from_checkout_commit",
+      "subject_binary.reported_version",
+      "arms.treatment.allowlist",
+      "arms.baseline.allowlist"
+    ],
+    "reason": "This stage-2 configuration was pinned by an unattended implementer session. A paid Claude CLI claim grid requires an explicit user-approved model and spending/time budget recorded before launch; no approver was present and no provider credentials are configured on this host (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN unset). Per design-unbiased-benchmarks stop conditions, an unapproved/uncapable paid grid must not be launched or its auth failures scored as answers."
+  },
+  "execution": {
+    "executed": false,
+    "reason": "paid_run_approval_not_granted; provider credentials not configured on this host",
+    "smoke": "hermetic one-claim/two-arm claim smoke passes via a deterministic fake agent through runner.run.run_task_both_arms (mode=claim-validation); the guarded live claim-smoke SKIPS without --live / credentials, proving the launch gate refuses an unapproved paid run",
+    "cells_planned": 60,
+    "cells_executed": 0,
+    "cells_recorded": 60,
+    "cells_failed_or_missing": 60,
+    "record_failure_status": "not_executed",
+    "provider_spend_usd": 0.0,
+    "omission_policy": "Every planned (task, arm, rep) cell is present in run-records.jsonl with a machine-readable status; none were silently dropped."
+  },
+  "comparability_with_stage1": {
+    "shared": [
+      "task bank (same 30 exploration tasks, same corpora / seed 7 / forge_version 1 pins)",
+      "both arm tool-allowlists and the Bash/Edit/Write denial",
+      "subject binary lci 0.10.1",
+      "model claude-sonnet-4-5 (arm-shared), reps=1, time budget 600 s/cell",
+      "runner + isolation gate + forge + resume-idempotency"
+    ],
+    "differs": [
+      "prompt format: claim-request-v1 -> structured claim answer (claim_validation_answer_v1)",
+      "scorer: cited-evidence P/R/F1 vs an answer key (stage 1) -> verdict accuracy + grounded-verdict accuracy + false-premise/unsupported detection against the independent forged-coordinate oracle (stage 2)",
+      "headline: evidence-location quality (stage 1) -> answer correctness given location (stage 2)"
+    ],
+    "limitation": "Both stages are single-seed (seed 7, reps=1) and both were pinned-not-executed with $0 provider spend, so neither yields a measured LCI-vs-baseline delta; stage-2 numbers are directly comparable to stage-1 only as 'instrument pinned, grid not run', never as an effect size."
+  },
+  "out_of_scope": [
+    "threshold selection / merge gates on LCI-vs-baseline verdict or grounding deltas",
+    "variance-powered replication (>=3 reps, spread, significance)",
+    "stage-1 exploration-arm execution",
+    "stage-3 edit-mode tasks"
+  ],
+  "artifacts": {
+    "run_records": "benchmarks/repo-qa/results/exploration-stage2/run-records.jsonl",
+    "scores": "benchmarks/repo-qa/results/exploration-stage2/scores.json",
+    "aggregate": "benchmarks/repo-qa/results/exploration-stage2/aggregate.json",
+    "report": "benchmarks/repo-qa/ANALYSIS-exploration-stage2.md"
+  }
+}

@@ -1,0 +1,3246 @@
+{
+  "schema": "claim_validation_score_set_v1",
+  "scores": [
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "true",
+      "claim_task_digest": "sha256:7e616db96cf75c14498ee0ece10870a0cf3df240786a9c23d85fe0f672407d41",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-build-manifest-reading::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-build-manifest-reading",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "true",
+      "claim_task_digest": "sha256:7e616db96cf75c14498ee0ece10870a0cf3df240786a9c23d85fe0f672407d41",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-build-manifest-reading::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-build-manifest-reading",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "wrong-layer",
+      "claim_task_digest": "sha256:cf157a2a298999b8d4b4aab902b8ba9e9f9fbf7a01f1d0e325b016aaf995885f",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-client-rewrite-resolution::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-client-rewrite-resolution",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "wrong-layer",
+      "claim_task_digest": "sha256:cf157a2a298999b8d4b4aab902b8ba9e9f9fbf7a01f1d0e325b016aaf995885f",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-client-rewrite-resolution::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-client-rewrite-resolution",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "misleading-doc",
+      "claim_task_digest": "sha256:1523ec92f54491d84b76c103ccbc0030032c2a015ffb593ad34a328b3673ffe8",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-dynamic-segment-detection::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-dynamic-segment-detection",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "misleading-doc",
+      "claim_task_digest": "sha256:1523ec92f54491d84b76c103ccbc0030032c2a015ffb593ad34a328b3673ffe8",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-dynamic-segment-detection::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-dynamic-segment-detection",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "dead-code",
+      "claim_task_digest": "sha256:1be2637fcc3f89adf74c7ac2cf51953f3e523d91d30824a78be0af29fd2c802d",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-internal-param-stripping::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-internal-param-stripping",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "dead-code",
+      "claim_task_digest": "sha256:1be2637fcc3f89adf74c7ac2cf51953f3e523d91d30824a78be0af29fd2c802d",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-internal-param-stripping::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-internal-param-stripping",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "misleading-doc",
+      "claim_task_digest": "sha256:1e22a1f3e036a1175ce1354f5dfc6ffe15046f37450f6bb2ae7a3316dbee6f11",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-manifest-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-manifest-claim-boundary",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "misleading-doc",
+      "claim_task_digest": "sha256:1e22a1f3e036a1175ce1354f5dfc6ffe15046f37450f6bb2ae7a3316dbee6f11",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-manifest-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-manifest-claim-boundary",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "false-premise",
+      "claim_task_digest": "sha256:7a35521dcc304cfb4172b41867b09b5cf0fa54334a4ea00c60ba17e650a162c3",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-page-path-canonicalization::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-page-path-canonicalization",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "false-premise",
+      "claim_task_digest": "sha256:7a35521dcc304cfb4172b41867b09b5cf0fa54334a4ea00c60ba17e650a162c3",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-page-path-canonicalization::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-page-path-canonicalization",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "unsupported",
+      "claim_task_digest": "sha256:74cf93c042693a47036d50a9f7f285cc28476ba0e27efc0d4a27b54b2c411edf",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-path-prefix-normalization::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-path-prefix-normalization",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "unsupported",
+      "claim_task_digest": "sha256:74cf93c042693a47036d50a9f7f285cc28476ba0e27efc0d4a27b54b2c411edf",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-path-prefix-normalization::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-path-prefix-normalization",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "true",
+      "claim_task_digest": "sha256:f9c6df0eab0e2b882f9952097a78c9f50c6b05bc49dee27778a98495a24c5f55",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-redirect-status-codes::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-redirect-status-codes",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "true",
+      "claim_task_digest": "sha256:f9c6df0eab0e2b882f9952097a78c9f50c6b05bc49dee27778a98495a24c5f55",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-redirect-status-codes::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-redirect-status-codes",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "unsupported",
+      "claim_task_digest": "sha256:c3ee4b512fc99d8fcdff3ea526480d3b19b11a0707cee933a21df6e763f68b1e",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-rewrite-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-rewrite-claim-boundary",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "unsupported",
+      "claim_task_digest": "sha256:c3ee4b512fc99d8fcdff3ea526480d3b19b11a0707cee933a21df6e763f68b1e",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-rewrite-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-rewrite-claim-boundary",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "wrong-layer",
+      "claim_task_digest": "sha256:23875ade680c7e39a5f5d438620a3da3fb3292d6086483e997941ba3d89591d1",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-rewrite-destination-build::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-rewrite-destination-build",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "wrong-layer",
+      "claim_task_digest": "sha256:23875ade680c7e39a5f5d438620a3da3fb3292d6086483e997941ba3d89591d1",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-rewrite-destination-build::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-rewrite-destination-build",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "misleading-doc",
+      "claim_task_digest": "sha256:19aa34e0b05aaa43fc33d60d71afb82c692971ed0282ebefcb4b296194e1b51b",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-server-render-abstractions::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-server-render-abstractions",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "misleading-doc",
+      "claim_task_digest": "sha256:19aa34e0b05aaa43fc33d60d71afb82c692971ed0282ebefcb4b296194e1b51b",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "nx-server-render-abstractions::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "nx-server-render-abstractions",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "dead-code",
+      "claim_task_digest": "sha256:63f9bd3285488f5ac73b5e70b6bd196cd3ef8e7b22350a0853289cc91f0ca22b",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-buffered-log-writes::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-buffered-log-writes",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "dead-code",
+      "claim_task_digest": "sha256:63f9bd3285488f5ac73b5e70b6bd196cd3ef8e7b22350a0853289cc91f0ca22b",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-buffered-log-writes::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-buffered-log-writes",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "false-premise",
+      "claim_task_digest": "sha256:903e389caa2aa3d233909d3dad571cb68769b0ece50f79cddcda32396f1aa9e6",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-email-delivery-contract::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-email-delivery-contract",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "false-premise",
+      "claim_task_digest": "sha256:903e389caa2aa3d233909d3dad571cb68769b0ece50f79cddcda32396f1aa9e6",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-email-delivery-contract::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-email-delivery-contract",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "unsupported",
+      "claim_task_digest": "sha256:ab3d677bad92d8ce5fa0ef8c5ce7e2e22e24fde55ef312a46714583799b7bf2e",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-expression-string-scanner::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-expression-string-scanner",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "unsupported",
+      "claim_task_digest": "sha256:ab3d677bad92d8ce5fa0ef8c5ce7e2e22e24fde55ef312a46714583799b7bf2e",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-expression-string-scanner::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-expression-string-scanner",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "true",
+      "claim_task_digest": "sha256:80be852d8d85a32f64590bad13e349f5bd523035ef50148a1013f9924d0c16b8",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-generic-slice-membership::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-generic-slice-membership",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "true",
+      "claim_task_digest": "sha256:80be852d8d85a32f64590bad13e349f5bd523035ef50148a1013f9924d0c16b8",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-generic-slice-membership::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-generic-slice-membership",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "dead-code",
+      "claim_task_digest": "sha256:9418101a5af909b1c72d3db994d0593641bf17acfe43b1b98537f0d06d7e2232",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-log-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-log-claim-boundary",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "dead-code",
+      "claim_task_digest": "sha256:9418101a5af909b1c72d3db994d0593641bf17acfe43b1b98537f0d06d7e2232",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-log-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-log-claim-boundary",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "wrong-layer",
+      "claim_task_digest": "sha256:96107ba3dade36ffb34e49d290929bf4fc0fc9d1696d85861832c99e4c4e70db",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-password-login-route::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-password-login-route",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "wrong-layer",
+      "claim_task_digest": "sha256:96107ba3dade36ffb34e49d290929bf4fc0fc9d1696d85861832c99e4c4e70db",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-password-login-route::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-password-login-route",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "misleading-doc",
+      "claim_task_digest": "sha256:a2eb183dda394c9bad22edf8ae99a21199148ac0f86eb97bf3eec7dd4f38e229",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-realtime-fanout-hub::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-realtime-fanout-hub",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "misleading-doc",
+      "claim_task_digest": "sha256:a2eb183dda394c9bad22edf8ae99a21199148ac0f86eb97bf3eec7dd4f38e229",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-realtime-fanout-hub::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-realtime-fanout-hub",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "dead-code",
+      "claim_task_digest": "sha256:ec99c638af8a64a2cafb53a1efa40a759597db96508120669f7de48760fb61df",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-record-query-expression::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-record-query-expression",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "dead-code",
+      "claim_task_digest": "sha256:ec99c638af8a64a2cafb53a1efa40a759597db96508120669f7de48760fb61df",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-record-query-expression::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-record-query-expression",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "false-premise",
+      "claim_task_digest": "sha256:4744883bfc1d41ce1c7626e375f32b24ca94c6802d557f173964489a14ca9b31",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-signed-token-mint-verify::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-signed-token-mint-verify",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "false-premise",
+      "claim_task_digest": "sha256:4744883bfc1d41ce1c7626e375f32b24ca94c6802d557f173964489a14ca9b31",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "pb-signed-token-mint-verify::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "pb-signed-token-mint-verify",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "unsupported",
+      "claim_task_digest": "sha256:3e1384c140eb8a39de26ec46f70135d1bd63f39db994866eacef00f01e7145ad",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-binned-tree-ensemble::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-binned-tree-ensemble",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "unsupported",
+      "claim_task_digest": "sha256:3e1384c140eb8a39de26ec46f70135d1bd63f39db994866eacef00f01e7145ad",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-binned-tree-ensemble::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-binned-tree-ensemble",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "true",
+      "claim_task_digest": "sha256:4371dcb4f822b0a4a070d3ee4438d8d614b46a1fc6c6b03f11856ef95aba327a",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-column-gap-fill::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-column-gap-fill",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "true",
+      "claim_task_digest": "sha256:4371dcb4f822b0a4a070d3ee4438d8d614b46a1fc6c6b03f11856ef95aba327a",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-column-gap-fill::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-column-gap-fill",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "wrong-layer",
+      "claim_task_digest": "sha256:1fb8e51fbb7375c7e4c7b4f9d350c86e78a783a1baa79286a055ed16f548714f",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-conditional-method::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-conditional-method",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "wrong-layer",
+      "claim_task_digest": "sha256:1fb8e51fbb7375c7e4c7b4f9d350c86e78a783a1baa79286a055ed16f548714f",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-conditional-method::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-conditional-method",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "misleading-doc",
+      "claim_task_digest": "sha256:2706730dfae10ca2dd8d0887a607254ff57c4b9b6c07d4c6d1dca1dac229339a",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-distance-embedding::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-distance-embedding",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "misleading-doc",
+      "claim_task_digest": "sha256:2706730dfae10ca2dd8d0887a607254ff57c4b9b6c07d4c6d1dca1dac229339a",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-distance-embedding::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-distance-embedding",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "dead-code",
+      "claim_task_digest": "sha256:521d7f2b94e9288e757794951d06ed9f6042aa867872514f4da42c1b2e6ecdf2",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-estimator-copy::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-estimator-copy",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "dead-code",
+      "claim_task_digest": "sha256:521d7f2b94e9288e757794951d06ed9f6042aa867872514f4da42c1b2e6ecdf2",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-estimator-copy::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-estimator-copy",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "false-premise",
+      "claim_task_digest": "sha256:88f3d76eeb1edfad03d04b6d8cba16854f326d86959018a68e7679b6edacccd5",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-grouping-quality-score::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-grouping-quality-score",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "false-premise",
+      "claim_task_digest": "sha256:88f3d76eeb1edfad03d04b6d8cba16854f326d86959018a68e7679b6edacccd5",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-grouping-quality-score::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-grouping-quality-score",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "false-premise",
+      "claim_task_digest": "sha256:f5132b2ccdd02968d4bb7e7e8391c8a1119fe682f7ccb99c7d07ee8f33deb990",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-imputer-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-imputer-claim-boundary",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "false-premise",
+      "claim_task_digest": "sha256:f5132b2ccdd02968d4bb7e7e8391c8a1119fe682f7ccb99c7d07ee8f33deb990",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-imputer-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-imputer-claim-boundary",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "unsupported",
+      "claim_task_digest": "sha256:3761339c2b8417dabdee474c221114009b12427a23d8cc61cc6176d80010bcb0",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-neighbour-gap-fill::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-neighbour-gap-fill",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "unsupported",
+      "claim_task_digest": "sha256:3761339c2b8417dabdee474c221114009b12427a23d8cc61cc6176d80010bcb0",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "unsupported",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-neighbour-gap-fill::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-neighbour-gap-fill",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "true",
+      "claim_task_digest": "sha256:ec5ed3932bf7b817fc863238344483f8fff7ca5cbe9ef65cc8b46444993707b9",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-remote-corpus-fetch::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-remote-corpus-fetch",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "true",
+      "claim_task_digest": "sha256:ec5ed3932bf7b817fc863238344483f8fff7ca5cbe9ef65cc8b46444993707b9",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "true",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-remote-corpus-fetch::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-remote-corpus-fetch",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "baseline",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "wrong-layer",
+      "claim_task_digest": "sha256:7ef911e4af891003dc6fca0f47d62307ac02dc6ca2bb9a63e4150d39095b89a2",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-staged-tree-ensemble::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-staged-tree-ensemble",
+      "valid_answer": false,
+      "verdict_correct": false
+    },
+    {
+      "arm": "treatment",
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "not_executed",
+          "tool_calls": 0
+        }
+      ],
+      "category": "wrong-layer",
+      "claim_task_digest": "sha256:7ef911e4af891003dc6fca0f47d62307ac02dc6ca2bb9a63e4150d39095b89a2",
+      "evidence": {
+        "answer_key_matched": 0,
+        "answer_key_total": 2,
+        "cited_invalid": 0,
+        "cited_total": 0,
+        "cited_valid": 0,
+        "f1": null,
+        "precision": null,
+        "recall": null
+      },
+      "expected_verdict": "false",
+      "forge_manifest": "1",
+      "grounded": false,
+      "mode": "claim-validation",
+      "model": "claude-sonnet-4-5",
+      "predicted_verdict": null,
+      "process": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "tool_calls": 0,
+        "wall_clock_seconds": 0.0
+      },
+      "run_key": "skl-staged-tree-ensemble::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+      "run_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "schema": "claim_validation_score_v1",
+      "schema_version": "claim_validation_answer_v1",
+      "scoring_settings": {
+        "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+        "timeout_seconds": 600
+      },
+      "seed": 7,
+      "status": "not_executed",
+      "success": false,
+      "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6",
+      "task_id": "skl-staged-tree-ensemble",
+      "valid_answer": false,
+      "verdict_correct": false
+    }
+  ],
+  "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6"
+}

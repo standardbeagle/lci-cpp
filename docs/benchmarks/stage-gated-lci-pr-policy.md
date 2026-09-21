@@ -9,8 +9,11 @@ threshold is enforced before the variance exists to support it.
 
 Companion artifacts:
 - Stage-1 report: `benchmarks/repo-qa/ANALYSIS-exploration-stage1.md`
+- Stage-2 report: `benchmarks/repo-qa/ANALYSIS-exploration-stage2.md`
+  (pinned-not-executed baseline; instrument wired, grid not run)
 - Stage-3 report: `benchmarks/repo-qa/edits/REPORT.md`
 - Pinned configs: `benchmarks/repo-qa/exploration/run-configs/stage1-baseline.json`,
+  `benchmarks/repo-qa/exploration/run-configs/stage2-baseline.json`,
   `benchmarks/repo-qa/edits/run-config.json`
 - Methodology: `.agents/skills/design-unbiased-benchmarks`,
   `.agents/skills/audit-benchmark-evidence`
