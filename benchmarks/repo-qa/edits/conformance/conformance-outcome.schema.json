@@ -8,13 +8,14 @@
     "bank_health_outcome": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema", "task_id", "rule_id", "kind", "passed", "diagnostic", "anchors"],
+      "required": ["schema", "task_id", "rule_id", "kind", "passed", "reason", "diagnostic", "anchors"],
       "properties": {
         "schema": {"const": "conformance_gate_v1"},
         "task_id": {"type": ["string", "null"], "description": "The edit task id evaluated."},
         "rule_id": {"type": ["string", "null"], "description": "The convention rule id; null when the rule was malformed."},
         "kind": {"type": ["string", "null"], "description": "The structural handler family that judged the rule; null when unsupported/malformed."},
         "passed": {"type": "boolean", "description": "True only when every anchor conforms."},
+        "reason": {"$ref": "#/$defs/reason", "description": "Schema-required top-level reason code for the verdict as a whole: CONFORMS when every anchor conforms, otherwise the first failing anchor's code, or the rule-level code (RULE_MALFORMED / RULE_UNSUPPORTED / MANIFEST_ABSENT) when no anchor was evaluated. This is the machine-readable carrier consumers read instead of parsing the diagnostic."},
         "diagnostic": {"type": "string", "minLength": 1, "description": "Human-readable summary; leads with the first failing reason code."},
         "anchors": {
           "type": "array",

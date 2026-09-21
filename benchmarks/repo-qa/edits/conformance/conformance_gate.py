@@ -563,13 +563,21 @@ def _rule_id_of(task):
     return rule_id if isinstance(rule_id, str) and rule_id else None
 
 
-def _gate_outcome(task_id, rule_id, kind, passed, diagnostic, anchors):
+def _gate_outcome(task_id, rule_id, kind, reason, passed, diagnostic, anchors):
+    """A ``conformance_gate_v1`` bank-health outcome.
+
+    ``reason`` is the schema-required top-level reason code for the verdict as a
+    whole. For a rule-level failure (malformed/unsupported rule, absent manifest)
+    it is the ONLY machine-readable carrier of the code -- there are no anchors
+    to read one from -- so consumers never parse the human-readable diagnostic.
+    """
     return {
         "schema": OUTCOME_SCHEMA,
         "task_id": task_id,
         "rule_id": rule_id,
         "kind": kind,
         "passed": passed,
+        "reason": reason,
         "diagnostic": diagnostic,
         "anchors": anchors,
     }
@@ -586,12 +594,12 @@ def evaluate_task(task, manifest, tree_dir):
 
     if rule_id is None:
         return _gate_outcome(
-            task_id, None, None, False,
+            task_id, None, None, Reason.RULE_MALFORMED, False,
             f"{Reason.RULE_MALFORMED}: convention.rule_id missing or empty", [],
         )
     if rule_id not in _RULE_HANDLERS:
         return _gate_outcome(
-            task_id, rule_id, None, False,
+            task_id, rule_id, None, Reason.RULE_UNSUPPORTED, False,
             f"{Reason.RULE_UNSUPPORTED}: no gate handler for rule {rule_id!r}", [],
         )
 
@@ -600,7 +608,7 @@ def evaluate_task(task, manifest, tree_dir):
     exemplars = task.get("exemplars")
     if not isinstance(exemplars, list) or not exemplars:
         return _gate_outcome(
-            task_id, rule_id, kind, False,
+            task_id, rule_id, kind, Reason.RULE_MALFORMED, False,
             f"{Reason.RULE_MALFORMED}: task has no exemplar anchors", [],
         )
 
@@ -611,14 +619,16 @@ def evaluate_task(task, manifest, tree_dir):
 
     passed = all(anchor["passed"] for anchor in anchors)
     if passed:
+        reason = Reason.CONFORMS
         diagnostic = f"{Reason.CONFORMS}: all {len(anchors)} anchor(s) conform"
     else:
         failing = [a for a in anchors if not a["passed"]]
+        reason = failing[0]["reason"]
         diagnostic = (
-            f"{failing[0]['reason']}: {len(failing)}/{len(anchors)} anchor(s) "
+            f"{reason}: {len(failing)}/{len(anchors)} anchor(s) "
             f"failed (first: {failing[0]['path']}:{failing[0]['lines']})"
         )
-    return _gate_outcome(task_id, rule_id, kind, passed, diagnostic, anchors)
+    return _gate_outcome(task_id, rule_id, kind, reason, passed, diagnostic, anchors)
 
 
 # ---------------------------------------------------------------------------
@@ -841,7 +851,7 @@ def evaluate_task_in_corpus(task, corpus_root):
     kind = _RULE_HANDLERS.get(rule_id, (None, None))[0] if rule_id else None
     if manifest is None:
         return _gate_outcome(
-            task.get("id"), rule_id, kind, False,
+            task.get("id"), rule_id, kind, Reason.MANIFEST_ABSENT, False,
             f"{Reason.MANIFEST_ABSENT}: forged corpus for "
             f"{task.get('corpus')!r} seed {ref.get('seed')!r} not found", [],
         )

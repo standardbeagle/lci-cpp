@@ -122,13 +122,19 @@ def oracle_outcome(
 
 
 def conformance_outcome(passed=True, reason="CONFORMS", task_id="t1"):
-    """A conformance_gate_v1 outcome."""
+    """A conformance_gate_v1 outcome.
+
+    ``reason`` is the schema-required top-level code (the scorer reads it when
+    there are no per-anchor entries to read), mirrored on the lone anchor so the
+    synthetic shape matches what S3.2 actually emits.
+    """
     return {
         "schema": "conformance_gate_v1",
         "task_id": task_id,
         "rule_id": "rule-1",
         "kind": "structural",
         "passed": passed,
+        "reason": reason,
         "diagnostic": "synthetic",
         "anchors": [
             {
@@ -906,12 +912,12 @@ class RuleLevelConformance(unittest.TestCase):
     """
 
     def test_the_real_gate_emits_rule_level_failures_with_no_anchors(self):
-        """The precondition the fallback exists for, pinned against the REAL gate.
+        """The precondition the scorer's field read exists for, against the REAL
+        gate.
 
-        Every one of these carries its reason ONLY in the diagnostic. If S3.2
-        ever grows a top-level reason field or starts emitting a synthetic
-        anchor, this fails and the fallback should be revisited rather than left
-        parsing prose.
+        Rule-level failures emit NO anchors, so their code must live in the
+        schema-required top-level `reason` field. If S3.2 ever drops the field
+        this fails LOUDLY, rather than leaving the scorer to parse prose.
         """
         for reason in RULE_LEVEL_REASONS:
             outcome = real_rule_level_outcome(reason)
@@ -919,33 +925,39 @@ class RuleLevelConformance(unittest.TestCase):
                 self.assertEqual(outcome["schema"], "conformance_gate_v1")
                 self.assertFalse(outcome["passed"])
                 self.assertEqual(outcome["anchors"], [])
-                self.assertNotIn("reason", outcome)
+                self.assertEqual(outcome["reason"], reason)
 
     def test_the_gate_diagnostic_leads_with_the_bare_reason_code(self):
-        """Pin the S3.2 boundary the scorer's split(':', 1)[0] parse depends on.
+        """Pin BOTH the schema-required `reason` field and the legacy diagnostic
+        leading token.
 
-        Asserted as an exact leading token -- not a substring -- so an S3.2
-        diagnostic reformat (a prefix, a wrapped code, a different separator)
-        breaks here LOUDLY instead of silently degrading every rule-level cell to
-        REASON_UNCLASSIFIED. The proper fix is a top-level `reason` field on
-        conformance_gate_v1; until S3.2 carries one, this test is the contract.
+        The field is the contract the scorer now reads. The diagnostic head is
+        asserted only as the archived-record compat path's precondition (and so
+        an S3.2 reformat cannot silently degrade a pre-field record to
+        REASON_UNCLASSIFIED).
         """
         for reason in RULE_LEVEL_REASONS:
-            diagnostic = real_rule_level_outcome(reason)["diagnostic"]
+            outcome = real_rule_level_outcome(reason)
+            diagnostic = outcome["diagnostic"]
             with self.subTest(reason=reason):
+                # the field is the primary contract...
+                self.assertEqual(outcome["reason"], reason)
+                # ...the diagnostic still leads with the same bare token, so the
+                # compat parse agrees with the field for archived records.
                 self.assertEqual(diagnostic.split(":", 1)[0], reason)
-                # ...and the scorer's own parse agrees with the gate's emission
                 self.assertEqual(
                     edit_scorer._reason_from_diagnostic(diagnostic), reason
                 )
 
     def test_a_rule_level_conformance_failure_is_a_HARNESS_fault(self):
-        """The discrimination test for the anchors:[] fallback.
+        """The discrimination test for the anchors:[] field read.
 
-        Fails if the diagnostic fallback is removed: with no anchors to read a
-        reason from, the convention gate reports zero reasons, and a reasonless
-        failure classifies as `patch_rejected` -- charging our own broken rule to
-        the agent.
+        Fails on two deliberate breaks: if the scorer stops reading the
+        top-level `reason` (and its compat diagnostic), the rule-level code is
+        dropped from the derived gate's `reasons`; and if RULE_*/MANIFEST_ABSENT
+        stop being harness codes, the cell is charged to the agent as
+        `patch_rejected`. Either way our own broken rule must not read as a bad
+        patch.
         """
         for reason in RULE_LEVEL_REASONS:
             score = edit_scorer.score_run(
@@ -971,9 +983,15 @@ class RuleLevelConformance(unittest.TestCase):
                 self.assertFalse(score["all_gates_passed"])
 
     def test_an_unrecognised_diagnostic_head_still_fails_to_HARNESS(self):
-        """The fallback's own fail-safe: an unmappable code is OUR stale mapping,
-        so it degrades to harness -- never to blaming the agent."""
+        """The COMPAT path's own fail-safe, for pre-field archived records.
+
+        A record written before conformance_gate_v1 carried a top-level `reason`
+        has no field to read, so the scorer falls back to the diagnostic head.
+        An unmappable head is OUR stale mapping, so it degrades to harness --
+        never to blaming the agent.
+        """
         outcome = conformance_outcome(False, "MATCH_ABSENT")
+        del outcome["reason"]  # archived, pre-field shape
         outcome["anchors"] = []
         outcome["diagnostic"] = "SOME_FUTURE_CODE: a reason this scorer predates"
         score = edit_scorer.score_run(
@@ -986,6 +1004,26 @@ class RuleLevelConformance(unittest.TestCase):
         self.assertEqual(
             score["gates"]["convention"]["reasons"],
             [edit_scorer.REASON_UNCLASSIFIED],
+        )
+        self.assertEqual(score["failure_class"], edit_scorer.FAILURE_HARNESS)
+
+    def test_the_scorer_reads_the_top_level_reason_not_the_diagnostic(self):
+        """The field is authoritative; the diagnostic head is not consulted when
+        the field is present. A diagnostic that leads with a different code must
+        not divert a rule-level failure into `patch_rejected`."""
+        outcome = conformance_outcome(False, "MATCH_ABSENT")
+        outcome["reason"] = "RULE_MALFORMED"
+        outcome["anchors"] = []
+        outcome["diagnostic"] = "PATCH_NONCONFORMING: a misleading legacy head"
+        score = edit_scorer.score_run(
+            record(
+                status=edit_record.STATUS_GATE_FAILED,
+                reason="GATE_FAILED",
+                gate_outcomes=gates(conformance=outcome),
+            )
+        )
+        self.assertEqual(
+            score["gates"]["convention"]["reasons"], ["RULE_MALFORMED"]
         )
         self.assertEqual(score["failure_class"], edit_scorer.FAILURE_HARNESS)
 

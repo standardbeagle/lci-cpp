@@ -332,6 +332,8 @@ class FailClosedTest(GateTestBase):
         del task["convention"]["rule_id"]
         out = gate.evaluate_task(task, c.manifest, c.tree_dir)
         self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.RULE_MALFORMED)
+        self.assertEqual(out["anchors"], [])
         self.assertIn(gate.Reason.RULE_MALFORMED, out["diagnostic"])
 
     def test_unsupported_rule_fails_closed(self):
@@ -341,6 +343,8 @@ class FailClosedTest(GateTestBase):
             c.manifest, c.tree_dir,
         )
         self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.RULE_UNSUPPORTED)
+        self.assertEqual(out["anchors"], [])
         self.assertIn(gate.Reason.RULE_UNSUPPORTED, out["diagnostic"])
 
     def test_absent_manifest_fails_closed(self):
@@ -349,7 +353,48 @@ class FailClosedTest(GateTestBase):
                      [_anchor("pkg/log.ts", [2], ["Log"])])
         out = gate.evaluate_task_in_corpus(task, self._tmp.name)
         self.assertFalse(out["passed"])
+        self.assertEqual(out["reason"], gate.Reason.MANIFEST_ABSENT)
+        self.assertEqual(out["anchors"], [])
         self.assertIn(gate.Reason.MANIFEST_ABSENT, out["diagnostic"])
+
+    def test_rule_level_outcome_carries_a_schema_required_top_level_reason(self):
+        # The rule-level code is a machine contract, not prose: every
+        # anchors:[] failure is schema-required to carry it as a top-level
+        # `reason` field so consumers need not parse the diagnostic.
+        import jsonschema
+        with open(
+            os.path.join(CONFORMANCE, "conformance-outcome.schema.json"),
+            encoding="utf-8",
+        ) as handle:
+            schema = json.load(handle)
+        validator = jsonschema.Draft202012Validator(
+            {"$ref": "#/$defs/bank_health_outcome", "$defs": schema["$defs"]}
+        )
+        c = self._log_corpus()
+        outcomes = [
+            gate.evaluate_task(
+                {"id": "t1", "convention": {"rule_id": "zz-no-such-rule"}},
+                c.manifest, c.tree_dir,
+            ),
+            gate.evaluate_task({"id": "t1"}, c.manifest, c.tree_dir),
+        ]
+        with tempfile.TemporaryDirectory() as empty_root:
+            outcomes.append(gate.evaluate_task_in_corpus(
+                _task("ts-central-log-namespace",
+                      [_anchor("pkg/log.ts", [2], ["Log"])]),
+                empty_root,
+            ))
+        for outcome in outcomes:
+            with self.subTest(reason=outcome["reason"]):
+                self.assertFalse(outcome["passed"])
+                self.assertEqual(outcome["anchors"], [])
+                validator.validate(outcome)
+        # ...and the field is REQUIRED, not merely emitted: a rule-level failure
+        # without it is rejected by the schema.
+        missing = dict(outcomes[0])
+        del missing["reason"]
+        with self.assertRaises(jsonschema.ValidationError):
+            validator.validate(missing)
 
     def test_malformed_anchor_fails_closed(self):
         # The module header promises fail-closed on EVERY abnormal input, but a

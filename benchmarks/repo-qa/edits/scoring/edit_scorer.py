@@ -261,26 +261,36 @@ def _derive_gate(subs):
 
 
 def _reason_from_diagnostic(diagnostic):
-    """The leading reason code of a gate diagnostic.
+    """COMPAT: the leading reason code of a gate diagnostic.
 
-    A rule-level conformance failure (malformed/unsupported rule, absent
-    manifest) emits NO anchors, so its reason code exists only as the
-    diagnostic's documented leading token. An unrecognised head is reported as
-    REASON_UNCLASSIFIED rather than guessed at.
+    Pre-field archived ``conformance_gate_v1`` records encode a rule-level
+    failure's code only as the diagnostic's documented leading token. New
+    records carry the schema-required top-level ``reason`` field and never reach
+    this path. An unrecognised head is reported as REASON_UNCLASSIFIED rather
+    than guessed at.
     """
     head = (diagnostic or "").split(":", 1)[0].strip()
     return head if head in _KNOWN_REASONS else REASON_UNCLASSIFIED
 
 
-def _failing_reasons(outcomes, diagnostic):
-    """Reason codes of the failing entries, falling back to the diagnostic's
-    leading token when a failure is rule-level and emits no entries."""
+def _failing_reasons(outcomes, diagnostic, reason=None):
+    """Reason codes of the failing entries.
+
+    Preference order: the failing entries' own codes, then the outcome's
+    top-level ``reason`` field (for rule-level failures that emit no entries),
+    then -- only for archived records predating the field -- the diagnostic's
+    leading token.
+    """
     reasons = {
         entry.get("reason")
         for entry in (outcomes or [])
         if not entry.get("passed") and entry.get("reason")
     }
-    return reasons or {_reason_from_diagnostic(diagnostic)}
+    if reasons:
+        return reasons
+    if reason and reason not in _PASSING_REASONS:
+        return {reason}
+    return {_reason_from_diagnostic(diagnostic)}
 
 
 def _derive_conformance(outcome):
@@ -293,8 +303,10 @@ def _derive_conformance(outcome):
         verdict plus a separate bank-health verdict. Both contribute reasons, so
         a defective bank surfaces as its own ANCHOR_*/RULE_* code and lands in
         the oracle/harness bucket instead of being charged to the patch.
-      * ``conformance_gate_v1`` is the bank-health outcome on its own, and
-        carries its reason codes per anchor.
+      * ``conformance_gate_v1`` is the bank-health outcome on its own. It
+        carries a schema-required top-level ``reason`` AND its reason codes per
+        anchor; the scorer reads the anchors first and the field for the
+        rule-level failures that emit none.
     """
     if outcome is None:
         return _absent_gate()
@@ -312,10 +324,13 @@ def _derive_conformance(outcome):
                 reasons |= _failing_reasons(
                     component.get("regions") or component.get("anchors"),
                     component.get("diagnostic"),
+                    component.get("reason"),
                 )
     else:
         reasons = _failing_reasons(
-            outcome.get("anchors"), outcome.get("diagnostic")
+            outcome.get("anchors"),
+            outcome.get("diagnostic"),
+            outcome.get("reason"),
         )
     return {"passed": False, "judged": True, "reasons": sorted(reasons)}
 
