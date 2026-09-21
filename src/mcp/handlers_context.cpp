@@ -117,9 +117,17 @@ nlohmann::json manifest_to_json(const ContextManifest& m) {
 // Accepts Go-shape compact keys as primary. Verbose keys (task/version/
 // project_root/refs/note/start/end) are accepted as a transitional fallback
 // with a one-line stderr warning per occurrence — karpathy rule 6, no silent
-// fallback. The compact contract is enforced by the parity descriptors
-// save-compact-keys.parity.json and save-verbose-keys-rejected.parity.json
-// (the latter targets the *ref* keys f/s, which never fall back).
+// fallback. The ref-level compact contract (f/s never fall back) is enforced
+// by the parse tests ContextManifestParse.VerboseSelectorRefIsInvalidRef-
+// NotEmptyRef / .BareObjectRefIsInvalidRefNotEmptyRef /
+// .EmptyLineRangeObjectRefIsInvalidRefNotEmptyRef and the load-handler test
+// ContextResolutionFixture.VerboseSelectorRefIsInvalidRefAndIsolatesValidSibling
+// (tests/mcp_handlers_context_test.cpp); the on-disk round-trip of the compact
+// shape is pinned by RealProjectContextManifestTest.SaveAndLoadCompactKeys-
+// FileRoundTrip (tests/integration/real_project_context_test.cpp, corpora-
+// gated). (The retired Go-parity descriptors save-compact-keys.parity.json and
+// save-verbose-keys-rejected.parity.json are named here only for history; the
+// tests above are the live enforcement.)
 //
 // Type handling:
 //  - A top-level scalar (t/v/p) present but not a string is a fatal error: a
@@ -231,9 +239,11 @@ std::string manifest_from_json(const nlohmann::json& j, ContextManifest& out,
         }
 
         ContextRef r;
-        // f/s are compact-only by contract; no verbose alias here — the
-        // negative parity descriptor save-verbose-keys-rejected.parity.json
-        // locks rejection of {file, symbol} on the ref level.
+        // f/s are compact-only by contract; no verbose alias here — a ref
+        // carrying only verbose {file, symbol} keys is isolated as an
+        // invalid_ref below (enforced by
+        // ContextManifestParse.VerboseSelectorRefIsInvalidRefNotEmptyRef,
+        // tests/mcp_handlers_context_test.cpp).
         if (rj.contains("f") && rj["f"].is_string()) {
             r.file = rj["f"].get<std::string>();
         }
@@ -258,8 +268,10 @@ std::string manifest_from_json(const nlohmann::json& j, ContextManifest& out,
         }
         // A ref must carry at least one honoured selector: a compact `f`, a
         // compact `s`, or a valid line range. A ref whose only selector keys
-        // are verbose `file`/`symbol` (never honoured at the ref level — see
-        // save-verbose-keys-rejected.parity.json) and a bare `{}` carry none.
+        // are verbose `file`/`symbol` (never honoured at the ref level — the
+        // guard below is pinned by
+        // ContextManifestParse.VerboseSelectorRefIsInvalidRefNotEmptyRef) and
+        // a bare `{}` carry none.
         // Such a ref is an invalid_ref, never an empty accepted ref: it must
         // not enter refs nor count as a resolved ref, and it must not be left
         // for hydrate to mask (which would silently drop the raw selectors).

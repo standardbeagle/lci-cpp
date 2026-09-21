@@ -18,6 +18,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #ifndef _WIN32
 #include <algorithm>
@@ -1520,6 +1521,49 @@ TEST_F(ContextResolutionFixture,
     EXPECT_EQ(j["unresolved"][0]["symbol"], "GhostOnly");
     EXPECT_EQ(j["unresolved"][0]["role"], "contract");
     EXPECT_EQ(j["stats"]["refs_loaded"], 1) << j.dump();
+}
+
+// The TOP-LEVEL verbose aliases (task/project_root/refs) are a DELIBERATE,
+// load-only accommodation — distinct from the stricter per-ref `f`/`s` contract
+// the tests above enforce. Karpathy rule 6 (no silent fallback) requires they
+// surface on stderr while STILL loading the manifest. This always-on test pins
+// both halves: it captures std::cerr around a real context_manifest load whose
+// top level carries verbose `task`, `project_root` and a non-empty verbose
+// `refs` array holding one valid compact `{f, s}` ref, and asserts (a) the
+// "lci: warning: context_manifest accepted verbose key" line is emitted once per
+// aliased key and (b) the ref still hydrates (one resolved ref, none unresolved,
+// no top-level error). Guards against the top-level fallback being tightened
+// into a rejection, and against the warning being dropped.
+TEST_F(ContextResolutionFixture,
+       TopLevelVerboseKeysWarnOnStderrAndStillLoadRefs) {
+    auto manifest = nlohmann::json{
+        {"task", "top-level verbose"},         // verbose alias for t
+        {"project_root", temp_dir_.string()},  // verbose alias for p
+        {"refs", nlohmann::json::array(        // verbose alias for r
+            {{{"f", "dup_a.go"}, {"s", "Dup"}}})}};
+
+    std::ostringstream capture;
+    auto* old_cerr = std::cerr.rdbuf(capture.rdbuf());
+    auto j = load(manifest);
+    std::cerr.rdbuf(old_cerr);  // restore before asserting on captured text
+
+    // (b) The accommodation still loads: the compact ref nested under the
+    // verbose top-level `refs` array resolves, with nothing spuriously dropped.
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    ASSERT_EQ(j["refs"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["refs"][0]["file"], "dup_a.go");
+    EXPECT_EQ(j["refs"][0]["symbol"], "Dup");
+    EXPECT_EQ(j["stats"]["unresolved_count"], 0) << j.dump();
+    EXPECT_EQ(j["stats"]["refs_loaded"], 1) << j.dump();
+
+    // (a) The accommodation still warns, once per aliased key.
+    const std::string out = capture.str();
+    EXPECT_NE(out.find("lci: warning: context_manifest accepted verbose key"),
+              std::string::npos)
+        << "top-level verbose keys must warn, not be silently accepted: " << out;
+    EXPECT_NE(out.find("verbose key 'task'"), std::string::npos) << out;
+    EXPECT_NE(out.find("verbose key 'project_root'"), std::string::npos) << out;
+    EXPECT_NE(out.find("verbose key 'refs'"), std::string::npos) << out;
 }
 
 // End-to-end (MCP dispatch): a ref whose only selector is an empty `{}` line

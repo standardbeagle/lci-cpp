@@ -456,7 +456,11 @@ class ListSymbolsScalingFixture : public ::testing::Test {
 // what 1k allocates (the old loop copied the file path into every row — a
 // malloc per symbol, invisible to a latency-only check but the defect the
 // task names). Counted via the process-wide operator new hook above, armed
-// only around the handler call.
+// only around the handler call. This is the AUTHORITATIVE, load-independent
+// carrier of the per-symbol-heap regression class that 7031c53 removed; the
+// wall-clock sibling below is a coarse backstop only, because a timing ratio
+// cannot separate the regression from the fix under parallel load (see that
+// test).
 TEST_F(ListSymbolsScalingFixture,
        ListSymbolsAllocationsDoNotScaleWithSymbolCount) {
     auto allocs_for_list = [](MasterIndex& idx) {
@@ -485,10 +489,27 @@ TEST_F(ListSymbolsScalingFixture,
         << " @1k vs " << allocs_10k << " @10k";
 }
 
-// Linear-latency guard: 10x symbols must cost < 12x wall time, best-of-5
-// interleaved (relative assertion only — never absolute ns).
+// Coarse superlinear-latency backstop: 10x symbols must not cost a grossly
+// superlinear multiple of wall time (a relative assertion only — never an
+// absolute ns bound). This is NOT the regression detector. The precise
+// per-symbol-heap shape that 7031c53 removed is carried load-independently and
+// deterministically by ListSymbolsAllocationsDoNotScaleWithSymbolCount above
+// (the operator-new counter reads ~186 vs ~10 189 allocs on the fix vs the
+// regression — a >50x gap no scheduler noise can bridge). A wall-clock ratio
+// CANNOT separate regression from fix on a shared suite: the two measured only
+// 10.69x vs 13.26x on a quiet box (7031c53), a margin smaller than ordinary
+// jitter, and the previous best-of-5 / 12.0 tripped under `ctest -j4` when one
+// scheduling stall on the ~3.5ms 10k sample — while the ~0.3ms 1k sample
+// caught a clean run — pushed the ratio to 13.62. Wall-clock is therefore kept
+// only as a quadratric-blowup net: interleave many rounds so each side's
+// minimum converges on its uncontended floor where one exists, and hold the
+// bound above the largest contention-inflated reading rather than above the
+// quiet mean. Quiet-machine baseline here: best-of-25 floor ~11x (12-core box);
+// under sustained external load the ratio was measured up to ~17x, so the bound
+// is set at 25x — ~2.3x the quiet floor and ~47% clear of the worst load spike,
+// yet far below the ~100x a genuine O(n^2) collect walk would cost.
 TEST_F(ListSymbolsScalingFixture,
-       ListSymbolsTenfoldSymbolsUnderTwelvefoldTime) {
+       ListSymbolsTenfoldSymbolsScaleLinearly) {
     auto time_list_once = [](MasterIndex& idx) {
         nlohmann::json params = nlohmann::json::object();
         params["max"] = 10;
@@ -501,11 +522,13 @@ TEST_F(ListSymbolsScalingFixture,
         EXPECT_FALSE(result.is_error) << result.text;
         return ns;
     };
-    (void)time_list_once(*small_->indexer);  // warm-up
-    (void)time_list_once(*big_->indexer);
+    for (int warm = 0; warm < 3; ++warm) {  // retire cold-cache/branch outliers
+        (void)time_list_once(*small_->indexer);
+        (void)time_list_once(*big_->indexer);
+    }
     long long best_small = std::numeric_limits<long long>::max();
     long long best_big = std::numeric_limits<long long>::max();
-    for (int round = 0; round < 5; ++round) {  // interleave: equal exposure
+    for (int round = 0; round < 25; ++round) {  // interleave: equal exposure
         best_small = std::min(best_small, time_list_once(*small_->indexer));
         best_big = std::min(best_big, time_list_once(*big_->indexer));
     }
@@ -513,7 +536,7 @@ TEST_F(ListSymbolsScalingFixture,
                    static_cast<double>(std::max<long long>(best_small, 1));
     std::printf("[ ListSymbolsLatency ] 1k=%.3fus 10k=%.3fus ratio=%.2f\n",
                 best_small / 1e3, best_big / 1e3, ratio);
-    EXPECT_LT(ratio, 12.0)
+    EXPECT_LT(ratio, 25.0)
         << "10x symbols cost " << ratio << "x time (1k=" << best_small
         << "ns 10k=" << best_big << "ns)";
 }
