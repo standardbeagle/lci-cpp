@@ -295,6 +295,13 @@ TEST(IndexPerformanceRequirements, FileAccessScalesSublinearly) {
     auto avg_small = best_of(50);
     auto avg_large = best_of(1000);
 
+    // avg_small is a per-lookup AVERAGE over kIterations=5000 timed lookups
+    // (bench divides the region by the iteration count), so it cannot round
+    // to zero: even one steady_clock::now() read costs more than 1ns, and
+    // every iteration pays two of them. The clamp is therefore never a
+    // clamped-zero denominator -- unlike the one-shot removal baseline in
+    // PostingsRemoveFileScalesWithTokenCountNotFileCount, which had to be
+    // made a per-pair average for exactly this reason.
     double ratio = static_cast<double>(avg_large.count()) /
                    static_cast<double>(std::max<int64_t>(avg_small.count(), 1));
     std::printf("[ FileAccessScales ] avg_50=%lldns avg_1000=%lldns ratio=%.2f\n",
@@ -360,6 +367,10 @@ TEST(IndexPerformanceRequirements, PaginationRandomTraversalIsFlat) {
     auto shallow_cost = best_of([](int) { return 0; });
     auto deep_cost = best_of([&](int) { return total - 10; });
 
+    // shallow_cost is an AVERAGE over kIterations=40 full list_symbols calls
+    // over a >100-symbol index (collect + sort + JSON), each already
+    // microseconds; 40 of them cannot average below 1ns, so this clamp never
+    // substitutes a fabricated denominator for an unmeasurable baseline.
     double ratio = static_cast<double>(deep_cost.count()) /
                    static_cast<double>(
                        std::max<int64_t>(shallow_cost.count(), 1));

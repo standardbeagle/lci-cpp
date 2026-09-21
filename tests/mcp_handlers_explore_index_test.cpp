@@ -532,6 +532,9 @@ TEST_F(ListSymbolsScalingFixture,
         best_small = std::min(best_small, time_list_once(*small_->indexer));
         best_big = std::min(best_big, time_list_once(*big_->indexer));
     }
+    // best_small is a single list_symbols call over a 1k-symbol index
+    // (collect + sort + JSON, ~ms), an absolute reading that cannot measure
+    // 0ns; the clamp never substitutes a fabricated denominator.
     double ratio = static_cast<double>(best_big) /
                    static_cast<double>(std::max<long long>(best_small, 1));
     std::printf("[ ListSymbolsLatency ] 1k=%.3fus 10k=%.3fus ratio=%.2f\n",

@@ -326,6 +326,10 @@ TEST(SymbolStoreTest, BenchmarkLookup) {
         best_big = std::min(best_big, best_ns_per_lookup(big, 10000, 5));
     }
 
+    // best_small is a per-lookup AVERAGE over 20000 iterations x 5 batches
+    // (best_ns_per_lookup divides by the iteration count), so it cannot round
+    // to zero -- timing overhead alone exceeds 1ns/lookup. The clamp never
+    // hides an unmeasurable denominator.
     const double ratio = static_cast<double>(best_big) /
                          static_cast<double>(std::max<long long>(best_small, 1));
     EXPECT_LT(ratio, 3.0)
@@ -696,6 +700,10 @@ TEST(SymbolStoreTest, SetUpdateCostPerSymbolScalesWithCountNotBucket) {
 
     long long per_sym_1x = best_per_symbol(2000);
     long long per_sym_10x = best_per_symbol(20000);
+    // per_sym_1x is reset_pass's total divided by snapshot.size()=2000 -- a
+    // per-symbol AVERAGE. Each store.set() hashes once, so the whole pass is
+    // far above 2000ns and the average cannot round to zero; the clamp never
+    // becomes a fabricated denominator.
     double ratio = static_cast<double>(per_sym_10x) /
                    static_cast<double>(std::max<long long>(per_sym_1x, 1));
     std::printf("[ SetUpdateScaling ] 1x=%lldns/sym 10x=%lldns/sym ratio=%.2f\n",
