@@ -570,6 +570,101 @@ TEST_F(ContextHandlerFixture, AppendRejectsInvalidRefsAndLeavesFile) {
         << loaded.text;
 }
 
+// Append-direction counterpart of AppendRejectsInvalidRefsAndLeavesFile: the
+// invalid ref lives in the manifest ALREADY ON DISK, and every ref being
+// appended is valid. The append-oriented loader silently dropped invalid_out,
+// so the merge-and-overwrite erased the invalid existing ref from disk and
+// reported success. A destination that cannot be round-tripped losslessly must
+// refuse the append and leave its bytes untouched. Seeds are written directly
+// with an ofstream: a save call rejects those refs and cannot produce the
+// state under test.
+TEST_F(ContextHandlerFixture,
+       AppendToManifestWithInvalidExistingRefErrorsAndLeavesFile) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"verbose-only-second-ref",
+         R"({"t":"seed","v":"1.0","r":[{"f":"main.go","s":"main"},)"
+         R"({"file":"main.go","symbol":"main"}]})"},
+        {"bare-object-second-ref",
+         R"({"t":"seed","v":"1.0","r":[{"f":"main.go","s":"main"},{}]})"},
+        {"wrong-typed-second-ref",
+         R"({"t":"seed","v":"1.0","r":[{"f":"main.go","s":"main"},)"
+         R"({"f":123,"s":"main"}]})"},
+    };
+    const std::string manifest_name = "append_invalid_existing.json";
+    const auto manifest_path = temp_dir_ / manifest_name;
+    for (const auto& [label, seed_json] : cases) {
+        {
+            std::ofstream out(manifest_path,
+                              std::ios::binary | std::ios::trunc);
+            out << seed_json;
+        }
+        std::ifstream before(manifest_path, std::ios::binary);
+        const std::string original((std::istreambuf_iterator<char>(before)),
+                                   std::istreambuf_iterator<char>());
+        ASSERT_EQ(original, seed_json) << label;
+
+        nlohmann::json attempt = {
+            {"operation", "save"},
+            {"to_file", manifest_name},
+            {"append", true},
+            {"refs", {{{"f", "handler.go"}, {"s", "handleRequest"}}}}};
+        auto r = handle_context(attempt, *indexer_, temp_dir_.string());
+        EXPECT_TRUE(r.is_error)
+            << label << ": appending a valid ref to a manifest holding an "
+                          "invalid existing ref must fail, got: "
+            << r.text;
+        EXPECT_NE(r.text.find("cannot append"), std::string::npos)
+            << label << ": " << r.text;
+        EXPECT_NE(r.text.find("unreadable"), std::string::npos)
+            << label << ": " << r.text;
+
+        std::ifstream after(manifest_path, std::ios::binary);
+        const std::string now((std::istreambuf_iterator<char>(after)),
+                              std::istreambuf_iterator<char>());
+        EXPECT_EQ(now, original)
+            << label << ": a refused append must leave the manifest bytes "
+                          "unchanged: "
+            << now;
+    }
+}
+
+// Load guardrail over the same three seeded destinations: the invalid existing
+// ref is isolated (reason == "invalid_ref"), the valid sibling still hydrates,
+// no top-level error is returned. Fixing append must not regress this.
+TEST_F(ContextHandlerFixture,
+       LoadManifestWithInvalidExistingRefStillIsolatesAndHydrates) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"verbose-only-second-ref",
+         R"({"t":"seed","v":"1.0","r":[{"f":"main.go","s":"main"},)"
+         R"({"file":"main.go","symbol":"main"}]})"},
+        {"bare-object-second-ref",
+         R"({"t":"seed","v":"1.0","r":[{"f":"main.go","s":"main"},{}]})"},
+        {"wrong-typed-second-ref",
+         R"({"t":"seed","v":"1.0","r":[{"f":"main.go","s":"main"},)"
+         R"({"f":123,"s":"main"}]})"},
+    };
+    const std::string manifest_name = "load_invalid_existing.json";
+    const auto manifest_path = temp_dir_ / manifest_name;
+    for (const auto& [label, seed_json] : cases) {
+        {
+            std::ofstream out(manifest_path,
+                              std::ios::binary | std::ios::trunc);
+            out << seed_json;
+        }
+        nlohmann::json params = {{"operation", "load"},
+                                 {"from_file", manifest_name}};
+        auto r = handle_context(params, *indexer_, temp_dir_.string());
+        ASSERT_FALSE(r.is_error) << label << ": " << r.text;
+        auto j = nlohmann::json::parse(r.text);
+        EXPECT_EQ(j["stats"]["refs_loaded"], 1)
+            << label << ": the valid sibling must hydrate: " << r.text;
+        ASSERT_EQ(j["unresolved"].size(), 1u)
+            << label << ": exactly one unresolved entry expected: " << r.text;
+        EXPECT_EQ(j["unresolved"][0]["reason"], "invalid_ref")
+            << label << ": " << r.text;
+    }
+}
+
 // apply_expansions used to hydrate callers/callees and then discard them
 // ((void)expanded), charging tokens for content that never reached the
 // response. A 'callers' directive must surface the caller's source in the
@@ -1323,6 +1418,61 @@ TEST_F(ContextWireFixture, WireAppendWrongTypedRefFailsExplicitlyAndLeavesFile) 
     const std::string now((std::istreambuf_iterator<char>(after)),
                           std::istreambuf_iterator<char>());
     EXPECT_EQ(now, original) << "failed append must not touch the file: " << now;
+}
+
+// Same defect through the real tools/call wire: the manifest already on disk
+// holds an invalid ref and every appended ref is valid. A well-parsed but
+// truncated load that erased the invalid sibling used to merge-and-overwrite,
+// returning ref_count=2 and losing the invalid entry silently. Now append
+// refuses with an explicit error envelope and the file bytes must not move.
+// Seeds are written with std::ofstream: save would reject them and could not
+// produce the state under test.
+TEST_F(ContextWireFixture,
+       WireAppendToManifestWithInvalidExistingRefErrorsAndLeavesFile) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"verbose-only-second-ref",
+         R"({"t":"seed","v":"1.0","r":[{"f":"dup_a.go","s":"Dup"},)"
+         R"({"file":"dup_a.go","symbol":"Dup"}]})"},
+        {"bare-object-second-ref",
+         R"({"t":"seed","v":"1.0","r":[{"f":"dup_a.go","s":"Dup"},{}]})"},
+        {"wrong-typed-second-ref",
+         R"({"t":"seed","v":"1.0","r":[{"f":"dup_a.go","s":"Dup"},)"
+         R"({"f":123,"s":"Dup"}]})"},
+    };
+    const std::string manifest_name = "wire_append_invalid_existing.json";
+    const auto manifest_path = temp_dir_ / manifest_name;
+    for (const auto& [label, seed_json] : cases) {
+        {
+            std::ofstream out(manifest_path,
+                              std::ios::binary | std::ios::trunc);
+            out << seed_json;
+        }
+        std::ifstream before(manifest_path, std::ios::binary);
+        const std::string original((std::istreambuf_iterator<char>(before)),
+                                   std::istreambuf_iterator<char>());
+        ASSERT_EQ(original, seed_json) << label;
+
+        auto r = call({{"operation", "save"},
+                       {"to_file", manifest_name},
+                       {"append", true},
+                       {"refs", {{{"f", "dup_b.go"}, {"s", "Dup"}}}}});
+        ASSERT_TRUE(r.is_error)
+            << label << ": expected isError envelope, got: "
+            << r.payload.dump();
+        const std::string msg = r.payload[1].get<std::string>();
+        EXPECT_NE(msg.find("cannot append"), std::string::npos)
+            << label << ": " << msg;
+        EXPECT_NE(msg.find("unreadable"), std::string::npos)
+            << label << ": " << msg;
+        EXPECT_EQ(msg.find("Internal error"), std::string::npos)
+            << label << ": must not degrade to the generic fallback: " << msg;
+
+        std::ifstream after(manifest_path, std::ios::binary);
+        const std::string now((std::istreambuf_iterator<char>(after)),
+                              std::istreambuf_iterator<char>());
+        EXPECT_EQ(now, original)
+            << label << ": refused append must not touch the file: " << now;
+    }
 }
 
 // v1.0 (and the default empty version) remain supported.

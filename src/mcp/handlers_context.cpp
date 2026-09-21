@@ -485,13 +485,21 @@ std::string load_manifest_from_file(const std::string& file_path,
     return {};
 }
 
-/// Append-oriented loader: strict, keeps the historic per-ref validation so a
-/// manifest with only malformed refs is rejected rather than silently merged.
+/// Append-oriented loader: refuses any manifest it cannot round-trip losslessly
+/// (a top-level parse problem, or any ref the shared parser isolated as
+/// invalid). The caller's merge-and-overwrite path would otherwise silently
+/// erase the isolated refs, so this contract is stricter than the three-arg
+/// loader's per-ref isolation used on the load path. `validate_manifest` still
+/// catches refs that survived parse but carry no honoured selector.
 std::string load_manifest_from_file(const std::string& file_path,
                                     ContextManifest& out) {
-    std::vector<UnresolvedRef> ignored;
-    auto err = load_manifest_from_file(file_path, out, ignored);
+    std::vector<UnresolvedRef> invalid;
+    auto err = load_manifest_from_file(file_path, out, invalid);
     if (!err.empty()) return err;
+    if (!invalid.empty()) {
+        return "contains " + std::to_string(invalid.size()) +
+               " unparseable reference(s) that an append would silently drop";
+    }
     return validate_manifest(out);
 }
 
