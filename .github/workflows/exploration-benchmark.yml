@@ -1,0 +1,149 @@
+name: exploration-benchmark
+
+# INFORMATIONAL ONLY. Stage-1 exploration paired-baseline artifact validator and
+# report regenerator. This workflow is **never** a required status check and is
+# triggered only by hand or on a schedule — it does not run on `pull_request` or
+# block any merge. Its job is to prove the committed stage-1 artifacts
+# (`results/exploration-stage1/*`) stay self-consistent and reproducible, and to
+# surface the LCI-vs-baseline numbers as a report — explicitly WITHOUT turning any
+# performance delta into a merge gate.
+#
+# It performs NO paid provider runs: it scores the committed run ledger only. It
+# never invokes `exploration_runner.py run`. Losing or failing this job must have
+# zero effect on merging.
+
+on:
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: "Print the full aggregate.json in the job summary"
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Weekly, informational. A failure here pages nobody and gates nothing.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-stage1-artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Informational: a red run is an observation, never a blocker.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: benchmarks/repo-qa
+    env:
+        # The one committed stage-1 run configuration this job validates against.
+        RUN_CONFIG: exploration/run-configs/stage1-baseline.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (validator + hermetic scorer suite)
+        run: python -m pip install --disable-pip-version-check jsonschema pytest
+
+      - name: Structural task-bank validation (hermetic; live layer skips without corpora)
+        run: python scripts/validate_exploration_tasks.py
+
+      - name: Hermetic runner/scorer suite (no provider; proves pipeline wiring)
+        run: >-
+          python -m pytest
+          tests/test_exploration_scorer.py
+          tests/test_exploration_task_schema.py
+          -q
+
+      - name: Regenerate scores + aggregate from the committed ledger
+        run: |
+          python scripts/score_exploration.py \
+            --tasks-dir exploration/tasks \
+            --records results/exploration-stage1/run-records.jsonl \
+            --out-dir "$RUNNER_TEMP/regen"
+
+      - name: Check committed aggregate is reproducible (no LCI-vs-baseline gate)
+        run: |
+          python - <<'PY'
+          import json
+          committed = json.load(open("results/exploration-stage1/aggregate.json"))
+          regen = json.load(open(__import__("os").environ["RUNNER_TEMP"] + "/regen/aggregate.json"))
+          assert committed == regen, "committed aggregate.json is NOT reproducible from run-records.jsonl"
+          print("aggregate.json reproducible:", json.dumps(committed.get("pairing", {}).get("unpaired_count")))
+          PY
+
+      - name: Validate cell accounting — every (task, arm, rep) present, none omitted
+        run: |
+          python - <<'PY'
+          import json, os
+          cfg = json.load(open(os.environ["RUN_CONFIG"]))
+          tasks = [json.load(open("exploration/tasks/" + n))
+                   for n in sorted(os.listdir("exploration/tasks")) if n.endswith(".json")]
+          recs = [json.loads(l) for l in open("results/exploration-stage1/run-records.jsonl") if l.strip()]
+          reps = cfg["repetitions"]["per_cell"]
+          expected = {f"{t['id']}::{arm}::seed-{t['manifest_ref']['seed']}"
+                      for t in tasks for arm in ("treatment", "baseline")}
+          got = {r["run_key"] for r in recs}
+          missing = expected - got
+          extra = got - expected
+          assert not missing, f"OMITTED cells (forbidden): {sorted(missing)}"
+          assert not extra, f"cells present but not in the planned grid: {sorted(extra)}"
+          assert len(recs) == len(tasks) * 2 * reps, "cell count != tasks x arms x reps"
+          bad = [r["run_key"] for r in recs if r.get("status") not in
+                 ("answered","timeout","provider_error","tool_violation","config_error","malformed_output","not_executed")]
+          assert not bad, f"cells with a non-machine-readable status: {bad}"
+          print(f"cell accounting OK: {len(recs)} cells, 0 omitted, statuses all machine-readable")
+          PY
+
+      - name: Validate run-config provenance against the committed registry + arms
+        run: |
+          python - <<'PY'
+          import json, os
+          cfg = json.load(open(os.environ["RUN_CONFIG"]))
+          corp = {c["id"]: c for c in json.load(open("exploration/corpora.json"))["corpora"]}
+          for entry in cfg["corpora"]:
+              cid = entry["corpus_id"]; ref = corp[cid]
+              assert entry["source_commit"] == ref["pinned_commit"], f"source_commit drift {cid}"
+              assert entry["reference_tree_hash"] == ref["reference_tree_hash"][f"seed-{entry['seed']}"], f"tree-hash drift {cid}"
+          import sys; sys.path.insert(0, "exploration")
+          from runner import toolsets
+          assert cfg["arms"]["treatment"]["allowlist"] == list(toolsets.arm_allowlist("treatment")), "treatment allowlist drift"
+          assert cfg["arms"]["baseline"]["allowlist"] == list(toolsets.arm_allowlist("baseline")), "baseline allowlist drift"
+          assert cfg["provenance"]["task_bank"]["task_count"] == len([n for n in os.listdir("exploration/tasks") if n.endswith(".json")]), "task_count drift"
+          print("provenance + allowlists consistent with corpora.json and runner.toolsets")
+          PY
+
+      - name: Informational summary
+        env:
+          VERBOSE: ${{ github.event.inputs.verbose }}
+        run: |
+          python - <<'PY'
+          import json, os
+          agg = json.load(open("results/exploration-stage1/aggregate.json"))
+          arms = agg["arms"]; pair = agg["pairing"]
+          lines = ["## Stage-1 exploration — informational report", ""]
+          lines.append("| arm | cells | answered | success_rate | evidence F1 | paired |")
+          lines.append("|---|---|---|---|---|---|")
+          for name in ("treatment", "baseline"):
+              a = arms.get(name, {})
+              ev = a.get("evidence", {}) or {}
+              lines.append(f"| {name} | {a.get('count')} | {a.get('answered')} | "
+                           f"{a.get('success_rate')} | {ev.get('f1')} | {pair['paired_count']} |")
+          lines.append("")
+          lines.append(f"`deltas` present: {bool(agg.get('deltas'))} "
+                       f"(an empty deltas map = no measured LCI-vs-baseline effect; "
+                       f"this job reports it, it does NOT gate a merge on it).")
+          print("\n".join(lines))
+          if os.environ.get("VERBOSE") == "true":
+              print("\n```json\n" + json.dumps(agg, indent=2, sort_keys=True) + "\n```")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write("\n".join(lines) + "\n")
+          PY
