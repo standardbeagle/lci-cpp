@@ -1,10 +1,36 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace lci {
+
+// -- Shared hydration budget --------------------------------------------------
+//
+// ONE budget governs a hydrated working set (the `context` loader and, later,
+// the CLI/composites that reuse it). For a positive budget the charge is
+// ceil(UTF-8 bytes of the final serialized context JSON / 4) — a byte-based
+// ESTIMATE of context size, deliberately NOT a model-tokenizer count. A budget
+// of 0 preserves the legacy unlimited behavior.
+
+/// Default token budget for CLI/composite callers that hydrate a working set
+/// under a bound. An MCP caller that omits max_tokens keeps unlimited (0).
+constexpr int kHydrationDefaultMaxTokens = 8000;
+
+/// Traversal bounds applied independently of the token budget, and only to a
+/// bounded load (max_tokens > 0). They cap the request shape and the graph walk
+/// so a hostile or oversized manifest cannot drive unbounded hydration.
+constexpr int kHydrationMaxInputRefs = 128;
+constexpr int kHydrationMaxExpansionDepth = 5;
+constexpr int kHydrationMaxVisitedTargets = 512;
+
+/// The shared token estimate: ceil(UTF-8 bytes / 4). An estimate of serialized
+/// context size, not a model-tokenizer count.
+inline int hydration_token_estimate(size_t utf8_bytes) {
+    return static_cast<int>((utf8_bytes + 3) / 4);
+}
 
 /// A range of lines in a file (1-indexed, inclusive).
 struct LineRange {
@@ -67,6 +93,13 @@ struct HydratedRef {
     // the line numbers are current-index positions and carry no semantic
     // stability guarantee across edits.
     bool is_line_range_literal{};
+    // Roles / expansion relationships that resolved to this same canonical
+    // identity. When several requested refs or an expansion target collapse
+    // onto one hydrated source, the source is emitted once and every
+    // requested role / relationship survives here — provenance is never lost
+    // by deduplication. Empty when this entry was requested under a single
+    // role and no expansion target collapsed onto it.
+    std::vector<std::string> provenance;
     PurityInfo purity;
     bool has_purity{};
 };
@@ -79,6 +112,13 @@ struct HydrationStats {
     int expansions_applied{};
     int unresolved_count{};
     bool truncated{};
+    // Primary refs (targeted source) omitted because the shared budget could
+    // not admit them, counted separately from expansion refs omitted.
+    int refs_omitted{};
+    int expansions_omitted{};
+    // Traversal (input-ref / depth / visited-target) was bounded, independent
+    // of the token budget. Reported so a large graph is never silently clipped.
+    bool traversal_truncated{};
 };
 
 /// Outcome of resolving a reference's identity against the current index.

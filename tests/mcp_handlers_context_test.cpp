@@ -11,6 +11,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <absl/container/flat_hash_set.h>
+
 #include "unique_temp.h"
 
 #include <chrono>
@@ -690,11 +692,415 @@ TEST_F(ContextHandlerFixture, ExpansionCallersEmitContent) {
                               << j.dump();
 }
 
-// The budget was checked only before hydrating the NEXT ref, so the last
-// admitted ref could overshoot arbitrarily and max_tokens - total_tokens
-// went negative into apply_expansions. With max_tokens=1 the first ref is
-// admitted (overshoot bounded by that one ref), the second is truncated,
-// and expansions receive a zero — never negative — budget, emitting nothing.
+// =============================================================================
+// Shared hydration budget (task 01M2VE7HFD8XREW9WGESXYCDAE)
+//
+// ONE budget is charged across the whole working set: the estimate is
+// ceil(UTF-8 bytes of the FINAL serialized context JSON / 4) — an estimate of
+// wire size, deliberately NOT a model-tokenizer count. The old loader charged
+// only the source bytes of each ref (not the JSON envelope, stats, or warnings)
+// and admitted a whole ref after checking only PRIOR usage, so the response
+// silently overshot max_tokens and the first ref could be arbitrarily large.
+// These tests assert the serialized size directly and pin the new contract:
+// primaries admitted before expansions, dedup by canonical identity with role/
+// relationship provenance retained (never repeated source), no oversized first
+// ref/expansion, a typed budget_too_small when even the minimal envelope cannot
+// fit, and independent traversal bounds (input refs, depth, visited targets).
+// =============================================================================
+
+// UTF-8 byte length of the emitted context JSON, as a token estimate: ceil/4.
+static int serialized_estimate(const std::string& json_text) {
+    return static_cast<int>((json_text.size() + 3) / 4);
+}
+
+class ContextBudgetFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_ctx_budget_");
+        std::filesystem::create_directories(temp_dir_);
+
+        // main(): small body, calls handleRequest.
+        write_file(temp_dir_ / "main.go",
+                   "package main\n\n"
+                   "func main() {\n"
+                   "\thandleRequest()\n"
+                   "}\n");
+        // handleRequest(): small body, calls parseInput.
+        write_file(temp_dir_ / "handler.go",
+                   "package main\n\n"
+                   "func handleRequest() {\n"
+                   "\tparseInput(\"hello\")\n"
+                   "}\n");
+        // parseInput(): deliberately large so a tight budget cannot admit its
+        // full source alongside anything else.
+        std::string big = "package main\n\nfunc parseInput(s string) int {\n";
+        for (int i = 0; i < 120; ++i) {
+            big += "\tlet x" + std::to_string(i) + " = " + std::to_string(i) +
+                   " // a filler line to inflate the body\n";
+        }
+        big += "\treturn len(s)\n}\n";
+        write_file(temp_dir_ / "utils.go", big);
+
+        // A call cycle: ping->pong->ping. callers:N must terminate and be
+        // bounded by the shared traversal depth/visited caps.
+        write_file(temp_dir_ / "cycle.go",
+                   "package p\n\n"
+                   "func ping() int { return pong() }\n\n"
+                   "func pong() int { return ping() }\n");
+
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+    }
+    void TearDown() override {
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+    static void write_file(const std::filesystem::path& path,
+                           const std::string& content) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream out(path);
+        out << content;
+        out.flush();
+    }
+    nlohmann::json load_manifest(nlohmann::json manifest, int max_tokens) {
+        nlohmann::json params = {{"operation", "load"},
+                                 {"from_string", manifest.dump()},
+                                 {"max_tokens", max_tokens}};
+        auto result = handle_context(params, *indexer_, temp_dir_.string());
+        if (result.is_error) {
+            return nlohmann::json{{"__error__", result.text}};
+        }
+        return nlohmann::json::parse(result.text);
+    }
+    ToolResult load_raw(nlohmann::json manifest, int max_tokens) {
+        nlohmann::json params = {{"operation", "load"},
+                                 {"from_string", manifest.dump()},
+                                 {"max_tokens", max_tokens}};
+        return handle_context(params, *indexer_, temp_dir_.string());
+    }
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+// max_tokens <= 0 keeps the legacy unlimited path: every ref hydrates, no
+// truncation, no budget error.
+TEST_F(ContextBudgetFixture, ZeroBudgetPreservesLegacyUnlimitedHydration) {
+    nlohmann::json manifest = {
+        {"r", {{{"f", "main.go"}, {"s", "main"}},
+               {{"f", "handler.go"}, {"s", "handleRequest"}},
+               {{"f", "utils.go"}, {"s", "parseInput"}}}}};
+    nlohmann::json params = {{"operation", "load"},
+                             {"from_string", manifest.dump()}};
+    auto result = handle_context(params, *indexer_, temp_dir_.string());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+    EXPECT_EQ(j["stats"]["refs_loaded"], 3) << j.dump();
+    EXPECT_FALSE(j["stats"]["truncated"].get<bool>()) << j.dump();
+}
+
+// A budget so small the empty response envelope cannot fit is a typed
+// budget_too_small error, never a truncated-but-valid partial payload and
+// never a negative budget.
+TEST_F(ContextBudgetFixture, BudgetTooSmallIsTypedError) {
+    nlohmann::json manifest = {
+        {"r", {{{"f", "main.go"}, {"s", "main"}}}}};
+    auto r = load_raw(manifest, 1);
+    ASSERT_TRUE(r.is_error) << "expected an error for an unfillable envelope: "
+                            << r.text;
+    auto j = nlohmann::json::parse(r.text);
+    EXPECT_EQ(j.value("code", ""), "budget_too_small") << r.text;
+    // It is a machine-readable code, not only prose.
+    EXPECT_TRUE(j.contains("error")) << r.text;
+}
+
+// The first ref (primary) is never admitted if its serialized contribution
+// cannot fit: the loader returns valid JSON with zero refs, truncation and an
+// omitted count, and never leaks the oversized body clipped as if complete.
+TEST_F(ContextBudgetFixture, NeverAdmitsOversizedFirstRef) {
+    // utils.go/parseInput has a deliberately large body. Choose a budget that
+    // fits the empty reporting envelope but not the large body.
+    nlohmann::json manifest = {
+        {"r", {{{"f", "utils.go"}, {"s", "parseInput"}}}}};
+    // Confirm the minimal envelope fits at this budget while the ref does not,
+    // by first checking a smaller budget is a budget_too_small error.
+    auto too_small = load_raw(manifest, 40);
+    ASSERT_TRUE(too_small.is_error) << too_small.text;
+    auto too_small_j = nlohmann::json::parse(too_small.text);
+    EXPECT_EQ(too_small_j.value("code", ""), "budget_too_small");
+
+    // 150 tokens (600 bytes) fits the envelope but not the ~6KB body, so the
+    // oversized first ref is omitted, never admitted or clipped.
+    auto j = load_manifest(manifest, 150);
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_TRUE(j["stats"]["truncated"].get<bool>()) << j.dump();
+    EXPECT_EQ(j["stats"]["refs_loaded"], 0) << j.dump();
+    EXPECT_GE(j["stats"]["refs_omitted"], 1) << j.dump();
+    // The oversized source must not be present (not clipped, not admitted).
+    auto dumped = j.dump();
+    EXPECT_EQ(dumped.find("a filler line to inflate"), std::string::npos)
+        << "oversized ref must not leak (even clipped): " << dumped;
+}
+
+// For every positive budget, the FINAL serialized JSON's ceil(bytes/4) estimate
+// never exceeds max_tokens — the invariant the old byte-of-source accounting
+// broke (the JSON envelope + stats + warnings add bytes on top of sources).
+TEST_F(ContextBudgetFixture, SerializedSizeNeverExceedsBudget) {
+    nlohmann::json manifest = {
+        {"t", "working set"},
+        {"r", {{{"f", "main.go"}, {"s", "main"}, {"role", "primary"}},
+               {{"f", "handler.go"},
+                {"s", "handleRequest"},
+                {"role", "contract"},
+                {"x", nlohmann::json::array({"callers", "callees"})}},
+               {{"f", "utils.go"}, {"s", "parseInput"}, {"role", "modify"}}}}};
+    for (int budget : {120, 200, 300, 500, 800, 1200, 2000, 8000}) {
+        auto j = load_manifest(manifest, budget);
+        if (j.contains("__error__")) {
+            // budget_too_small is allowed only below the minimal envelope.
+            auto e = nlohmann::json::parse(j["__error__"].get<std::string>());
+            EXPECT_EQ(e.value("code", ""), "budget_too_small")
+                << "budget=" << budget << " " << j.dump();
+            continue;
+        }
+        nlohmann::json params = {{"operation", "load"},
+                                 {"from_string", manifest.dump()},
+                                 {"max_tokens", budget}};
+        auto result =
+            handle_context(params, *indexer_, temp_dir_.string());
+        ASSERT_FALSE(result.is_error);
+        int est = serialized_estimate(result.text);
+        EXPECT_LE(est, budget)
+            << "budget=" << budget << " serialized estimate " << est
+            << " exceeds the ceiling; bytes=" << result.text.size()
+            << "\n" << result.text;
+    }
+}
+
+// Multi-byte UTF-8 in a ref note is charged by its BYTE length, not its code
+// point count. A note of all-ASCII would under-count the budget; the estimate
+// must reflect the serialized UTF-8 bytes.
+TEST_F(ContextBudgetFixture, NonAsciiIsChargedAsUtf8Bytes) {
+    // "中" is 3 UTF-8 bytes; repeat to force a measurable byte-vs-codepoint gap.
+    std::string note;
+    for (int i = 0; i < 60; ++i) note += "中文漢字";  // 4*3 bytes each = 12B
+    nlohmann::json manifest = {
+        {"r", {{{"f", "main.go"}, {"s", "main"}, {"n", note}}}}};
+    // Compute the full serialized size (unlimited) to pick a boundary budget.
+    nlohmann::json unlimited = {{"operation", "load"},
+                                {"from_string", manifest.dump()}};
+    auto full = handle_context(unlimited, *indexer_, temp_dir_.string());
+    ASSERT_FALSE(full.is_error) << full.text;
+    int full_est = serialized_estimate(full.text);
+    // The byte-based estimate must exceed a naive code-point count: this note
+    // is 240 code points but 720 bytes, so the response is > 180 tokens by the
+    // byte model.
+    EXPECT_GT(full_est, 180)
+        << "multi-byte note must inflate the byte-based estimate: "
+        << full.text;
+    // Charging exactly at the byte model: budget == full_est admits the whole
+    // response (fits); budget == full_est - 1 (at least the envelope) either
+    // omits the ref or is budget_too_small, but NEVER emits the oversized body.
+    auto fits = load_manifest(manifest, full_est);
+    ASSERT_FALSE(fits.contains("__error__")) << fits.dump();
+    EXPECT_EQ(fits["stats"]["refs_loaded"], 1) << fits.dump();
+    EXPECT_EQ(fits["stats"]["refs_omitted"], 0) << fits.dump();
+    auto tight = load_manifest(manifest, 45);  // envelope fits, note body does not
+    if (!tight.contains("__error__")) {
+        EXPECT_EQ(tight["stats"]["refs_loaded"], 0) << tight.dump();
+        EXPECT_TRUE(tight["stats"]["truncated"].get<bool>()) << tight.dump();
+    }
+}
+
+// Bisection proves the boundary exactly: the smallest max_tokens that returns
+// a non-error response yields a serialized estimate at or below that value,
+// and one less than that boundary is budget_too_small (or omits content).
+TEST_F(ContextBudgetFixture, ExactBoundaryNeverExceeds) {
+    nlohmann::json manifest = {
+        {"t", "bisect"},
+        {"r", {{{"f", "main.go"}, {"s", "main"}, {"role", "primary"}}}}};
+    int lo = 1, hi = 8000;
+    // Find the minimal non-error budget in [1, 8000].
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        auto r = load_raw(manifest, mid);
+        if (r.is_error) {
+            auto j = nlohmann::json::parse(r.text);
+            ASSERT_EQ(j.value("code", ""), "budget_too_small") << r.text;
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    auto result = load_raw(manifest, lo);
+    ASSERT_FALSE(result.is_error) << "boundary budget must not error: "
+                                  << result.text;
+    int est = serialized_estimate(result.text);
+    EXPECT_LE(est, lo) << "boundary response estimate " << est
+                      << " exceeds its budget " << lo;
+}
+
+// Two primary refs naming the SAME resolved identity hydrate once; the second
+// adds only its role to the first's provenance, and the source body is present
+// exactly once (never repeated).
+TEST_F(ContextBudgetFixture, DuplicatePrimariesDedupAndRetainProvenance) {
+    nlohmann::json manifest = {
+        {"r", {{{"f", "main.go"}, {"s", "main"}, {"role", "primary"}},
+               {{"f", "main.go"}, {"s", "main"}, {"role", "boundary"}}}}};
+    auto j = load_manifest(manifest, 8000);
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    ASSERT_EQ(j["refs"].size(), 1u)
+        << "same file+symbol must hydrate once: " << j.dump();
+    const auto& r = j["refs"][0];
+    // Both requested roles survive without repeating the source.
+    ASSERT_TRUE(r.contains("provenance")) << r.dump();
+    auto dumped = r["provenance"].dump();
+    EXPECT_NE(dumped.find("primary"), std::string::npos) << dumped;
+    EXPECT_NE(dumped.find("boundary"), std::string::npos) << dumped;
+    // The single emitted source is present exactly once across the whole
+    // response: dedup collapsed both primaries onto one hydrated body.
+    std::string body = r["source"].get<std::string>();
+    EXPECT_NE(body.find("handleRequest()"), std::string::npos) << body;
+    std::string full = j.dump();
+    size_t first = full.find("handleRequest()");
+    ASSERT_NE(first, std::string::npos) << full;
+    EXPECT_EQ(full.find("handleRequest()", first + 1), std::string::npos)
+        << "the source must be emitted once, not repeated by the duplicate: "
+        << full;
+}
+
+// An expansion target that resolves to an identity already admitted as a
+// primary is not repeated: its source appears once, and the relationship
+// (e.g. "caller") is recorded as provenance on the surviving entry.
+TEST_F(ContextBudgetFixture, ExpansionDedupsAgainstPrimaryWithProvenance) {
+    // main is both a primary AND the caller of handleRequest.
+    nlohmann::json manifest = {
+        {"r", {{{"f", "main.go"}, {"s", "main"}, {"role", "primary"}},
+               {{"f", "handler.go"},
+                {"s", "handleRequest"},
+                {"x", nlohmann::json::array({"callers"})}}}}};
+    auto j = load_manifest(manifest, 8000);
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    int main_entries = 0;
+    nlohmann::json main_ref;
+    for (const auto& r : j["refs"]) {
+        if (r.value("symbol", "") == "main") {
+            ++main_entries;
+            main_ref = r;
+        }
+    }
+    EXPECT_EQ(main_entries, 1)
+        << "main must appear once (primary), not repeated by the callers "
+           "expansion: " << j.dump();
+    auto prov = main_ref.value("provenance", nlohmann::json::array()).dump();
+    EXPECT_NE(prov.find("caller"), std::string::npos)
+        << "the relationship provenance must survive dedup: " << prov;
+}
+
+// Primaries are admitted before expansions: with a budget that fits the primary
+// but not its expansion, the primary's source is present and the expansion is
+// reported as omitted — never admitted out of priority order.
+TEST_F(ContextBudgetFixture, PrimaryPriorityExpandsOnlyWithinBudget) {
+    // parseInput is large; handleRequest is small and callees -> parseInput.
+    nlohmann::json manifest = {
+        {"r", {{{"f", "handler.go"},
+                {"s", "handleRequest"},
+                {"x", nlohmann::json::array({"callees"})}}}}};
+    // Generous: both primary and callee admitted.
+    auto roomy = load_manifest(manifest, 8000);
+    ASSERT_FALSE(roomy.contains("__error__")) << roomy.dump();
+    bool callee_present = false;
+    for (const auto& r : roomy["refs"]) {
+        if (r.value("symbol", "") == "parseInput") callee_present = true;
+    }
+    EXPECT_TRUE(callee_present) << roomy.dump();
+    EXPECT_GT(roomy["stats"]["expansions_applied"], 0) << roomy.dump();
+    // Priority invariant across budgets: whenever a callee expansion IS present,
+    // its primary must be present too (never an expansion admitted ahead of its
+    // primary); and the serialized estimate never exceeds the budget.
+    for (int budget : {120, 200, 300, 500, 1000, 2000}) {
+        auto r = load_raw(manifest, budget);
+        if (r.is_error) continue;  // budget_too_small below the frame: allowed
+        auto j = nlohmann::json::parse(r.text);
+        int est = serialized_estimate(r.text);
+        EXPECT_LE(est, budget) << "budget=" << budget << " est=" << est;
+        bool primary_present = false, expansion_present = false;
+        for (const auto& rr : j["refs"]) {
+            if (rr.value("symbol", "") == "handleRequest") primary_present = true;
+            if (rr.value("symbol", "") == "parseInput")
+                expansion_present = true;
+        }
+        EXPECT_TRUE(primary_present || !expansion_present)
+            << "an expansion must never be admitted ahead of its primary "
+               "(budget=" << budget << "): " << j.dump();
+    }
+    // A budget that fits the primary but not the large callee expansion:
+    // primary present, callee omitted, truncated reported.
+    auto clipped = load_manifest(manifest, 250);
+    if (!clipped.contains("__error__")) {
+        bool p = false, e = false;
+        for (const auto& rr : clipped["refs"]) {
+            if (rr.value("symbol", "") == "handleRequest") p = true;
+            if (rr.value("symbol", "") == "parseInput") e = true;
+        }
+        EXPECT_TRUE(p) << "primary fits at 250 and must be present: "
+                       << clipped.dump();
+        EXPECT_FALSE(e) << "the oversized callee expansion must be omitted: "
+                        << clipped.dump();
+    }
+}
+
+// A cyclic, over-deep callers expansion is bounded independently of the token
+// budget: it terminates, and reports traversal truncation.
+TEST_F(ContextBudgetFixture, CyclicDeepExpansionIsBounded) {
+    nlohmann::json manifest = {
+        {"r", {{{"f", "cycle.go"},
+                {"s", "ping"},
+                {"x", nlohmann::json::array({"callers:9"})}}}}};
+    nlohmann::json params = {{"operation", "load"},
+                             {"from_string", manifest.dump()},
+                             {"max_tokens", 8000}};
+    auto result = handle_context(params, *indexer_, temp_dir_.string());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+    // Bounded traversal is surfaced, not silently swallowed.
+    EXPECT_TRUE(j["stats"].contains("traversal_truncated"))
+        << "traversal truncation must be reported: " << j.dump();
+    // Terminated (we are here) and every emitted ref is a distinct identity.
+    absl::flat_hash_set<std::string> seen;
+    for (const auto& r : j["refs"]) {
+        std::string key = r.value("file", "") + "\x1f" + r.value("symbol", "") +
+                          "\x1f" +
+                          std::to_string(r.value("lines", nlohmann::json::object())
+                                             .value("start", 0));
+        EXPECT_TRUE(seen.insert(key).second)
+            << "no identity may be emitted twice: " << j.dump();
+    }
+}
+
+// Excess request inputs are rejected for a bounded load rather than silently
+// traversed: more than the documented input-ref cap returns a typed error.
+TEST_F(ContextBudgetFixture, ExcessInputRefsAreRejected) {
+    nlohmann::json refs = nlohmann::json::array();
+    for (int i = 0; i < 200; ++i) {
+        refs.push_back(nlohmann::json{{"f", "main.go"}, {"s", "main"}});
+    }
+    nlohmann::json manifest = {{"r", refs}};
+    auto result = load_raw(manifest, 8000);
+    ASSERT_TRUE(result.is_error)
+        << "a bounded load must reject more than the input-ref cap: "
+        << result.text;
+    auto j = nlohmann::json::parse(result.text);
+    EXPECT_EQ(j.value("code", ""), "too_many_refs") << result.text;
+}
+
+// The old loader checked the budget only before hydrating the NEXT ref, so the
+// last admitted ref overshot and the remaining budget went negative into
+// apply_expansions. Replaced assertion: with a budget below the first ref's
+// serialized contribution, nothing is admitted and the response is still
+// valid, non-negative, and honest about what was omitted.
 TEST_F(ContextHandlerFixture, TokenBudgetTruncatesAndNeverGoesNegative) {
     nlohmann::json manifest = {
         {"refs",
@@ -706,13 +1112,13 @@ TEST_F(ContextHandlerFixture, TokenBudgetTruncatesAndNeverGoesNegative) {
                              {"from_string", manifest.dump()},
                              {"max_tokens", 1}};
     auto result = handle_context(params, *indexer_, temp_dir_.string());
-    ASSERT_FALSE(result.is_error) << result.text;
-
+    // A budget of 1 token cannot fit even the empty envelope: the contract now
+    // fails explicitly rather than admitting an oversized first ref.
+    ASSERT_TRUE(result.is_error)
+        << "the old first-ref overshoot is replaced by an explicit small-budget "
+           "rejection: " << result.text;
     auto j = nlohmann::json::parse(result.text);
-    EXPECT_TRUE(j["stats"]["truncated"].get<bool>()) << j.dump();
-    EXPECT_EQ(j["stats"]["refs_loaded"], 1) << j.dump();
-    // Zero remaining budget: no expansion refs admitted.
-    EXPECT_EQ(j["refs"].size(), 1u) << j.dump();
+    EXPECT_EQ(j.value("code", ""), "budget_too_small") << result.text;
 }
 
 // =============================================================================
@@ -1253,8 +1659,11 @@ TEST_F(ContextExpansionFixture, AmbiguousExpansionSourceIsNeverAGuess) {
     EXPECT_EQ(result.reason, RefResolution::AmbiguousSymbol)
         << "Widget is ambiguous in two_iface.go; hydration must report it, "
            "not pick one, so apply_expansions never sees a guessed source";
+    ExpansionTally tally;
+    absl::flat_hash_set<std::string> emitted;
+    tally.emitted_keys = &emitted;
     auto applied = engine.apply_expansions(
-        ref, result.ref, FormatType::Full, 100000, temp_dir_.string());
+        ref, result.ref, FormatType::Full, temp_dir_.string(), tally);
     EXPECT_TRUE(applied.expanded.empty())
         << "an ambiguous source must expand to nothing";
 }
@@ -1675,6 +2084,57 @@ TEST_F(ContextWireFixture, WireUnsupportedVersionStructured) {
     ASSERT_EQ(r.payload["unresolved"].size(), 1u);
     EXPECT_EQ(r.payload["unresolved"][0]["reason"], "unsupported_version");
     EXPECT_EQ(r.payload["unresolved"][0]["role"], "p");
+}
+
+// Through the real tools/call wire, a budget too small to fit even the minimal
+// envelope is an isError envelope carrying the typed budget_too_small code —
+// never a truncated-but-oversized or silently-clipped payload.
+TEST_F(ContextWireFixture, WireBudgetTooSmallIsTypedErrorOnWire) {
+    nlohmann::json manifest = {
+        {"r", {{{"f", "dup_a.go"}, {"s", "Dup"}}}}};
+    auto r = call({{"operation", "load"},
+                   {"from_string", manifest.dump()},
+                   {"max_tokens", 1}});
+    ASSERT_TRUE(r.is_error) << r.payload.dump();
+    auto j = nlohmann::json::parse(r.payload[1].get<std::string>());
+    EXPECT_EQ(j.value("code", ""), "budget_too_small") << j.dump();
+}
+
+// Over the wire, the shared budget dedups duplicate primaries to one hydrated
+// source and retains both requested roles as provenance.
+TEST_F(ContextWireFixture, WireBudgetDedupsDuplicatePrimaries) {
+    nlohmann::json manifest = {{"r",
+                                {{{"f", "dup_a.go"},
+                                  {"s", "Dup"},
+                                  {"role", "primary"}},
+                                 {{"f", "dup_a.go"},
+                                  {"s", "Dup"},
+                                  {"role", "boundary"}}}}};
+    auto r = call({{"operation", "load"},
+                   {"from_string", manifest.dump()},
+                   {"max_tokens", 8000}});
+    ASSERT_FALSE(r.is_error) << r.payload.dump();
+    ASSERT_EQ(r.payload["refs"].size(), 1u) << r.payload.dump();
+    auto prov = r.payload["refs"][0]["provenance"].dump();
+    EXPECT_NE(prov.find("primary"), std::string::npos) << prov;
+    EXPECT_NE(prov.find("boundary"), std::string::npos) << prov;
+}
+
+// A bounded load whose serialized response fits the budget reports a
+// non-oversized estimate; a bounded request naming more refs than the input cap
+// is a typed too_many_refs error on the wire.
+TEST_F(ContextWireFixture, WireExcessInputRefsRejected) {
+    nlohmann::json refs = nlohmann::json::array();
+    for (int i = 0; i < 200; ++i) {
+        refs.push_back(nlohmann::json{{"f", "dup_a.go"}, {"s", "Dup"}});
+    }
+    nlohmann::json manifest = {{"r", refs}};
+    auto r = call({{"operation", "load"},
+                   {"from_string", manifest.dump()},
+                   {"max_tokens", 8000}});
+    ASSERT_TRUE(r.is_error) << r.payload.dump();
+    auto j = nlohmann::json::parse(r.payload[1].get<std::string>());
+    EXPECT_EQ(j.value("code", ""), "too_many_refs") << j.dump();
 }
 
 // Through the real tools/call wire, a save-append of a wrong-typed selector ref

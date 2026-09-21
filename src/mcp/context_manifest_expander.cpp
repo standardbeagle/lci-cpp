@@ -42,7 +42,7 @@ ExpansionEngine::ExpansionEngine(MasterIndex& index) : index_(index) {}
 // -- Path resolution ----------------------------------------------------------
 
 std::string ExpansionEngine::resolve_path(const std::string& file,
-                                           const std::string& project_root) {
+                                           const std::string& project_root) const {
     // Keys in MasterIndex::path_to_id are forward-slash on every platform
     // (the scanner stores generic_string()), and lookups are exact string
     // matches. Build the lookup key the same way: normalize to forward-slash
@@ -59,6 +59,27 @@ std::string ExpansionEngine::resolve_path(const std::string& file,
 std::string ExpansionEngine::get_file_path(FileID file_id) {
     return index_.get_file_path(file_id);
 }
+
+// -- Canonical identity -------------------------------------------------------
+
+std::string ExpansionEngine::identity_key(const HydratedRef& hr,
+                                          const std::string& project_root) const {
+    // Normalize the file so a primary stored as a relative path and an
+    // expansion resolved by SymbolID to the absolute index path collapse to the
+    // same key. resolve_path leaves an already-absolute path unchanged.
+    std::string path = resolve_path(hr.file, project_root);
+    std::string key;
+    key.reserve(path.size() + hr.symbol.size() + 24);
+    key += path;
+    key += '\x1f';
+    key += hr.symbol;
+    key += '\x1f';
+    key += std::to_string(hr.lines.start);
+    key += '-';
+    key += std::to_string(hr.lines.end);
+    return key;
+}
+
 
 // -- Source extraction --------------------------------------------------------
 
@@ -420,34 +441,40 @@ ExpansionEngine::HydrateResult ExpansionEngine::hydrate_symbol_id(
 
 ExpansionEngine::ExpansionResult ExpansionEngine::apply_expansions(
     const ContextRef& ref, HydratedRef& hydrated, FormatType format,
-    int remaining_tokens, const std::string& project_root) {
+    const std::string& project_root, ExpansionTally& tally) {
     if (ref.expansions.empty()) {
         return {};
     }
 
     ExpansionResult out;
-    int total_tokens = 0;
 
     for (const auto& directive : ref.expansions) {
-        if (total_tokens >= remaining_tokens) break;
-
         auto [dtype, depth] = parse_expansion_directive(directive);
+
+        // The token budget is owned by the caller's single serialized-JSON
+        // accounting; expansions bound only traversal here. Clamp each
+        // directive's depth to the shared cap so a cyclic or over-deep graph
+        // cannot drive the walk, and report the clamp rather than silently
+        // dropping a deeper reach.
+        if (depth > tally.max_depth) {
+            depth = tally.max_depth;
+            tally.traversal_truncated = true;
+        }
+        tally.relationship = dtype;
+
         std::vector<HydratedRef> expanded;
-
-        int budget = remaining_tokens - total_tokens;
-
         if (dtype == "callers") {
-            expanded = expand_callers(ref, depth, budget, project_root, format);
+            expanded = expand_callers(ref, depth, project_root, format, tally);
         } else if (dtype == "callees") {
-            expanded = expand_callees(ref, depth, budget, project_root, format);
+            expanded = expand_callees(ref, depth, project_root, format, tally);
         } else if (dtype == "implementations") {
-            expanded = expand_implementations(ref, budget, project_root, format);
+            expanded = expand_implementations(ref, project_root, format, tally);
         } else if (dtype == "interface") {
-            expanded = expand_interface(ref, budget, project_root, format);
+            expanded = expand_interface(ref, project_root, format, tally);
         } else if (dtype == "siblings") {
-            expanded = expand_siblings(ref, budget, project_root, format);
+            expanded = expand_siblings(ref, project_root, format, tally);
         } else if (dtype == "tests") {
-            expanded = expand_tests(ref, budget, project_root, format);
+            expanded = expand_tests(ref, project_root, format, tally);
         } else if (dtype == "doc") {
             extract_documentation(hydrated);
             continue;
@@ -458,18 +485,13 @@ ExpansionEngine::ExpansionResult ExpansionEngine::apply_expansions(
             continue;  // Unknown directive
         }
 
-        for (const auto& er : expanded) {
-            total_tokens += static_cast<int>(er.source.size()) / 4;
-        }
-        // Emit the expansion content: the caller appends these to the
-        // hydrated context so the charged tokens correspond to emitted
-        // source.
+        // Emit the new, already-deduplicated expansion refs; the caller appends
+        // them to the working set and the serialized budget decides admission.
         out.expanded.insert(out.expanded.end(),
                             std::make_move_iterator(expanded.begin()),
                             std::make_move_iterator(expanded.end()));
     }
 
-    out.tokens = total_tokens;
     return out;
 }
 
@@ -477,38 +499,47 @@ ExpansionEngine::ExpansionResult ExpansionEngine::apply_expansions(
 
 namespace {
 
-/// Helper to hydrate a list of symbol IDs into HydratedRefs. Each target is
-/// resolved by its exact SymbolID (never re-derived by name), so an expansion
-/// sibling cannot be substituted by, or made ambiguous against, a same-name
-/// symbol in another file.
+/// Hydrate candidate SymbolIDs into NEW, deduplicated expansion refs. Each
+/// target is resolved by its exact SymbolID (never re-derived by name), so an
+/// expansion sibling cannot be substituted by, or made ambiguous against, a
+/// same-name symbol in another file. An identity already present in
+/// `tally.emitted_keys` is skipped — its source is never repeated — and recorded
+/// in `tally.deduped` with the current relationship label, so the caller folds
+/// the relationship into the surviving entry's provenance. A new identity is
+/// inserted into `emitted_keys` and consumes one unit of the shared visited-
+/// target budget; once the budget is spent, traversal is marked truncated and
+/// no further target is hydrated. This is the single place dedup and traversal
+/// bounds are enforced across the whole working set (all primaries and all
+/// expansions), rather than per directive.
 std::vector<HydratedRef> hydrate_symbol_ids(
     ExpansionEngine& engine, const std::vector<SymbolID>& ids,
-    ReferenceTracker& /*tracker*/, MasterIndex& /*index*/,
-    int remaining_tokens, const std::string& /*project_root*/,
-    FormatType format, absl::flat_hash_set<SymbolID>& visited) {
+    const std::string& project_root, FormatType format, ExpansionTally& tally) {
     std::vector<HydratedRef> results;
-    int total_tokens = 0;
-
     for (auto id : ids) {
-        if (total_tokens >= remaining_tokens) break;
-        if (visited.contains(id)) continue;
-        visited.insert(id);
-
         auto result = engine.hydrate_symbol_id(id, format);
         if (!result.error.empty()) continue;
 
-        total_tokens += result.tokens;
+        std::string key = engine.identity_key(result.ref, project_root);
+        if (tally.emitted_keys && tally.emitted_keys->contains(key)) {
+            tally.deduped.emplace_back(std::move(key), tally.relationship);
+            continue;
+        }
+        if (tally.visited_used >= tally.visited_cap) {
+            tally.traversal_truncated = true;
+            break;
+        }
+        ++tally.visited_used;
+        if (tally.emitted_keys) tally.emitted_keys->insert(std::move(key));
         results.push_back(std::move(result.ref));
     }
-
     return results;
 }
 
 }  // namespace
 
 std::vector<HydratedRef> ExpansionEngine::expand_callers(
-    const ContextRef& ref, int depth, int remaining_tokens,
-    const std::string& project_root, FormatType format) {
+    const ContextRef& ref, int depth, const std::string& project_root,
+    FormatType format, ExpansionTally& tally) {
     if (ref.symbol.empty()) return {};
 
     auto rs = resolve_start(resolve_path(ref.file, project_root), ref.symbol);
@@ -520,8 +551,9 @@ std::vector<HydratedRef> ExpansionEngine::expand_callers(
     if (!sym) return {};
 
     // Level-order walk up to `depth` hops, deduped, so "callers:2" reaches
-    // callers-of-callers. seen is the BFS dedup set; hydrate_symbol_ids gets
-    // its own visited set seeded with only the start symbol.
+    // callers-of-callers. `seen` is the BFS dedup set (and excludes the start
+    // symbol, which the caller already emitted as a primary); the shared
+    // cross-set dedup happens in hydrate_symbol_ids.
     absl::flat_hash_set<SymbolID> seen;
     seen.insert(sym->id);
     std::vector<SymbolID> ordered;
@@ -537,15 +569,12 @@ std::vector<HydratedRef> ExpansionEngine::expand_callers(
         frontier = std::move(next);
     }
 
-    absl::flat_hash_set<SymbolID> visited;
-    visited.insert(sym->id);
-    return hydrate_symbol_ids(*this, ordered, tracker, index_,
-                              remaining_tokens, project_root, format, visited);
+    return hydrate_symbol_ids(*this, ordered, project_root, format, tally);
 }
 
 std::vector<HydratedRef> ExpansionEngine::expand_callees(
-    const ContextRef& ref, int depth, int remaining_tokens,
-    const std::string& project_root, FormatType format) {
+    const ContextRef& ref, int depth, const std::string& project_root,
+    FormatType format, ExpansionTally& tally) {
     if (ref.symbol.empty()) return {};
 
     auto rs = resolve_start(resolve_path(ref.file, project_root), ref.symbol);
@@ -571,15 +600,12 @@ std::vector<HydratedRef> ExpansionEngine::expand_callees(
         frontier = std::move(next);
     }
 
-    absl::flat_hash_set<SymbolID> visited;
-    visited.insert(sym->id);
-    return hydrate_symbol_ids(*this, ordered, tracker, index_,
-                              remaining_tokens, project_root, format, visited);
+    return hydrate_symbol_ids(*this, ordered, project_root, format, tally);
 }
 
 std::vector<HydratedRef> ExpansionEngine::expand_implementations(
-    const ContextRef& ref, int remaining_tokens,
-    const std::string& project_root, FormatType format) {
+    const ContextRef& ref, const std::string& project_root, FormatType format,
+    ExpansionTally& tally) {
     if (ref.symbol.empty()) return {};
 
     // Resolve the expansion source by the same identity rule as hydration: a
@@ -605,16 +631,12 @@ std::vector<HydratedRef> ExpansionEngine::expand_implementations(
     all_ids.insert(all_ids.end(), impl_ids.begin(), impl_ids.end());
     all_ids.insert(all_ids.end(), derived_ids.begin(), derived_ids.end());
 
-    absl::flat_hash_set<SymbolID> visited;
-    visited.insert(target_id);
-
-    return hydrate_symbol_ids(*this, all_ids, tracker, index_,
-                              remaining_tokens, project_root, format, visited);
+    return hydrate_symbol_ids(*this, all_ids, project_root, format, tally);
 }
 
 std::vector<HydratedRef> ExpansionEngine::expand_interface(
-    const ContextRef& ref, int remaining_tokens,
-    const std::string& project_root, FormatType format) {
+    const ContextRef& ref, const std::string& project_root, FormatType format,
+    ExpansionTally& tally) {
     if (ref.symbol.empty()) return {};
 
     // Same identity rule as hydration (see expand_implementations): resolve the
@@ -638,16 +660,12 @@ std::vector<HydratedRef> ExpansionEngine::expand_interface(
     all_ids.insert(all_ids.end(), iface_ids.begin(), iface_ids.end());
     all_ids.insert(all_ids.end(), base_ids.begin(), base_ids.end());
 
-    absl::flat_hash_set<SymbolID> visited;
-    visited.insert(target_id);
-
-    return hydrate_symbol_ids(*this, all_ids, tracker, index_,
-                              remaining_tokens, project_root, format, visited);
+    return hydrate_symbol_ids(*this, all_ids, project_root, format, tally);
 }
 
 std::vector<HydratedRef> ExpansionEngine::expand_siblings(
-    const ContextRef& ref, int remaining_tokens,
-    const std::string& project_root, FormatType format) {
+    const ContextRef& ref, const std::string& project_root, FormatType format,
+    ExpansionTally& tally) {
     if (ref.symbol.empty()) return {};
 
     auto rs = resolve_start(resolve_path(ref.file, project_root), ref.symbol);
@@ -671,16 +689,12 @@ std::vector<HydratedRef> ExpansionEngine::expand_siblings(
         sibling_ids.push_back(fs->id);
     }
 
-    absl::flat_hash_set<SymbolID> visited;
-    visited.insert(sym->id);
-
-    return hydrate_symbol_ids(*this, sibling_ids, tracker, index_,
-                              remaining_tokens, project_root, format, visited);
+    return hydrate_symbol_ids(*this, sibling_ids, project_root, format, tally);
 }
 
 std::vector<HydratedRef> ExpansionEngine::expand_tests(
-    const ContextRef& ref, int remaining_tokens,
-    const std::string& project_root, FormatType format) {
+    const ContextRef& ref, const std::string& project_root, FormatType format,
+    ExpansionTally& tally) {
     if (ref.symbol.empty()) return {};
 
     auto& tracker = index_.ref_tracker();
@@ -719,9 +733,7 @@ std::vector<HydratedRef> ExpansionEngine::expand_tests(
         }
     }
 
-    absl::flat_hash_set<SymbolID> visited;
-    return hydrate_symbol_ids(*this, test_ids, tracker, index_,
-                              remaining_tokens, project_root, format, visited);
+    return hydrate_symbol_ids(*this, test_ids, project_root, format, tally);
 }
 
 void ExpansionEngine::extract_documentation(HydratedRef& ref) {

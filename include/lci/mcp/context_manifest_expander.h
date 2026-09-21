@@ -1,8 +1,12 @@
 #pragma once
 
+#include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+#include <absl/container/flat_hash_set.h>
 
 #include <lci/context_manifest.h>
 #include <lci/types.h>
@@ -27,6 +31,33 @@ struct SymbolInfo {
 /// Returns the directive type and depth (default 1).
 std::pair<std::string, int> parse_expansion_directive(std::string_view directive);
 
+/// Per-load traversal accounting for one hydration working set. Owned by the
+/// loader (the MCP `context` handler, and later the CLI/composites) and threaded
+/// through every expansion so identity deduplication and traversal bounds are
+/// enforced ONCE across the whole set — primaries plus every expansion — rather
+/// than per directive. The token budget is NOT here: it is the single
+/// serialized-JSON budget owned by the caller.
+struct ExpansionTally {
+    /// Canonical identity keys already present in the working set (a primary or
+    /// an earlier expansion). An expansion target matching one is skipped — its
+    /// source is never repeated — and recorded in `deduped`.
+    absl::flat_hash_set<std::string>* emitted_keys = nullptr;
+    /// Clamps every directive's requested depth. INT_MAX for an unlimited load.
+    int max_depth = std::numeric_limits<int>::max();
+    /// Caps total NEW expansion targets hydrated across the whole load.
+    int visited_cap = std::numeric_limits<int>::max();
+    int visited_used = 0;
+    /// Set when a directive's depth was clamped or the visited cap was reached.
+    bool traversal_truncated = false;
+    /// The directive type currently being applied (e.g. "callers"), read by the
+    /// shared hydrate helper to label a deduplicated target's relationship.
+    std::string relationship;
+    /// Targets whose identity was already emitted: (canonical key, relationship
+    /// directive, e.g. "callers"). The caller folds the relationship into the
+    /// surviving entry's provenance instead of repeating the source.
+    std::vector<std::pair<std::string, std::string>> deduped;
+};
+
 /// Resolves context references into hydrated source code.
 ///
 /// Given a ContextRef (file + symbol + optional line range), loads the actual
@@ -39,6 +70,15 @@ class ExpansionEngine {
   public:
     /// Creates an engine backed by the given index for symbol resolution.
     explicit ExpansionEngine(MasterIndex& index);
+
+    /// Canonical identity key for a hydrated ref: the resolved file path
+    /// (normalized against `project_root` so a relative primary path and the
+    /// absolute path an expansion resolves to collapse together) plus the
+    /// resolved symbol and line range. Two refs naming the same file+symbol, or
+    /// an expansion landing on an already-admitted identity, share a key and so
+    /// hydrate their source exactly once across the working set.
+    std::string identity_key(const HydratedRef& hr,
+                             const std::string& project_root) const;
 
     /// Hydrates a single reference into source code.
     /// Returns the hydrated ref, approximate token count, error string
@@ -59,19 +99,19 @@ class ExpansionEngine {
     HydrateResult hydrate_symbol_id(SymbolID id, FormatType format);
 
     /// Applies expansion directives (callers, callees, etc.) to a reference.
-    /// Returns additional token count consumed, the hydrated expansion refs
-    /// (callers/callees/... — emitted by the caller into the response), and
-    /// error string.
+    /// Returns the newly-emitted hydrated expansion refs (identities not
+    /// already in `tally.emitted_keys`) and an error string. Deduplication and
+    /// traversal bounds are applied through the shared `tally`; the token
+    /// budget is owned by the caller's serialized-JSON accounting.
     struct ExpansionResult {
-        int tokens{};
         std::vector<HydratedRef> expanded;
         std::string error;
     };
     ExpansionResult apply_expansions(const ContextRef& ref,
                                      HydratedRef& hydrated,
                                      FormatType format,
-                                     int remaining_tokens,
-                                     const std::string& project_root);
+                                     const std::string& project_root,
+                                     ExpansionTally& tally);
 
   private:
     MasterIndex& index_;
@@ -111,7 +151,7 @@ class ExpansionEngine {
 
     /// Resolves a file path relative to the project root.
     std::string resolve_path(const std::string& file,
-                             const std::string& project_root);
+                             const std::string& project_root) const;
 
     /// Gets the file path for a symbol's file ID.
     std::string get_file_path(FileID file_id);
@@ -119,28 +159,28 @@ class ExpansionEngine {
     // -- Expansion methods ---------------------------------------------------
 
     std::vector<HydratedRef> expand_callers(
-        const ContextRef& ref, int depth, int remaining_tokens,
-        const std::string& project_root, FormatType format);
+        const ContextRef& ref, int depth, const std::string& project_root,
+        FormatType format, ExpansionTally& tally);
 
     std::vector<HydratedRef> expand_callees(
-        const ContextRef& ref, int depth, int remaining_tokens,
-        const std::string& project_root, FormatType format);
+        const ContextRef& ref, int depth, const std::string& project_root,
+        FormatType format, ExpansionTally& tally);
 
     std::vector<HydratedRef> expand_implementations(
-        const ContextRef& ref, int remaining_tokens,
-        const std::string& project_root, FormatType format);
+        const ContextRef& ref, const std::string& project_root,
+        FormatType format, ExpansionTally& tally);
 
     std::vector<HydratedRef> expand_interface(
-        const ContextRef& ref, int remaining_tokens,
-        const std::string& project_root, FormatType format);
+        const ContextRef& ref, const std::string& project_root,
+        FormatType format, ExpansionTally& tally);
 
     std::vector<HydratedRef> expand_siblings(
-        const ContextRef& ref, int remaining_tokens,
-        const std::string& project_root, FormatType format);
+        const ContextRef& ref, const std::string& project_root,
+        FormatType format, ExpansionTally& tally);
 
     std::vector<HydratedRef> expand_tests(
-        const ContextRef& ref, int remaining_tokens,
-        const std::string& project_root, FormatType format);
+        const ContextRef& ref, const std::string& project_root,
+        FormatType format, ExpansionTally& tally);
 
     /// Extracts only the doc comments from source.
     void extract_documentation(HydratedRef& ref);

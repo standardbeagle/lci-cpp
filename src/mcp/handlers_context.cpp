@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
 
 #include <lci/indexing/master_index.h>
@@ -323,6 +324,28 @@ ManifestStats compute_manifest_stats(const ContextManifest& m) {
     return stats;
 }
 
+/// Serializes one hydrated ref to its JSON object. Shared by the whole-context
+/// serializer and the budget admission loop, which sizes each candidate by
+/// dumping just this object.
+nlohmann::json hydrated_ref_to_json(const HydratedRef& r) {
+    nlohmann::json rj;
+    rj["file"] = r.file;
+    if (!r.symbol.empty()) rj["symbol"] = r.symbol;
+    rj["lines"] = {{"start", r.lines.start}, {"end", r.lines.end}};
+    if (!r.role.empty()) rj["role"] = r.role;
+    if (!r.note.empty()) rj["note"] = r.note;
+    rj["source"] = r.source;
+    if (!r.symbol_type.empty()) rj["symbol_type"] = r.symbol_type;
+    if (!r.signature.empty()) rj["signature"] = r.signature;
+    if (r.is_exported) rj["is_exported"] = true;
+    if (r.is_external) rj["is_external"] = true;
+    if (r.is_line_range_literal) rj["line_range_literal"] = true;
+    // Every requested role / relationship that collapsed onto this canonical
+    // identity survives here, so dedup never loses provenance.
+    if (!r.provenance.empty()) rj["provenance"] = r.provenance;
+    return rj;
+}
+
 nlohmann::json hydrated_context_to_json(const HydratedContext& ctx) {
     nlohmann::json j;
     if (!ctx.task.empty()) j["task"] = ctx.task;
@@ -331,19 +354,7 @@ nlohmann::json hydrated_context_to_json(const HydratedContext& ctx) {
     refs = nlohmann::json::array();
     refs.get_ref<nlohmann::json::array_t&>().reserve(ctx.refs.size());
     for (const auto& r : ctx.refs) {
-        nlohmann::json rj;
-        rj["file"] = r.file;
-        if (!r.symbol.empty()) rj["symbol"] = r.symbol;
-        rj["lines"] = {{"start", r.lines.start}, {"end", r.lines.end}};
-        if (!r.role.empty()) rj["role"] = r.role;
-        if (!r.note.empty()) rj["note"] = r.note;
-        rj["source"] = r.source;
-        if (!r.symbol_type.empty()) rj["symbol_type"] = r.symbol_type;
-        if (!r.signature.empty()) rj["signature"] = r.signature;
-        if (r.is_exported) rj["is_exported"] = true;
-        if (r.is_external) rj["is_external"] = true;
-        if (r.is_line_range_literal) rj["line_range_literal"] = true;
-        refs.push_back(std::move(rj));
+        refs.push_back(hydrated_ref_to_json(r));
     }
 
     // Structured unresolved entries: the original selector + role + reason,
@@ -370,6 +381,9 @@ nlohmann::json hydrated_context_to_json(const HydratedContext& ctx) {
                   {"tokens_approx", ctx.stats.tokens_approx},
                   {"expansions_applied", ctx.stats.expansions_applied},
                   {"unresolved_count", ctx.stats.unresolved_count},
+                  {"refs_omitted", ctx.stats.refs_omitted},
+                  {"expansions_omitted", ctx.stats.expansions_omitted},
+                  {"traversal_truncated", ctx.stats.traversal_truncated},
                   {"truncated", ctx.stats.truncated}};
 
     if (!ctx.warnings.empty()) j["warnings"] = ctx.warnings;
@@ -825,33 +839,88 @@ ToolResult handle_context_load(const nlohmann::json& params,
         filter_refs_by_role(manifest.refs, filter_roles, exclude_roles);
 
     int max_tokens = params.value("max_tokens", 0);
-    if (max_tokens <= 0) {
-        max_tokens = std::numeric_limits<int>::max();
+    const bool bounded = max_tokens > 0;
+    const size_t byte_ceiling = bounded
+        ? static_cast<size_t>(max_tokens) * 4
+        : std::numeric_limits<size_t>::max();
+
+    // Traversal input bound, applied to a bounded load only: a request naming
+    // more refs than the documented cap is rejected as a typed error rather
+    // than silently traversed. An unlimited load preserves legacy behavior.
+    if (bounded &&
+        filtered_refs.size() > static_cast<size_t>(kHydrationMaxInputRefs)) {
+        nlohmann::json err;
+        err["success"] = false;
+        err["operation"] = "context";
+        err["code"] = "too_many_refs";
+        err["error"] = "a bounded load accepts at most " +
+                       std::to_string(kHydrationMaxInputRefs) +
+                       " input refs (got " +
+                       std::to_string(filtered_refs.size()) +
+                       "); set max_tokens to 0 for an unbounded load";
+        return {dump_json_lossy(err), true};
     }
 
-    // Hydrate
-    HydratedContext result;
-    result.task = manifest.task;
     // Parse-time invalid selectors surface as unresolved entries (preserving
     // their original selectors/roles) alongside any that fail hydration.
-    result.unresolved = std::move(invalid_refs);
-    int total_tokens = 0;
+    std::vector<UnresolvedRef> unresolved = std::move(invalid_refs);
 
     ExpansionEngine engine(indexer);
 
-    for (const auto& ref : filtered_refs) {
-        if (total_tokens >= max_tokens) {
-            result.warnings.push_back(
-                "Truncated: reached token limit of " +
-                std::to_string(max_tokens));
-            result.stats.truncated = true;
-            break;
-        }
+    // Ordered working-set candidates. Identities are deduplicated across the
+    // WHOLE set (primaries first, then every expansion target) BEFORE any
+    // budget decision, so an identity's source is hydrated once and the budget
+    // only chooses how much of that deduplicated set to admit. `is_expansion`
+    // lets the emitted stats report primaries-omitted and expansions-omitted
+    // separately.
+    struct Candidate {
+        HydratedRef hr;
+        bool is_expansion{};
+        size_t obj_bytes{};  // serialized bytes of just this ref object
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(filtered_refs.size());
+    absl::flat_hash_set<std::string> emitted_keys;
+    absl::flat_hash_map<std::string, size_t> key_to_index;
+    std::vector<int> ref_to_candidate(filtered_refs.size(), -1);
 
+    auto add_provenance = [](HydratedRef& hr, const std::string& label) {
+        if (label.empty()) return;
+        for (const auto& p : hr.provenance) {
+            if (p == label) return;
+        }
+        hr.provenance.push_back(label);
+    };
+
+    // Register a hydrated ref under its canonical identity: a first sighting
+    // becomes a candidate; a repeat merges its role/relationship into the
+    // surviving entry's provenance without adding another source. Returns the
+    // candidate index (new or existing).
+    auto register_identity = [&](HydratedRef hr, bool is_expansion,
+                                 const std::string& label) -> size_t {
+        std::string key = engine.identity_key(hr, project_root);
+        auto it = key_to_index.find(key);
+        if (it != key_to_index.end()) {
+            add_provenance(candidates[it->second].hr, label);
+            return it->second;
+        }
+        size_t idx = candidates.size();
+        add_provenance(hr, label);
+        key_to_index.emplace(std::move(key), idx);
+        Candidate cand;
+        cand.hr = std::move(hr);
+        cand.is_expansion = is_expansion;
+        cand.obj_bytes = dump_json_lossy(hydrated_ref_to_json(cand.hr)).size();
+        candidates.push_back(std::move(cand));
+        return idx;
+    };
+
+    // Pass 1 — primaries, in manifest order. A ref that fails identity
+    // resolution is an honest unresolved entry, never a silent drop.
+    for (size_t i = 0; i < filtered_refs.size(); ++i) {
+        const auto& ref = filtered_refs[i];
         auto hr = engine.hydrate_reference(ref, format, project_root);
         if (!hr.error.empty() || hr.reason != RefResolution::Resolved) {
-            // Record the structured unresolved entry with the original
-            // selector and role; keep the legacy warning for continuity.
             UnresolvedRef ue;
             ue.file = ref.file;
             ue.symbol = ref.symbol;
@@ -862,59 +931,195 @@ ToolResult handle_context_load(const nlohmann::json& params,
             ue.reason = hr.reason == RefResolution::Resolved
                             ? RefResolution::InvalidRef
                             : hr.reason;
-            result.unresolved.push_back(std::move(ue));
-            result.warnings.push_back("Failed to hydrate " + ref.file + ":" +
-                                      ref.symbol + ": " + hr.error);
+            unresolved.push_back(std::move(ue));
             continue;
         }
+        ref_to_candidate[i] = static_cast<int>(
+            register_identity(std::move(hr.ref), /*is_expansion=*/false,
+                              ref.role));
+    }
 
-        total_tokens += hr.tokens;
-        result.stats.refs_loaded++;
-        // A line-range-only ref hydrates no symbol.
-        if (!ref.symbol.empty()) {
-            result.stats.symbols_hydrated++;
-        }
-        if (hr.ref.is_line_range_literal) {
-            result.warnings.push_back(
-                "line-range ref " + ref.file + ":" +
-                std::to_string(ref.line_range.start) + "-" +
-                std::to_string(ref.line_range.end) +
-                " uses literal current-index line numbers; positions are not "
-                "stable across edits");
-        }
+    // Pass 2 — expansions, in manifest order, admitted AFTER all primaries.
+    // The shared tally dedups every target against the whole working set and
+    // applies the independent traversal caps (depth, visited targets).
+    ExpansionTally tally;
+    tally.emitted_keys = &emitted_keys;
+    tally.max_depth =
+        bounded ? kHydrationMaxExpansionDepth : std::numeric_limits<int>::max();
+    tally.visited_cap =
+        bounded ? kHydrationMaxVisitedTargets : std::numeric_limits<int>::max();
+    for (const auto& kv : key_to_index) {
+        emitted_keys.insert(kv.first);
+    }
 
-        // Apply expansions. The admitted ref may overshoot the budget by its
-        // own size (checked before hydration, bounded by one ref); clamp the
-        // expansion budget at zero so apply_expansions never sees a negative
-        // remaining_tokens.
-        std::vector<HydratedRef> expanded_refs;
-        if (!ref.expansions.empty()) {
-            int remaining = max_tokens - total_tokens;
-            if (remaining < 0) remaining = 0;
-            auto exp_result = engine.apply_expansions(
-                ref, hr.ref, format, remaining, project_root);
-            if (!exp_result.error.empty()) {
-                result.warnings.push_back("Failed to expand " + ref.file +
-                                          ":" + ref.symbol + ": " +
-                                          exp_result.error);
-            } else {
-                total_tokens += exp_result.tokens;
-                result.stats.expansions_applied +=
-                    static_cast<int>(ref.expansions.size());
-                expanded_refs = std::move(exp_result.expanded);
+    int expansions_applied = 0;
+    for (size_t i = 0; i < filtered_refs.size(); ++i) {
+        const auto& ref = filtered_refs[i];
+        if (ref.expansions.empty()) continue;
+        int primary_idx = ref_to_candidate[i];
+        if (primary_idx < 0) continue;  // primary unresolved -> nothing to seed
+
+        HydratedRef& primary = candidates[primary_idx].hr;
+        size_t dedup_before = tally.deduped.size();
+        auto exp =
+            engine.apply_expansions(ref, primary, format, project_root, tally);
+        expansions_applied += static_cast<int>(ref.expansions.size());
+
+        // Newly-expanded identities (already deduplicated and registered in
+        // emitted_keys by the shared tally) become expansion candidates in
+        // encounter order, after every primary.
+        for (auto& er : exp.expanded) {
+            register_identity(std::move(er), /*is_expansion=*/true,
+                              /*label=*/"");
+        }
+        // Targets whose identity already existed contribute a relationship to
+        // the surviving entry's provenance, never a second copy of source.
+        for (size_t d = dedup_before; d < tally.deduped.size(); ++d) {
+            auto it = key_to_index.find(tally.deduped[d].first);
+            if (it != key_to_index.end()) {
+                add_provenance(candidates[it->second].hr,
+                               tally.deduped[d].second);
             }
-        }
-
-        result.refs.push_back(std::move(hr.ref));
-        for (auto& er : expanded_refs) {
-            result.refs.push_back(std::move(er));
         }
     }
 
-    result.stats.tokens_approx = total_tokens;
-    result.stats.unresolved_count = static_cast<int>(result.unresolved.size());
+    // Build the final response under ONE shared serialized-JSON budget. The
+    // charge is ceil(UTF-8 bytes of the full serialized context / 4) — an
+    // estimate of wire size, not a model-tokenizer count.
+    size_t total_primaries = 0, total_expansions = 0;
+    for (const auto& c : candidates) {
+        if (c.is_expansion) ++total_expansions;
+        else ++total_primaries;
+    }
 
-    return make_json_response(hydrated_context_to_json(result));
+    auto build_context = [&](const std::vector<size_t>& admitted) {
+        HydratedContext ctx;
+        ctx.task = manifest.task;
+        ctx.unresolved = unresolved;
+        absl::flat_hash_set<size_t> chosen(admitted.begin(), admitted.end());
+        size_t loaded_primaries = 0, loaded_expansions = 0;
+        for (const auto& idx : admitted) {
+            const Candidate& c = candidates[idx];
+            if (c.is_expansion) ++loaded_expansions;
+            else ++loaded_primaries;
+            ctx.refs.push_back(c.hr);
+        }
+        ctx.stats.refs_loaded = static_cast<int>(loaded_primaries);
+        for (const auto& idx : admitted) {
+            if (!candidates[idx].is_expansion &&
+                !candidates[idx].hr.symbol.empty()) {
+                ++ctx.stats.symbols_hydrated;
+            }
+        }
+        ctx.stats.expansions_applied = expansions_applied;
+        ctx.stats.unresolved_count = static_cast<int>(ctx.unresolved.size());
+        ctx.stats.refs_omitted =
+            static_cast<int>(total_primaries - loaded_primaries);
+        ctx.stats.expansions_omitted =
+            static_cast<int>(total_expansions - loaded_expansions);
+        ctx.stats.traversal_truncated = tally.traversal_truncated;
+        const bool truncated = ctx.stats.refs_omitted > 0 ||
+                               ctx.stats.expansions_omitted > 0;
+        ctx.stats.truncated = truncated;
+        if (truncated) {
+            ctx.warnings.push_back(
+                "Context truncated to fit the max_tokens budget; omitted refs "
+                "and expansions are reported in stats (estimates: not a model "
+                "tokenizer count).");
+        }
+        if (tally.traversal_truncated) {
+            ctx.warnings.push_back(
+                "Expansion traversal bounded by the depth/visited-target caps.");
+        }
+        return ctx;
+    };
+
+    auto serialized_bytes = [](const HydratedContext& ctx) {
+        return dump_json_lossy(hydrated_context_to_json(ctx)).size();
+    };
+
+    // Every index is a candidate to consider, in order (primaries first because
+    // they were registered first).
+    std::vector<size_t> all_indices;
+    all_indices.reserve(candidates.size());
+    for (size_t i = 0; i < candidates.size(); ++i) all_indices.push_back(i);
+
+    // Fast path: unbounded, or the entire deduplicated working set fits — emit
+    // everything with no truncation.
+    if (!bounded) {
+        HydratedContext ctx = build_context(all_indices);
+        ctx.stats.tokens_approx =
+            hydration_token_estimate(serialized_bytes(ctx));
+        return make_json_response(hydrated_context_to_json(ctx));
+    }
+
+    {
+        HydratedContext probe = build_context(all_indices);
+        probe.stats.tokens_approx = max_tokens;  // reserve estimate width
+        if (serialized_bytes(probe) <= byte_ceiling) {
+            HydratedContext ctx = build_context(all_indices);
+            ctx.stats.tokens_approx =
+                hydration_token_estimate(serialized_bytes(ctx));
+            return make_json_response(hydrated_context_to_json(ctx));
+        }
+    }
+
+    // Greedy admit in priority order (primaries then expansions), sized against
+    // the real serialized envelope plus each candidate's own ref object. The
+    // truncation-reporting frame is measured with zero refs so the minimal
+    // response is known to fit before any content is added.
+    HydratedContext frame = build_context({});
+    frame.stats.tokens_approx = max_tokens;
+    const size_t frame_bytes = serialized_bytes(frame);
+
+    if (frame_bytes > byte_ceiling) {
+        // Even the minimal (empty-content) response, which must still report
+        // the omissions honestly, cannot fit. Fail with a typed error rather
+        // than return an oversized or clipped payload.
+        nlohmann::json err;
+        err["success"] = false;
+        err["operation"] = "context";
+        err["code"] = "budget_too_small";
+        err["error"] =
+            "max_tokens " + std::to_string(max_tokens) +
+            " cannot fit the minimal context envelope; the smallest valid "
+            "response estimates " +
+            std::to_string(hydration_token_estimate(frame_bytes)) +
+            " tokens";
+        return {dump_json_lossy(err), true};
+    }
+
+    std::vector<size_t> admitted;
+    size_t running = frame_bytes;
+    for (size_t idx : all_indices) {
+        const size_t cost =
+            candidates[idx].obj_bytes + (admitted.empty() ? 0 : 1);
+        if (running + cost > byte_ceiling) break;  // this and later are omitted
+        admitted.push_back(idx);
+        running += cost;
+    }
+
+    // Final exact serialize, then shrink the tail (lowest-priority, i.e. the
+    // last-admitted expansion, then primary) until the reported estimate fits.
+    while (true) {
+        HydratedContext ctx = build_context(admitted);
+        ctx.stats.tokens_approx = hydration_token_estimate(serialized_bytes(ctx));
+        if (serialized_bytes(ctx) <= byte_ceiling) {
+            return make_json_response(hydrated_context_to_json(ctx));
+        }
+        if (admitted.empty()) {
+            // Should be unreachable (frame fit above), but never emit an
+            // oversized payload.
+            nlohmann::json err;
+            err["success"] = false;
+            err["operation"] = "context";
+            err["code"] = "budget_too_small";
+            err["error"] = "max_tokens " + std::to_string(max_tokens) +
+                           " cannot fit the minimal context envelope";
+            return {dump_json_lossy(err), true};
+        }
+        admitted.pop_back();
+    }
 }
 
 }  // namespace
