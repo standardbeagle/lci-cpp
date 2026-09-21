@@ -396,19 +396,28 @@ TEST(IndexPerformanceRequirements, PaginationRandomTraversalIsFlat) {
 // removal regardless of how few tokens the removed file has -- the S3
 // update path pays this once per reindexed file.
 //
-// Shape of the measurement: only the remove_file call is timed, and it runs
-// inside a bulk window (set_bulk_indexing) so the clone-mutate-publish RCU
-// cost -- which is proportional to the WHOLE index by design and is not
-// what this guards -- stays out of the timed region. This matches the
-// integrator path (S3 update/remove run against the staging snapshot).
+// Shape of the measurement: only remove_file and the re-add that restores
+// identical state are timed, inside a bulk window (set_bulk_indexing) so the
+// clone-mutate-publish RCU cost -- which is proportional to the WHOLE index
+// by design and is not what this guards -- stays out of the timed region.
+// This matches the integrator path (S3 update/remove run against the staging
+// snapshot). One remove of a 1-token file is faster than a steady_clock
+// tick, so each timed region covers `pairs` consecutive remove/re-add pairs
+// and the per-pair average is returned; see
+// PostingsRemoveFileScalesWithTokenCountNotFileCount for why a single-op
+// baseline is unmeasurable (the 2026-09-20 flake grid files=5000:104ns
+// files=50:0ns).
 // ---------------------------------------------------------------------------
 namespace {
 
 // Index `n_files` files, each contributing the hot token "function" plus
-// `extra_tokens` distinct tokens, then best-of-5 the remove_file of one
-// representative file (re-added between reps so each timed removal starts
-// from identical state). Returns ns of the removal alone.
-long long time_remove_with_hot_token(int n_files, int extra_tokens) {
+// `extra_tokens` distinct tokens, then best-of-5 a region of `pairs`
+// consecutive remove/re-add pairs of one representative file (identical
+// state at each pair boundary). Returns ns per pair; 0 means the average
+// still fell below clock resolution -- callers must treat that as
+// unmeasurable, never as a denominator.
+long long time_remove_with_hot_token(int n_files, int extra_tokens,
+                                     int pairs) {
     auto tokens_for = [](int file_idx, int extra) {
         std::vector<PostingsToken> toks;
         toks.push_back(PostingsToken{"function", 0});
@@ -429,20 +438,26 @@ long long time_remove_with_hot_token(int n_files, int extra_tokens) {
                                       tokens_for(i, extra_tokens));
     }
     const FileID victim = static_cast<FileID>(n_files / 2);
+    // Built once, outside every timed region: pair cost must be the two
+    // index operations, not per-token string allocation.
+    const std::vector<PostingsToken> victim_toks =
+        tokens_for(static_cast<int>(victim), extra_tokens);
+    // Warmup reps (page faults, allocator warm).
+    for (int r = 0; r < pairs; ++r) {
+        index.remove_file(victim);
+        index.index_file_pretokenized(victim, victim_toks);
+    }
     long long best = std::numeric_limits<long long>::max();
-    // Warmup rep (page faults, allocator warm).
-    index.remove_file(victim);
-    index.index_file_pretokenized(victim, tokens_for(static_cast<int>(victim),
-                                                     extra_tokens));
     for (int rep = 0; rep < 5; ++rep) {
         auto start = std::chrono::steady_clock::now();
-        index.remove_file(victim);
+        for (int r = 0; r < pairs; ++r) {
+            index.remove_file(victim);
+            index.index_file_pretokenized(victim, victim_toks);
+        }
         auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                       std::chrono::steady_clock::now() - start)
                       .count();
-        best = std::min<long long>(best, ns);
-        index.index_file_pretokenized(victim, tokens_for(static_cast<int>(victim),
-                                                         extra_tokens));
+        best = std::min<long long>(best, ns / pairs);
     }
     index.set_bulk_indexing(false);
     return best;
@@ -458,8 +473,9 @@ long long time_remove_with_hot_token(int n_files, int extra_tokens) {
 // or skip -- never substitute a fabricated denominator.
 std::optional<double> postings_remove_scaling_ratio(long long hot_5000_ns,
                                                     long long hot_50_ns) {
+    if (hot_5000_ns < 0 || hot_50_ns <= 0) return std::nullopt;
     return static_cast<double>(hot_5000_ns) /
-           static_cast<double>(std::max<long long>(hot_50_ns, 1));
+           static_cast<double>(hot_50_ns);
 }
 
 }  // namespace
@@ -486,14 +502,39 @@ TEST(IndexPerformanceRequirements, PostingsRemoveFileScalesWithTokenCountNotFile
     // removal from a 50-file index. Pre-fix the ratio is ~50-100x (linear
     // in the hot token's file count); post-fix it is ~1x (bounded by the
     // removed file's own token count).
-    long long hot_5000 = time_remove_with_hot_token(5000, 0);
-    long long hot_50 = time_remove_with_hot_token(50, 0);
-    double ratio = static_cast<double>(hot_5000) /
-                   static_cast<double>(std::max<long long>(hot_50, 1));
-    std::printf("[ PostingsRemoveScaling ] files=5000:%lldns files=50:%lldns ratio=%.2f\n",
-                hot_5000, hot_50, ratio);
+    //
+    // The 50-file baseline (one hash lookup + swap-pop, SSO "function"
+    // re-add) fits inside a single steady_clock tick, so a one-shot timing
+    // of it measures 0ns -- the 2026-09-20 flake that broke other tasks'
+    // full-suite gates with ratio=104.00. Each timed region therefore covers
+    // kPairs consecutive remove/re-add pairs and reports the per-pair
+    // average. If even that reads 0 on a coarse host, widen the region
+    // before drawing any conclusion; only a baseline that is STILL 0 at
+    // 20000-pair regions is honestly skipped (conditional, never
+    // unconditional), and no clamped 1 ever becomes a denominator.
+    constexpr int kPairs = 200;
+    int pairs = kPairs;
+    long long hot_5000 = time_remove_with_hot_token(5000, 0, pairs);
+    long long hot_50 = time_remove_with_hot_token(50, 0, pairs);
+    while (hot_50 <= 0 && pairs < 20000) {
+        pairs *= 100;
+        hot_5000 = time_remove_with_hot_token(5000, 0, pairs);
+        hot_50 = time_remove_with_hot_token(50, 0, pairs);
+    }
+    const auto ratio = postings_remove_scaling_ratio(hot_5000, hot_50);
+    std::printf(
+        "[ PostingsRemoveScaling ] pairs=%d files=5000:%lldns files=50:%lldns "
+        "ratio=%.2f\n",
+        pairs, hot_5000, hot_50, ratio.value_or(-1.0));
     std::fflush(stdout);
-    EXPECT_LT(ratio, 5.0)
+    if (!ratio.has_value()) {
+        GTEST_SKIP() << "50-file remove baseline measured " << hot_50
+                     << "ns even at " << pairs
+                     << "-pair regions: below this host's clock resolution, "
+                        "scaling ratio unmeasurable (no fabricated "
+                        "denominator is substituted)";
+    }
+    EXPECT_LT(*ratio, 5.0)
         << "remove_file cost scaled with the number of files sharing the "
            "hot token (linear posting-vector scan suspected): 5000-file "
         << hot_5000 << "ns vs 50-file " << hot_50 << "ns";
