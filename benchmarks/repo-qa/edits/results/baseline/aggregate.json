@@ -1,0 +1,370 @@
+{
+  "arms": {
+    "baseline": {
+      "all_pass": 0,
+      "failure_reasons": {
+        "agent_failure": 0,
+        "harness_failure": 0,
+        "invalid_patch": 0,
+        "missing_cell": 24,
+        "oracle_failure": 0,
+        "patch_rejected": 0
+      },
+      "gates": {
+        "behavior": {
+          "judged": 0,
+          "passed": 0,
+          "rate": 0.0
+        },
+        "blast": {
+          "judged": 0,
+          "passed": 0,
+          "rate": 0.0
+        },
+        "convention": {
+          "judged": 0,
+          "passed": 0,
+          "rate": 0.0
+        }
+      },
+      "input_tokens": null,
+      "matrix": {
+        "FFF": 0,
+        "FFT": 0,
+        "FTF": 0,
+        "FTT": 0,
+        "TFF": 0,
+        "TFT": 0,
+        "TTF": 0,
+        "TTT": 0
+      },
+      "observed": 0,
+      "output_tokens": null,
+      "planned": 24,
+      "tool_calls": null,
+      "wall_clock_seconds": null
+    },
+    "treatment": {
+      "all_pass": 0,
+      "failure_reasons": {
+        "agent_failure": 0,
+        "harness_failure": 0,
+        "invalid_patch": 0,
+        "missing_cell": 24,
+        "oracle_failure": 0,
+        "patch_rejected": 0
+      },
+      "gates": {
+        "behavior": {
+          "judged": 0,
+          "passed": 0,
+          "rate": 0.0
+        },
+        "blast": {
+          "judged": 0,
+          "passed": 0,
+          "rate": 0.0
+        },
+        "convention": {
+          "judged": 0,
+          "passed": 0,
+          "rate": 0.0
+        }
+      },
+      "input_tokens": null,
+      "matrix": {
+        "FFF": 0,
+        "FFT": 0,
+        "FTF": 0,
+        "FTT": 0,
+        "TFF": 0,
+        "TFT": 0,
+        "TTF": 0,
+        "TTT": 0
+      },
+      "observed": 0,
+      "output_tokens": null,
+      "planned": 24,
+      "tool_calls": null,
+      "wall_clock_seconds": null
+    }
+  },
+  "compatibility": {},
+  "completeness": {
+    "missing": [
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "nx-api-1"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "nx-api-1"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "nx-api-2"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "nx-api-2"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "nx-log-1"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "nx-log-1"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "nx-log-2"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "nx-log-2"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "nx-module-1"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "nx-module-1"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "nx-module-2"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "nx-module-2"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "nx-retry-1"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "nx-retry-1"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "nx-retry-2"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "nx-retry-2"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "pb-api-1"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "pb-api-1"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "pb-api-2"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "pb-api-2"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "pb-log-1"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "pb-log-1"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "pb-log-2"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "pb-log-2"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "pb-module-1"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "pb-module-1"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "pb-module-2"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "pb-module-2"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "pb-retry-1"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "pb-retry-1"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "pb-retry-2"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "pb-retry-2"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "skl-api-1"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "skl-api-1"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "skl-api-2"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "skl-api-2"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "skl-log-1"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "skl-log-1"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "skl-log-2"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "skl-log-2"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "skl-module-1"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "skl-module-1"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "skl-module-2"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "skl-module-2"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "skl-retry-1"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "skl-retry-1"
+      },
+      {
+        "arm": "baseline",
+        "seed": 7,
+        "task_id": "skl-retry-2"
+      },
+      {
+        "arm": "treatment",
+        "seed": 7,
+        "task_id": "skl-retry-2"
+      }
+    ],
+    "missing_cells": 48,
+    "observed_cells": 0,
+    "passed": false,
+    "planned_cells": 48,
+    "unplanned": []
+  },
+  "deltas": {},
+  "grouped_by": [],
+  "headline": {
+    "arms": {
+      "baseline": {
+        "all_pass": 0,
+        "observed": 0,
+        "planned": 24,
+        "rate": 0.0
+      },
+      "treatment": {
+        "all_pass": 0,
+        "observed": 0,
+        "planned": 24,
+        "rate": 0.0
+      }
+    },
+    "complete": false,
+    "definition": "share of PLANNED task x arm x repetition cells whose patch passed behaviour AND convention AND blast-radius",
+    "denominator": "planned_cells",
+    "metric": "all_three_gates_pass_rate"
+  },
+  "pairing": {
+    "paired_count": 0,
+    "unpaired": [],
+    "unpaired_count": 0
+  },
+  "schema": "edit_aggregate_v1"
+}

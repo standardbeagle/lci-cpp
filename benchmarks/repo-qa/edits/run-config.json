@@ -1,0 +1,209 @@
+{
+  "schema": "edit_run_config_v1",
+  "config_id": "stage3-edits-baseline",
+  "stage": "stage-3-edits",
+  "purpose": "Stage-3 paired edit-mode baseline: the LCI semantic-navigation arm vs the lexical grep/glob/read arm, both now producing a patch, scored by the all-three-gates conjunction (behaviour AND convention AND blast-radius) over the committed 24-task edit bank. Informational baseline: it pins and instruments the grid and accounts for every cell; it does NOT gate a merge and reports no LCI-vs-baseline effect, because the paid grid was never launched.",
+  "status": "pinned_not_executed",
+  "gates": {
+    "definition": "A cell counts toward the headline only when ALL THREE named gates pass on the agent's captured patch.",
+    "behavior": {
+      "schema": "oracle_gate_v1",
+      "conjunction": ["oracle.existing_suite", "oracle.discrimination"],
+      "evaluator": "benchmarks/repo-qa/edits/oracles/oracle_gate.py"
+    },
+    "convention": {
+      "schema": "conformance_gate_v2",
+      "conjunction": ["conformance.agent_patch", "conformance.bank_health"],
+      "evaluator": "benchmarks/repo-qa/edits/conformance/conformance_gate.py"
+    },
+    "blast": {
+      "schema": "oracle_gate_v1",
+      "conjunction": ["oracle.changed_path", "oracle.api_impact"],
+      "evaluator": "benchmarks/repo-qa/edits/oracles/oracle_gate.py"
+    },
+    "fail_closed": "An absent gate is a FAIL (REASON_GATE_ABSENT), never an unknown or a pass."
+  },
+  "provenance": {
+    "harness": {
+      "runner_module": "benchmarks/repo-qa/edits/runner",
+      "primitive": "edit_run.run_edit_task_both_arms / edit_run.run_edit_bank",
+      "orchestrator": "benchmarks/repo-qa/scripts/exploration_runner.py (subcommand edit-run / edit-smoke)",
+      "adapter": "runner.adapter.ClaudeCliAdapter (paid); runner.adapter.FakeAgent (smoke)",
+      "runner_mode": "edit",
+      "task_schema_version": "edit_task_v1",
+      "isolation_gate": "runner.gate.enforce (tool_not_allowed / path_escape / sealed_path); Bash denied on both arms",
+      "hermetic_pipeline_smoke": "benchmarks/repo-qa/scripts/edit_pipeline_smoke.py"
+    },
+    "scorer": {
+      "module": "benchmarks/repo-qa/edits/scoring/edit_scorer.py",
+      "baseline_ledger_generator": "benchmarks/repo-qa/scripts/edit_baseline_ledger.py",
+      "score_schema_version": "edit_score_v1",
+      "aggregate_schema_version": "edit_aggregate_v1",
+      "primary_metric": "all_three_gates_pass_rate",
+      "denominator": "planned_cells",
+      "gate_versions_recorded": {
+        "oracle": "oracle_gate_v1",
+        "conformance": "conformance_gate_v2"
+      },
+      "judge": "none (deterministic behaviour/blast/convention gates; no LLM judge)"
+    },
+    "task_bank": {
+      "dir": "benchmarks/repo-qa/edits/tasks",
+      "schema_version": "edit_task_v1",
+      "schema_file": "benchmarks/repo-qa/edits/schema/edit-task.schema.json",
+      "task_count": 24,
+      "per_corpus": {
+        "next.js": 8,
+        "pocketbase": 8,
+        "scikit-learn": 8
+      },
+      "categories": {
+        "api-shape-consistency": 6,
+        "logging": 6,
+        "module-extraction-layout": 6,
+        "retry-error-handling": 6
+      },
+      "seed_uniform": 7,
+      "adjudication": "each task carries two annotator verdicts (ann-hyde, ann-quill) in edits/annotations/, resolved",
+      "task_digest_recipe": "task_digest.task_digest(canonical sort_keys JSON of full task)"
+    },
+    "forge": {
+      "script": "benchmarks/repo-qa/scripts/exploration_corpus_forge.py",
+      "registry": "benchmarks/repo-qa/exploration/corpora.json",
+      "registry_schema_version": "exploration_corpora_v1",
+      "forge_version_emitted": "2",
+      "forge_version_pinned_by_bank": "1",
+      "corpora_ready_verified": true,
+      "note": "Edit-mode corpora are the same forged, adjudicated trees as the stage-1 exploration bank; the edit bank adds the mutation goal prompts, oracle_patch, behaviour/blast/convention rubrics and dual annotator adjudication on top."
+    }
+  },
+  "corpora": [
+    {
+      "corpus_id": "pocketbase",
+      "language": "go",
+      "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+      "seed": 7,
+      "forge_version": "1",
+      "reference_tree_hash": "65119ec1226bdb6e2a45791e41f5a1c099d9bb5baf65200d1ece813bae26840d"
+    },
+    {
+      "corpus_id": "scikit-learn",
+      "language": "python",
+      "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+      "seed": 7,
+      "forge_version": "1",
+      "reference_tree_hash": "2c8e1660624b4aaf6d8288ff7ae000754f33a887b48d1669cf137594de3cee61"
+    },
+    {
+      "corpus_id": "next.js",
+      "language": "typescript",
+      "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+      "seed": 7,
+      "forge_version": "1",
+      "reference_tree_hash": "e3a6fc4e730e68a50db223cfa5205cba7e2d8d25c8283e7d8d98945154742af5"
+    }
+  ],
+  "seeds": [7],
+  "subject_binary": {
+    "name": "lci",
+    "built_from_checkout_commit": "e8489a108d615963a28fe9dddfd8236024456cee",
+    "reported_version": "0.10.1",
+    "path": "build/release/src/lci",
+    "invocation": "lci mcp (stdio), registered as server 'lci' via --mcp-config; baseline arm attaches no MCP server"
+  },
+  "arms": {
+    "treatment": {
+      "description": "LCI MCP semantic tools + Read + mutation (Edit/Write)",
+      "allowlist": [
+        "Edit",
+        "Read",
+        "Write",
+        "mcp__lci__browse_file",
+        "mcp__lci__callers",
+        "mcp__lci__find_files",
+        "mcp__lci__get_context",
+        "mcp__lci__inspect_symbol",
+        "mcp__lci__list_symbols",
+        "mcp__lci__references",
+        "mcp__lci__search"
+      ],
+      "denied": ["Bash"]
+    },
+    "baseline": {
+      "description": "Lexical Grep + Glob + Read + mutation (Edit/Write); no LCI server attached",
+      "allowlist": ["Edit", "Glob", "Grep", "Read", "Write"],
+      "denied": ["Bash", "mcp__lci__*"]
+    },
+    "single_variable": "model, system prompt, timeout, pinned clean checkout and the goal prompt are byte-identical across arms; only the navigation toolset (LCI MCP + Read vs Glob/Grep + Read) differs."
+  },
+  "model": {
+    "intended": "claude-sonnet-4-5",
+    "note": "Harness default (exploration_runner.DEFAULT_MODEL), arm-shared by BOTH arms. A paid run requires this be an explicitly approved model id (verified against the live provider), not the unattended default."
+  },
+  "repetitions": {
+    "per_cell": 1,
+    "independent_seeds": [7],
+    "note": "The committed bank is authored and adjudicated at a single corpus seed (7). A repetition is a distinct (task, arm, seed) cell in the scorer's key, so >=3 independent replications require re-forging AND re-adjudicating seeds 8, 9 ... which no committed bank yet provides. Variance-powered replication (>=3 reps, spread, minimum-successes gate) is therefore a documented PREREQUISITE of any threshold claim, not a config field that can be flipped."
+  },
+  "budget": {
+    "planned_total_cells": 48,
+    "proposed_time_budget_seconds_per_cell": 600,
+    "proposed_time_budget_seconds_total": 28800,
+    "proposed_spending_budget_usd": null,
+    "note": "48 = 24 tasks x 2 arms x seed 7 (reps per_cell = 1). A spending cap was never set because no paid run was authorized (see approval)."
+  },
+  "approval": {
+    "status": "not_granted",
+    "granted_by": null,
+    "granted_at": null,
+    "reason": "This stage-3 configuration was pinned by an unattended implementer session. The task's own blocker list requires 'explicit paid-run configuration signoff' before launch: a named human approving the model and the spending/time budget, recorded before launch. No approver was present and no provider credentials are configured on this host (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN unset). Per design-unbiased-benchmarks stop conditions, an unapproved/uncapable paid grid must not be launched, and its auth failures must not be scored as answers."
+  },
+  "execution": {
+    "executed": false,
+    "reason": "paid_run_approval_not_granted; provider credentials not configured on this host",
+    "cells_planned": 48,
+    "cells_executed": 0,
+    "cells_observed": 0,
+    "cells_missing": 48,
+    "record_failure_status": "missing_cell",
+    "provider_spend_usd": 0.0,
+    "omission_policy": "No live paid ledger exists, so the paid run-records.jsonl is empty. Every one of the 48 planned (task, arm, seed) cells is enumerated in aggregate.json completeness.missing and bucketed as missing_cell in the failure breakdown -- present as a planned cell carrying an explicit missing status, none silently dropped. A not-executed record is deliberately NOT fabricated, because edit_scorer._STATUS_FAILURE has no not_executed mapping and would mis-bucket a governance decision as a harness failure; the missing_cell bucket is the scorer's purpose-built not-run path.",
+    "resume_semantics": "The runner is resume-idempotent per cell keyed on (task_id::arm::seed, task_digest): a COMPLETED cell is never re-run or duplicated; only retryable classes (timeout, agent_failure, config_error, harness_failure) re-run on a resume. Because zero cells were observed, a later approved run appends 48 fresh cells; nothing is skipped or reused from this pinned state."
+  },
+  "smoke": {
+    "hermetic_pipeline_smoke": {
+      "command": "python3 benchmarks/repo-qa/scripts/edit_pipeline_smoke.py --out-dir benchmarks/repo-qa/edits/results/smoke",
+      "result": "PASS",
+      "scope": "one task, both arms, deterministic fake agent, trivial argv behaviour command, real runner/gates/scorer/aggregate; no provider, no toolchain, byte-stable",
+      "artifacts": "benchmarks/repo-qa/edits/results/smoke/{run-records.jsonl,scores.json,aggregate.json}",
+      "evidence": "both arms reach edit_passed (all three gates green), completeness passed, headline rate 1.0 over 2 planned cells"
+    },
+    "guarded_live_smoke": {
+      "command": "python3 benchmarks/repo-qa/scripts/exploration_runner.py edit-smoke",
+      "result": "SKIP (exit 0)",
+      "reason": "not opted in (requires --live / EXPLORATION_RUNNER_LIVE=1 AND a resolvable claude CLI AND the lci binary)",
+      "evidence": "the paid-launch smoke path is fail-closed: it refuses to spend credentials unless explicitly opted in and capable. This is the 'no silent paid run' guard."
+    }
+  },
+  "stages": {
+    "stage1_exploration": "COMPLETE (informational): pinned + fully materialised + 0 executed for the same approval reason. Report: benchmarks/repo-qa/ANALYSIS-exploration-stage1.md",
+    "stage2_claim_validation": "PENDING: instrument present (exploration/scoring/claim_validation.py, scripts/score_claim_validation.py, claim-run/claim-smoke subcommands); no committed stage-2 baseline ledger or report exists yet. Per the task's blocking clause, stage-2 is integrated as PENDING and does not block the stage-3 baseline.",
+    "stage3_edits": "This config (pinned, not executed)."
+  },
+  "out_of_scope": [
+    "threshold selection / merge gates on LCI-vs-baseline deltas (no variance support yet)",
+    "variance-powered replication (>=3 independent seeds, spread, significance)",
+    "stage-2 claim-validation baseline execution",
+    "launching any paid cell"
+  ],
+  "integration_policy": "docs/benchmarks/stage-gated-lci-pr-policy.md",
+  "artifacts": {
+    "run_config": "benchmarks/repo-qa/edits/run-config.json",
+    "paid_run_records": "benchmarks/repo-qa/edits/results/baseline/run-records.jsonl",
+    "scores": "benchmarks/repo-qa/edits/results/baseline/scores.json",
+    "aggregate": "benchmarks/repo-qa/edits/results/baseline/aggregate.json",
+    "smoke": "benchmarks/repo-qa/edits/results/smoke/",
+    "report": "benchmarks/repo-qa/edits/REPORT.md",
+    "integration_policy": "docs/benchmarks/stage-gated-lci-pr-policy.md"
+  }
+}

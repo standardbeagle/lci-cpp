@@ -1,0 +1,94 @@
+[
+  {
+    "all_gates_passed": true,
+    "arm": "treatment",
+    "cell": {
+      "arm": "treatment",
+      "seed": 7,
+      "task_id": "smoke-pb-module-1"
+    },
+    "corpus_id": "smoke-corpus",
+    "failure_class": null,
+    "forge_version": "2",
+    "gates": {
+      "behavior": {
+        "judged": true,
+        "passed": true,
+        "reasons": []
+      },
+      "blast": {
+        "judged": true,
+        "passed": true,
+        "reasons": []
+      },
+      "convention": {
+        "judged": true,
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "matrix_cell": "TTT",
+    "model": "edit-smoke-fake-model",
+    "patch_hash": "sha256:2afa2cc6c0d4557c2e286992f701bc03f0e462570e13028d2b392e11ffb0785e",
+    "process": {
+      "input_tokens": 10,
+      "output_tokens": 3,
+      "tool_calls": 0,
+      "wall_clock_seconds": 0.0
+    },
+    "reason": "ALL_GREEN",
+    "run_key": "smoke-pb-module-1::treatment::seed-7",
+    "schema": "edit_score_v1",
+    "seed": 7,
+    "status": "edit_passed",
+    "task_bank_version": "edit_task_v1",
+    "task_digest": "sha256:c90ef889b6e9983ae4708fe1ec68b494ca5f583c0b3e5aabaa39fc318a2cd5bb",
+    "task_id": "smoke-pb-module-1"
+  },
+  {
+    "all_gates_passed": true,
+    "arm": "baseline",
+    "cell": {
+      "arm": "baseline",
+      "seed": 7,
+      "task_id": "smoke-pb-module-1"
+    },
+    "corpus_id": "smoke-corpus",
+    "failure_class": null,
+    "forge_version": "2",
+    "gates": {
+      "behavior": {
+        "judged": true,
+        "passed": true,
+        "reasons": []
+      },
+      "blast": {
+        "judged": true,
+        "passed": true,
+        "reasons": []
+      },
+      "convention": {
+        "judged": true,
+        "passed": true,
+        "reasons": []
+      }
+    },
+    "matrix_cell": "TTT",
+    "model": "edit-smoke-fake-model",
+    "patch_hash": "sha256:2afa2cc6c0d4557c2e286992f701bc03f0e462570e13028d2b392e11ffb0785e",
+    "process": {
+      "input_tokens": 10,
+      "output_tokens": 3,
+      "tool_calls": 0,
+      "wall_clock_seconds": 0.0
+    },
+    "reason": "ALL_GREEN",
+    "run_key": "smoke-pb-module-1::baseline::seed-7",
+    "schema": "edit_score_v1",
+    "seed": 7,
+    "status": "edit_passed",
+    "task_bank_version": "edit_task_v1",
+    "task_digest": "sha256:c90ef889b6e9983ae4708fe1ec68b494ca5f583c0b3e5aabaa39fc318a2cd5bb",
+    "task_id": "smoke-pb-module-1"
+  }
+]

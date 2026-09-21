@@ -1,0 +1,198 @@
+{
+  "arms": {
+    "baseline": {
+      "all_pass": 1,
+      "failure_reasons": {
+        "agent_failure": 0,
+        "harness_failure": 0,
+        "invalid_patch": 0,
+        "missing_cell": 0,
+        "oracle_failure": 0,
+        "patch_rejected": 0
+      },
+      "gates": {
+        "behavior": {
+          "judged": 1,
+          "passed": 1,
+          "rate": 1.0
+        },
+        "blast": {
+          "judged": 1,
+          "passed": 1,
+          "rate": 1.0
+        },
+        "convention": {
+          "judged": 1,
+          "passed": 1,
+          "rate": 1.0
+        }
+      },
+      "input_tokens": {
+        "max": 10,
+        "mean": 10,
+        "median": 10,
+        "min": 10,
+        "n": 1,
+        "total": 10
+      },
+      "matrix": {
+        "FFF": 0,
+        "FFT": 0,
+        "FTF": 0,
+        "FTT": 0,
+        "TFF": 0,
+        "TFT": 0,
+        "TTF": 0,
+        "TTT": 1
+      },
+      "observed": 1,
+      "output_tokens": {
+        "max": 3,
+        "mean": 3,
+        "median": 3,
+        "min": 3,
+        "n": 1,
+        "total": 3
+      },
+      "planned": 1,
+      "tool_calls": {
+        "max": 0,
+        "mean": 0,
+        "median": 0,
+        "min": 0,
+        "n": 1,
+        "total": 0
+      },
+      "wall_clock_seconds": {
+        "max": 0.0,
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "n": 1,
+        "total": 0.0
+      }
+    },
+    "treatment": {
+      "all_pass": 1,
+      "failure_reasons": {
+        "agent_failure": 0,
+        "harness_failure": 0,
+        "invalid_patch": 0,
+        "missing_cell": 0,
+        "oracle_failure": 0,
+        "patch_rejected": 0
+      },
+      "gates": {
+        "behavior": {
+          "judged": 1,
+          "passed": 1,
+          "rate": 1.0
+        },
+        "blast": {
+          "judged": 1,
+          "passed": 1,
+          "rate": 1.0
+        },
+        "convention": {
+          "judged": 1,
+          "passed": 1,
+          "rate": 1.0
+        }
+      },
+      "input_tokens": {
+        "max": 10,
+        "mean": 10,
+        "median": 10,
+        "min": 10,
+        "n": 1,
+        "total": 10
+      },
+      "matrix": {
+        "FFF": 0,
+        "FFT": 0,
+        "FTF": 0,
+        "FTT": 0,
+        "TFF": 0,
+        "TFT": 0,
+        "TTF": 0,
+        "TTT": 1
+      },
+      "observed": 1,
+      "output_tokens": {
+        "max": 3,
+        "mean": 3,
+        "median": 3,
+        "min": 3,
+        "n": 1,
+        "total": 3
+      },
+      "planned": 1,
+      "tool_calls": {
+        "max": 0,
+        "mean": 0,
+        "median": 0,
+        "min": 0,
+        "n": 1,
+        "total": 0
+      },
+      "wall_clock_seconds": {
+        "max": 0.0,
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "n": 1,
+        "total": 0.0
+      }
+    }
+  },
+  "compatibility": {
+    "forge_version": "2",
+    "model": "edit-smoke-fake-model",
+    "task_bank_version": "edit_task_v1"
+  },
+  "completeness": {
+    "missing": [],
+    "missing_cells": 0,
+    "observed_cells": 2,
+    "passed": true,
+    "planned_cells": 2,
+    "unplanned": []
+  },
+  "deltas": {
+    "all_three_gates_pass_rate": 0.0,
+    "behavior_rate": 0.0,
+    "blast_rate": 0.0,
+    "convention_rate": 0.0,
+    "input_tokens_mean": 0,
+    "output_tokens_mean": 0,
+    "tool_calls_mean": 0,
+    "wall_clock_mean": 0.0
+  },
+  "grouped_by": [],
+  "headline": {
+    "arms": {
+      "baseline": {
+        "all_pass": 1,
+        "observed": 1,
+        "planned": 1,
+        "rate": 1.0
+      },
+      "treatment": {
+        "all_pass": 1,
+        "observed": 1,
+        "planned": 1,
+        "rate": 1.0
+      }
+    },
+    "complete": true,
+    "definition": "share of PLANNED task x arm x repetition cells whose patch passed behaviour AND convention AND blast-radius",
+    "denominator": "planned_cells",
+    "metric": "all_three_gates_pass_rate"
+  },
+  "pairing": {
+    "paired_count": 1,
+    "unpaired": [],
+    "unpaired_count": 0
+  },
+  "schema": "edit_aggregate_v1"
+}
