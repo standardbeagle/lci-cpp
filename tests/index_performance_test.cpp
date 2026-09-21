@@ -28,6 +28,7 @@
 #include <chrono>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -447,7 +448,37 @@ long long time_remove_with_hot_token(int n_files, int extra_tokens) {
     return best;
 }
 
+// The scaling ratio between the timed 5000-file removal and the 50-file
+// baseline. A 1-token file removal from the 50-file index is a hash lookup
+// plus one swap-pop: it can take less than one steady_clock tick, which is
+// exactly the 2026-09-20 flake grid files=5000:104ns files=50:0ns. A 0ns
+// baseline is not a measurement: clamping it to 1 collapses the ratio onto
+// hot_5000 itself (104.00 above) and the scaling test reports a false 104x
+// regression. nullopt = unmeasurable, the caller must widen the timed region
+// or skip -- never substitute a fabricated denominator.
+std::optional<double> postings_remove_scaling_ratio(long long hot_5000_ns,
+                                                    long long hot_50_ns) {
+    return static_cast<double>(hot_5000_ns) /
+           static_cast<double>(std::max<long long>(hot_50_ns, 1));
+}
+
 }  // namespace
+
+TEST(IndexPerformanceRequirements,
+     PostingsRemoveScalingRefusesUnmeasurableBaseline) {
+    // The observed flake grid (.tman/ctest.log:426-429, 2026-09-20 22:38Z,
+    // 2700/2701 otherwise green): 104ns at 5000 files, 0ns at 50 files.
+    // An unmeasurable baseline must not yield a ratio EXPECT_LT can fail.
+    EXPECT_EQ(postings_remove_scaling_ratio(104, 0), std::nullopt)
+        << "a 0ns baseline was clamped to 1ns and reported as a 104x "
+           "regression";
+    // Measurable baseline: plain ratio, no clamping.
+    const auto ok = postings_remove_scaling_ratio(104, 50);
+    ASSERT_TRUE(ok.has_value());
+    EXPECT_NEAR(*ok, 104.0 / 50.0, 1e-9);
+    // A negative reading means the measurement is broken, not merely fast.
+    EXPECT_EQ(postings_remove_scaling_ratio(-1, 50), std::nullopt);
+}
 
 TEST(IndexPerformanceRequirements, PostingsRemoveFileScalesWithTokenCountNotFileCount) {
     // Removing a 1-token file from an index where "function" is shared by
