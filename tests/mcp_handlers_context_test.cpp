@@ -18,6 +18,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <memory>
 #include <sstream>
 #include <string>
 #ifndef _WIN32
@@ -2435,53 +2437,98 @@ CodeObjectID oid_for(const ReferenceTracker::Snapshot& snap,
     return oid;
 }
 
-// get_context on `leaf_fn` in a corpus of `filler_count` filler files.
-double best_of_get_context_leaf(int filler_count, int reps) {
-    auto dir = lci::test::unique_temp_dir("lci_ctx_scale_");
-    write_entry_corpus(dir, filler_count);
+// A fully indexed corpus plus the engine answering get_context on `leaf_fn`.
+// Held alive for the WHOLE measurement so the small and large corpora are
+// timed inside one interleaved loop under identical conditions (the previous
+// helper built+timed+torndown each corpus in its own phase: under `ctest -j4`
+// one phase could catch a clean window and the other a scheduler stall, and
+// the per-call cost is sub-millisecond, so the ratio was pure contention
+// noise). The engine references the indexer, so both live here.
+struct LeafCorpus {
+    std::filesystem::path dir;
+    std::unique_ptr<MasterIndex> indexer;
+    std::unique_ptr<ContextLookupEngine> engine;
+    CodeObjectID oid;
+};
+
+std::unique_ptr<LeafCorpus> make_leaf_corpus(int filler_count) {
+    auto c = std::make_unique<LeafCorpus>();
+    c->dir = lci::test::unique_temp_dir("lci_ctx_scale_");
+    write_entry_corpus(c->dir, filler_count);
     Config config;
-    config.project.root = dir.string();
-    MasterIndex indexer(config);
-    if (!indexer.index_directory(dir.string())) return -1.0;
-
-    ContextLookupEngine engine(indexer);
-    auto snap = indexer.ref_tracker().pin();
-    if (snap == nullptr) return -1.0;
-    auto oid = oid_for(*snap, "leaf_fn");
+    config.project.root = c->dir.string();
+    c->indexer = std::make_unique<MasterIndex>(config);
+    if (!c->indexer->index_directory(c->dir.string())) return nullptr;
+    c->engine = std::make_unique<ContextLookupEngine>(*c->indexer);
+    auto snap = c->indexer->ref_tracker().pin();
+    if (snap == nullptr) return nullptr;
+    c->oid = oid_for(*snap, "leaf_fn");
     bool ok = false;
-    engine.get_context(oid, ok);  // warm-up (lazy paths)
-    if (!ok) return -1.0;
+    c->engine->get_context(c->oid, ok);  // retire lazy-path cold starts
+    if (!ok) return nullptr;
+    return c;
+}
 
-    double best = 1e30;
-    for (int i = 0; i < reps; ++i) {
-        auto t0 = std::chrono::steady_clock::now();
-        auto ctx = engine.get_context(oid, ok);
-        auto t1 = std::chrono::steady_clock::now();
+// Mean per-call latency of a batch of kCalls get_context calls. Batching is
+// the contention defence: a single call cannot be told apart from a scheduler
+// preemption on a shared box, but a batch spans many scheduler windows, so
+// its mean sits far above switch noise and its minimum over rounds converges
+// on the uncontended floor.
+double batch_get_context_ms(LeafCorpus& c, int k_calls) {
+    bool ok = false;
+    auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < k_calls; ++i) {
+        auto ctx = c.engine->get_context(c.oid, ok);
         EXPECT_TRUE(ok);
         EXPECT_GT(ctx.semantic_context.entry_point_dependencies.size(), 0u)
             << "fixture must produce entry-point dependencies";
-        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        best = std::min(best, ms);
     }
-    std::error_code ec;
-    std::filesystem::remove_all(dir, ec);
-    return best;
+    auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration<double, std::milli>(t1 - t0).count() /
+           static_cast<double>(k_calls);
 }
 
 }  // namespace
 
 // 10x the files (same core symbol graph) must not cost 2x the get_context
-// latency. Baseline fails: find_all_entry_points scanned every file per call.
+// latency. The threshold is UNCHANGED from the original (ratio < 2.0): the
+// property is flat-in-file-count, so the true ratio is ~1 and a genuine
+// linear-in-files regression reads ~10x — 2.0 sits between them and does not
+// need to move. Only the measurement is hardened: both corpora share one
+// interleaved loop, every sample is a per-call mean over a batch, and the
+// best-of-kRounds min drives each side to its uncontended floor. A baseline
+// regression (per-request corpus walk) still fails: the large corpus pays
+// ~10x per call, batching scales both sides by the same factor, so the ratio
+// holds at ~10x.
 TEST(ContextPerfTest, GetContextScalingRatioFlatInFileCount) {
-    constexpr int kReps = 5;
-    double small = best_of_get_context_leaf(40, kReps);
-    double large = best_of_get_context_leaf(400, kReps);
-    ASSERT_GT(small, 0.0);
-    ASSERT_GT(large, 0.0);
-    EXPECT_LT(large, small * 2.0)
+    auto small = make_leaf_corpus(40);
+    auto large = make_leaf_corpus(400);
+    ASSERT_TRUE(small != nullptr);
+    ASSERT_TRUE(large != nullptr);
+
+    // A single get_context is ~10us — shorter than a scheduler switch — so a
+    // one-call sample is indistinguishable from a preemption stall. A batch of
+    // 512 calls is a ~5ms sample that spans the switch quantum; 25 interleaved
+    // rounds let the per-side minimum settle on its uncontended floor.
+    constexpr int kBatch = 512;
+    constexpr int kRounds = 25;
+    double best_small = std::numeric_limits<double>::infinity();
+    double best_large = std::numeric_limits<double>::infinity();
+    for (int round = 0; round < kRounds; ++round) {
+        best_small = std::min(best_small, batch_get_context_ms(*small, kBatch));
+        best_large = std::min(best_large, batch_get_context_ms(*large, kBatch));
+    }
+    double ratio = best_large / best_small;
+    std::printf("[ GetContextScaling ] small=%.4fms/call large=%.4fms/call ratio=%.2f\n",
+                best_small, best_large, ratio);
+    EXPECT_LT(ratio, 2.0)
         << "get_context on a 10x-file corpus (same symbol) cost "
-        << large << "ms vs " << small
-        << "ms: per-request cost still scales with corpus size";
+        << best_large << "ms/call vs " << best_small
+        << "ms/call: per-request cost still scales with corpus size";
+
+    std::error_code ec;
+    std::filesystem::remove_all(small->dir, ec);
+    std::filesystem::remove_all(large->dir, ec);
 }
 
 // entry_point_dependencies order must be identical across 5 fresh processes

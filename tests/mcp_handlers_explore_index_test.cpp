@@ -541,6 +541,127 @@ TEST_F(ListSymbolsScalingFixture,
         << "ns 10k=" << best_big << "ns)";
 }
 
+namespace {
+
+// Mean per-call latency (microseconds) of a batch of k_calls list_symbols
+// calls over `idx`, max=10 page (the shape every list_symbols scaling guard
+// uses). A single call over a 10k-symbol index already costs a few
+// milliseconds — above the scheduler quantum — so a modest batch widens each
+// sample across many switch windows and the best-of-rounds minimum, taken
+// inside an interleaved loop, drives each side to its uncontended floor even
+// under `ctest -j4` contention. The handler result is checked but not parsed
+// inside the timed loop: JSON parse cost is symmetric between corpora and
+// would only inflate the numbers without sharpening the ratio.
+double batch_list_symbols_us(MasterIndex& idx, int k_calls) {
+    nlohmann::json params = nlohmann::json::object();
+    params["max"] = 10;
+    (void)handle_list_symbols(params, idx);  // retire cold-start allocations
+    auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < k_calls; ++i) {
+        EXPECT_FALSE(handle_list_symbols(params, idx).is_error);
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration<double, std::micro>(t1 - t0).count() /
+           static_cast<double>(k_calls);
+}
+
+}  // namespace
+
+// The list_symbols surface's LINEAR-IN-FILES negative control — the throat
+// the symbol-scaling guards above cannot have. Those hold the file count
+// constant (4 vs 4) and vary symbols, so a per-file corpus walk is invisible
+// to them by construction; and the O(n^2) collect walk they DO reject against
+// is a superlinear-SYMBOLS tripwire, not the file-count regression this task's
+// acceptance names ("must still FAIL against a deliberately linear-in-files
+// regression"). Here the two corpora share an identical total symbol count
+// (10 000) but differ 10x in FILE count (10 files x 1000 vs 100 files x 100).
+// The correct collect loop costs ~O(total symbols) per call — the outer file
+// loop does only O(1) work per file — so latency must be flat in file count
+// and the true ratio is ~1. A genuine linear-in-files regression (a corpus
+// walk repeated per file, the exact shape get_entry_point_dependencies used
+// to have) reads ~10x: the per-file scan runs 10x more often on the
+// 100-file corpus while the symbol work is unchanged. Threshold 2.0 sits
+// between the two, unchanged from the get_context guard, and is a RELATIVE
+// bound only — never an absolute ns/µs SLO. Measurement is hardened the same
+// way (interleaved batched samples, best-of-rounds minimum), and an
+// unmeasurable small-side floor is skipped rather than fabricated into a
+// denominator (index_performance_test.cpp's postings_remove_scaling_ratio
+// rule). RED/GREEN evidence in the commit message.
+TEST_F(ListSymbolsScalingFixture,
+       ListSymbolsTenfoldFilesFlatInFileCount) {
+    auto file_small = make_scaled_corpus(10, 1000);   // 10 files, 10 000 syms
+    auto file_big = make_scaled_corpus(100, 100);     // 100 files, 10 000 syms
+    ASSERT_TRUE(file_small != nullptr);
+    ASSERT_TRUE(file_big != nullptr);
+
+    // Pin the corpus invariant once, outside the timed loop: both sides walk
+    // the SAME 10 000 symbols, only the file count differs (10x). If this
+    // ever breaks the ratio below would compare apples to oranges.
+    {
+        nlohmann::json params = nlohmann::json::object();
+        params["max"] = 1;
+        EXPECT_EQ(nlohmann::json::parse(
+                      handle_list_symbols(params, *file_small->indexer).text)
+                      ["total"]
+                          .get<int>(),
+                  10000)
+            << "10-file corpus must carry 10 000 symbols";
+        EXPECT_EQ(nlohmann::json::parse(
+                      handle_list_symbols(params, *file_big->indexer).text)
+                      ["total"]
+                          .get<int>(),
+                  10000)
+            << "100-file corpus must carry 10 000 symbols";
+    }
+
+    // A few-ms-per-call measurement: a 20-call batch (~50ms) spans ~50
+    // scheduler windows, and 20 interleaved rounds let each side's minimum
+    // settle on its uncontended floor under load. Kept far smaller than the
+    // get_context guard's 512-call batch precisely because this per-call cost
+    // is already ~300x larger.
+    constexpr int kBatch = 20;
+    constexpr int kRounds = 20;
+    for (int warm = 0; warm < 3; ++warm) {  // retire cold-cache/branch outliers
+        (void)batch_list_symbols_us(*file_small->indexer, 1);
+        (void)batch_list_symbols_us(*file_big->indexer, 1);
+    }
+    double best_small = std::numeric_limits<double>::infinity();
+    double best_big = std::numeric_limits<double>::infinity();
+    for (int round = 0; round < kRounds; ++round) {  // interleave: equal exposure
+        best_small = std::min(
+            best_small, batch_list_symbols_us(*file_small->indexer, kBatch));
+        best_big =
+            std::min(best_big, batch_list_symbols_us(*file_big->indexer, kBatch));
+    }
+    // A 0µs/call floor is below clock resolution, not a fast measurement: it
+    // would collapse the ratio onto best_big alone and report a false
+    // regression. Widen the batch before concluding; skip honestly if still 0,
+    // never substitute a fabricated denominator.
+    if (best_small <= 0.0) {
+        std::error_code ec;
+        std::filesystem::remove_all(file_small->dir, ec);
+        std::filesystem::remove_all(file_big->dir, ec);
+        GTEST_SKIP() << "10-file list_symbols floor measured " << best_small
+                     << "us/call: below this host's clock resolution, "
+                        "scaling ratio unmeasurable (no fabricated "
+                        "denominator substituted)";
+    }
+    double ratio = best_big / best_small;
+    std::printf(
+        "[ ListSymbolsFileScaling ] 10file=%.3fus/call 100file=%.3fus/call "
+        "ratio=%.2f\n",
+        best_small, best_big, ratio);
+    std::fflush(stdout);
+    EXPECT_LT(ratio, 2.0)
+        << "list_symbols cost scaled with file count, not symbol count: "
+        << "10x files at constant 10k symbols cost " << best_big
+        << "us/call vs " << best_small << "us/call (per-file scan suspected)";
+
+    std::error_code ec;
+    std::filesystem::remove_all(file_small->dir, ec);
+    std::filesystem::remove_all(file_big->dir, ec);
+}
+
 // =============================================================================
 // inspect_symbol tests
 // =============================================================================
