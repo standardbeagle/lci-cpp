@@ -282,29 +282,53 @@ ExpansionEngine::HydrateResult ExpansionEngine::hydrate_reference(
 
     auto file_path = resolve_path(ref.file, project_root);
 
-    // A pure line-range ref (no symbol) keeps literal current-index line
-    // semantics in every format; outline is a file-level listing for symbol
-    // refs only, so it must not widen a bound-only ref into a whole-file
-    // outline that drops the saved range and the line_range_literal marker.
-    if (format == FormatType::Outline &&
-        !(ref.symbol.empty() && ref.has_line_range)) {
-        // Outline is a file-level listing, but a saved file+symbol still has to
-        // resolve by identity inside that file first: a missing file, an absent
-        // symbol, or a same-file overload set is reported unresolved, never
-        // masked by a full-file listing labelled with that symbol.
-        if (!ref.symbol.empty()) {
-            auto rs = resolve_start(file_path, ref.symbol);
-            if (rs.status != RefResolution::Resolved) {
-                return {{}, 0, "outline ref unresolved in " + ref.file,
-                        rs.status};
-            }
+    // Resolve a file path's index status without ever reading the file body:
+    // a file in the index hydrates a symbol listing (possibly empty for a
+    // no-symbol file such as a contract JSON); a file on disk but not in the
+    // index is FileNotIndexed (honest, never a silent full-file read); a file
+    // neither in the index nor on disk is MissingFile.
+    auto file_presence = [&](const std::string& key) -> RefResolution {
+        if (index_.path_to_id(key) != 0) return RefResolution::Resolved;
+        std::error_code ec;
+        if (std::filesystem::exists(key, ec)) {
+            return RefResolution::FileNotIndexed;
+        }
+        return RefResolution::MissingFile;
+    };
+
+    // A file-only ref (file, no symbol, no line range) is a request for the
+    // whole file as context. Rather than reject it or read the full body,
+    // return the file's own symbol outline: name + kind + current line for
+    // each indexed symbol, empty-but-resolved for a no-symbol file. This lets
+    // one manifest mix targeted symbol source (below) with unselected files.
+    if (ref.symbol.empty() && !ref.has_line_range) {
+        auto status = file_presence(file_path);
+        if (status != RefResolution::Resolved) {
+            std::string err = status == RefResolution::FileNotIndexed
+                                  ? "file is not indexed: " + ref.file
+                                  : "file not found: " + ref.file;
+            return {{}, 0, err, status};
+        }
+        hr.source = build_file_outline(index_, file_path);  // "" is valid here
+        int tokens = static_cast<int>(hr.source.size()) / 4;
+        return {std::move(hr), tokens, {}, RefResolution::Resolved};
+    }
+
+    // An explicit global outline: same listing, but a saved file+symbol still
+    // has to resolve by identity inside that file first — a missing file, an
+    // absent symbol, or a same-file overload set is reported unresolved, never
+    // masked by a full-file listing labelled with that symbol. A pure line-
+    // range ref (no symbol) keeps literal current-index line semantics and is
+    // not widened into a whole-file outline, so it falls through to Case 2.
+    if (format == FormatType::Outline && !ref.symbol.empty()) {
+        auto rs = resolve_start(file_path, ref.symbol);
+        if (rs.status != RefResolution::Resolved) {
+            return {{}, 0, "outline ref unresolved in " + ref.file, rs.status};
         }
         hr.source = build_file_outline(index_, file_path);
         if (hr.source.empty()) {
-            RefResolution reason =
-                index_.path_to_id(file_path) == 0 ? RefResolution::MissingFile
-                                                  : RefResolution::Resolved;
-            return {{}, 0, "no symbols found for outline: " + ref.file, reason};
+            return {{}, 0, "no symbols found for outline: " + ref.file,
+                    RefResolution::Resolved};
         }
         int tokens = static_cast<int>(hr.source.size()) / 4;
         return {std::move(hr), tokens, {}, RefResolution::Resolved};

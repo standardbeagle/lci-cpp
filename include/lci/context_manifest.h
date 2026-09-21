@@ -92,6 +92,10 @@ enum class RefResolution : uint8_t {
     MissingSymbol,     // file present, symbol absent (never cross-file match)
     AmbiguousSymbol,   // >1 same-name symbol in the named file
     UnsupportedVersion,  // manifest schema version is neither empty nor 1.0
+    FileNotIndexed,    // named file exists on disk but was never indexed
+                       // (excluded, gitignored, or created after the index);
+                       // distinct from MissingFile so a file-only outline ref
+                       // is never answered by silently reading the whole file
 };
 
 inline const char* to_string(RefResolution r) {
@@ -102,6 +106,7 @@ inline const char* to_string(RefResolution r) {
         case RefResolution::MissingSymbol: return "missing_symbol";
         case RefResolution::AmbiguousSymbol: return "ambiguous_symbol";
         case RefResolution::UnsupportedVersion: return "unsupported_version";
+        case RefResolution::FileNotIndexed: return "not_indexed";
     }
     return "unknown";
 }

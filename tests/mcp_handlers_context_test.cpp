@@ -750,15 +750,27 @@ TEST_F(ContextHandlerFixture, HydrateReferenceBySymbol) {
     }
 }
 
-TEST_F(ContextHandlerFixture, HydrateReferenceEmptyRefFails) {
+// A file-only ref (a file with no symbol and no line range) under the default
+// Full format hydrates to the file's own symbol outline — the honest answer to
+// "what is in this file" when nothing more specific was selected. It used to be
+// rejected as invalid_ref, which made a mixed working set (some targeted
+// symbols, some whole files) impossible to hydrate in one load.
+TEST_F(ContextHandlerFixture, HydrateReferenceFileOnlyReturnsOutline) {
     ExpansionEngine engine(*indexer_);
 
     ContextRef ref;
-    ref.file = "main.go";
+    ref.file = "handler.go";
 
     auto result =
         engine.hydrate_reference(ref, FormatType::Full, temp_dir_.string());
-    EXPECT_FALSE(result.error.empty());
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.reason, RefResolution::Resolved);
+    // Outline lists the file's own symbols by name and kind, never the body.
+    EXPECT_NE(result.ref.source.find("handleRequest"), std::string::npos)
+        << result.ref.source;
+    EXPECT_EQ(result.ref.source.find("parseInput(\"hello\")"),
+              std::string::npos)
+        << "an outline must not copy the function body: " << result.ref.source;
 }
 
 // Finding 3: format=signatures/outline were parsed but silently ignored
@@ -1247,6 +1259,260 @@ TEST_F(ContextExpansionFixture, AmbiguousExpansionSourceIsNeverAGuess) {
         << "an ambiguous source must expand to nothing";
 }
 
+// =============================================================================
+// Mixed working sets: targeted source for selected symbols + outline for files
+// (task 01M2VE7HEVAGPHFB262RV456ZF)
+//
+// A real working set names a few symbols precisely AND several whole files that
+// are only relevant as context. One manifest load must return the targeted
+// source for the symbol refs and a compact symbol outline for the file-only
+// refs, preserving input order and roles, and it must never fabricate or
+// silently read a whole file body for a file-only ref.
+// =============================================================================
+
+class ContextOutlineFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_ctx_outline_");
+        std::filesystem::create_directories(temp_dir_);
+
+        write_file(temp_dir_ / "main.go",
+                   "package p\n"
+                   "\n"
+                   "func main() {\n"
+                   "\tAlpha()\n"
+                   "}\n");
+        // Two symbols in one file, each with a body token distinct enough to
+        // prove an outline lists names without copying bodies.
+        write_file(temp_dir_ / "helpers.go",
+                   "package p\n"
+                   "\n"
+                   "func Alpha() int { return 101 }\n"
+                   "\n"
+                   "func Beta() int { return 202 }\n");
+        // An indexed file that yields no symbols at all: a contract manifest.
+        write_file(temp_dir_ / "contract.json",
+                   "{\n  \"schema\": \"order.v1\",\n  \"fields\": [\"id\", \"qty\"]\n}\n");
+        // A zero-byte file: honest status for an empty file.
+        write_file(temp_dir_ / "empty.go", "");
+
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+
+        // Written AFTER indexing: exists on disk but never entered the index —
+        // the honest "unindexed" case, distinct from "missing file".
+        write_file(temp_dir_ / "late.go",
+                   "package p\n\nfunc LateOnly() int { return 999 }\n");
+    }
+    void TearDown() override {
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+    static void write_file(const std::filesystem::path& path,
+                           const std::string& content) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream out(path);
+        out << content;
+        out.flush();
+    }
+    nlohmann::json load(nlohmann::json manifest,
+                        const std::string& format = "") {
+        nlohmann::json params = {{"operation", "load"},
+                                 {"from_string", manifest.dump()}};
+        if (!format.empty()) params["format"] = format;
+        auto result = handle_context(params, *indexer_, temp_dir_.string());
+        if (result.is_error) {
+            return nlohmann::json{{"__error__", result.text}};
+        }
+        return nlohmann::json::parse(result.text);
+    }
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+// One load returns targeted source for each selected symbol and an outline for
+// the file-only ref, preserving input order and roles. Two symbols living in
+// the same file are resolved independently; the file-only ref for that same
+// file coexists with them and lists both without copying their bodies.
+TEST_F(ContextOutlineFixture, MixedLoadReturnsTargetedSourceAndFileOutline) {
+    auto j = load({{"r",
+                    {{{"f", "main.go"}, {"s", "main"}, {"role", "modify"}},
+                     {{"f", "helpers.go"}, {"s", "Alpha"}, {"role", "contract"}},
+                     {{"f", "helpers.go"}, {"s", "Beta"}, {"role", "verify"}},
+                     {{"f", "helpers.go"}, {"role", "pattern"}},
+                     {{"f", "contract.json"}, {"role", "boundary"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_EQ(j["unresolved"].size(), 0u) << j.dump();
+    // Order preserved: five resolved refs, in manifest order.
+    ASSERT_EQ(j["refs"].size(), 5u) << j.dump();
+    EXPECT_EQ(j["refs"][0]["file"], "main.go");
+    EXPECT_EQ(j["refs"][0]["role"], "modify");
+    EXPECT_EQ(j["refs"][1]["file"], "helpers.go");
+    EXPECT_EQ(j["refs"][1]["symbol"], "Alpha");
+    EXPECT_EQ(j["refs"][1]["role"], "contract");
+    EXPECT_EQ(j["refs"][2]["symbol"], "Beta");
+    EXPECT_EQ(j["refs"][2]["role"], "verify");
+    EXPECT_EQ(j["refs"][3]["role"], "pattern");
+    EXPECT_EQ(j["refs"][4]["role"], "boundary");
+
+    // Selected symbols hydrate to their targeted body (body token present).
+    EXPECT_NE(j["refs"][1]["source"].get<std::string>().find("return 101"),
+              std::string::npos)
+        << j["refs"][1].dump();
+    EXPECT_NE(j["refs"][2]["source"].get<std::string>().find("return 202"),
+              std::string::npos)
+        << j["refs"][2].dump();
+
+    // The file-only helpers.go ref is an outline: it lists both symbols with
+    // kind, but copies neither body.
+    const std::string outline = j["refs"][3]["source"].get<std::string>();
+    EXPECT_NE(outline.find("Alpha"), std::string::npos) << outline;
+    EXPECT_NE(outline.find("Beta"), std::string::npos) << outline;
+    EXPECT_NE(outline.find("function"), std::string::npos) << outline;
+    EXPECT_EQ(outline.find("return 101"), std::string::npos)
+        << "outline must not copy the body: " << outline;
+    EXPECT_EQ(outline.find("return 202"), std::string::npos) << outline;
+
+    // The contract.json file is indexed but yields no symbols: its outline is
+    // legitimately empty, never an error and never the file body.
+    EXPECT_EQ(j["refs"][4]["source"].get<std::string>(), "")
+        << "an empty outline is valid for an existing no-symbol file";
+    EXPECT_EQ(j["refs"][4].find("schema"), j["refs"][4].end())
+        << "must not silently read the whole contract file: "
+        << j["refs"][4].dump();
+
+    // Only the three symbol refs count as hydrated symbols.
+    EXPECT_EQ(j["stats"]["refs_loaded"], 5) << j.dump();
+    EXPECT_EQ(j["stats"]["symbols_hydrated"], 3) << j.dump();
+    EXPECT_EQ(j["stats"]["unresolved_count"], 0) << j.dump();
+}
+
+// The outline for a file-only ref carries an existing file's honest empty
+// result, and its role/note survive the round trip through the hydrate path.
+TEST_F(ContextOutlineFixture, NoSymbolExistingFileIsValidEmptyOutline) {
+    ExpansionEngine engine(*indexer_);
+    ContextRef ref;
+    ref.file = "contract.json";
+    ref.role = "contract";
+    ref.note = "order schema";
+    auto r = engine.hydrate_reference(ref, FormatType::Full, temp_dir_.string());
+    ASSERT_TRUE(r.error.empty()) << r.error;
+    EXPECT_EQ(r.reason, RefResolution::Resolved);
+    EXPECT_TRUE(r.ref.source.empty()) << r.ref.source;
+    EXPECT_EQ(r.ref.role, "contract");
+    EXPECT_EQ(r.ref.note, "order schema");
+}
+
+// A file that is not in the index but exists on disk (a gitignored/excluded or
+// since-created file) is reported honestly as not_indexed — the engine must not
+// read the whole file off disk to fabricate an outline.
+TEST_F(ContextOutlineFixture, UnindexedFileIsNotIndexedNotWholeFileRead) {
+    auto j = load({{"r", {{{"f", "late.go"}, {"role", "boundary"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_EQ(j["refs"].size(), 0u) << j.dump();
+    ASSERT_EQ(j["unresolved"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["reason"], "not_indexed") << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["file"], "late.go") << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["role"], "boundary") << j.dump();
+    // The unindexed file's body must never leak into the response.
+    EXPECT_EQ(j.dump().find("LateOnly"), std::string::npos) << j.dump();
+    EXPECT_EQ(j.dump().find("return 999"), std::string::npos) << j.dump();
+}
+
+// A file that does not exist anywhere is missing_file — distinct from the
+// on-disk-but-unindexed case above, so a typo'd path is never mistaken for an
+// excluded file.
+TEST_F(ContextOutlineFixture, NonexistentFileIsMissingFile) {
+    auto j = load({{"r", {{{"f", "nowhere.go"}, {"role", "boundary"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_EQ(j["refs"].size(), 0u) << j.dump();
+    ASSERT_EQ(j["unresolved"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["reason"], "missing_file") << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["file"], "nowhere.go") << j.dump();
+}
+
+// The zero-byte `empty.go` fixture must actually be hydrated, and its honest
+// outcome — an existing file that resolves to a valid empty outline — pinned as
+// DISTINCT from the two non-resolving file-only cases: a file present on disk
+// but never indexed (not_indexed) and a file absent everywhere (missing_file).
+// One load carries all three so a reader sees the three statuses side by side:
+// the empty outline must never be mistaken for a failure (it lands in refs, not
+// unresolved), and neither a typo'd nor an excluded path may masquerade as it.
+TEST_F(ContextOutlineFixture,
+       ExistingEmptyFileResolvesEmptyOutlineDistinctFromMissingAndUnindexed) {
+    // Guard against a vacuous pass: the fixture really is a zero-byte file, or
+    // "existing-empty" is not what is under test.
+    const auto empty_path = temp_dir_ / "empty.go";
+    ASSERT_TRUE(std::filesystem::exists(empty_path)) << empty_path;
+    ASSERT_EQ(std::filesystem::file_size(empty_path), 0u)
+        << "the existing-empty case requires a genuine zero-byte file";
+
+    // Through the expander directly: an existing empty file hydrates to a
+    // resolved, empty outline with no error, and role/note round-trip.
+    ExpansionEngine engine(*indexer_);
+    ContextRef eRef;
+    eRef.file = "empty.go";
+    eRef.role = "contract";
+    eRef.note = "empty placeholder";
+    auto hydrated =
+        engine.hydrate_reference(eRef, FormatType::Full, temp_dir_.string());
+    ASSERT_TRUE(hydrated.error.empty()) << hydrated.error;
+    EXPECT_EQ(hydrated.reason, RefResolution::Resolved);
+    EXPECT_TRUE(hydrated.ref.source.empty()) << hydrated.ref.source;
+    EXPECT_EQ(hydrated.ref.role, "contract");
+    EXPECT_EQ(hydrated.ref.note, "empty placeholder");
+
+    // End-to-end through the loader: all three file-only cases in one manifest.
+    auto j = load({{"r",
+                    {{{"f", "empty.go"}, {"role", "boundary"}},
+                     {{"f", "late.go"}, {"role", "boundary"}},
+                     {{"f", "nowhere.go"}, {"role", "boundary"}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+
+    // Only the existing empty file resolves; its outline is legitimately empty,
+    // never the file body and never a fabricated symbol.
+    ASSERT_EQ(j["refs"].size(), 1u) << j.dump();
+    EXPECT_EQ(j["refs"][0]["file"], "empty.go") << j.dump();
+    EXPECT_TRUE(j["refs"][0]["source"].get<std::string>().empty())
+        << j["refs"][0].dump();
+    EXPECT_EQ(j["refs"][0]["role"], "boundary") << j.dump();
+    // An empty file hydrates no symbol.
+    EXPECT_EQ(j["stats"]["refs_loaded"], 1) << j.dump();
+    EXPECT_EQ(j["stats"]["symbols_hydrated"], 0) << j.dump();
+
+    // The other two are unresolved with distinct honest statuses, in input order.
+    ASSERT_EQ(j["unresolved"].size(), 2u) << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["file"], "late.go") << j.dump();
+    EXPECT_EQ(j["unresolved"][0]["reason"], "not_indexed") << j.dump();
+    EXPECT_EQ(j["unresolved"][1]["file"], "nowhere.go") << j.dump();
+    EXPECT_EQ(j["unresolved"][1]["reason"], "missing_file") << j.dump();
+    EXPECT_EQ(j["stats"]["unresolved_count"], 2) << j.dump();
+}
+
+// A file-only ref keeps the literal-outline semantics: it is a listing, never a
+// body, under every explicit global format too, while a symbol ref under
+// format=signatures still returns exactly one line.
+TEST_F(ContextOutlineFixture, FileOnlyOutlineAndSymbolSignaturesPreserved) {
+    auto j = load({{"r",
+                    {{{"f", "helpers.go"}, {"role", "pattern"}},
+                     {{"f", "helpers.go"}, {"s", "Alpha"}, {"role", "modify"}}}}},
+                  "signatures");
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    ASSERT_EQ(j["refs"].size(), 2u) << j.dump();
+    // file-only → outline lists both symbols (a listing, not one line).
+    const std::string outline = j["refs"][0]["source"].get<std::string>();
+    EXPECT_NE(outline.find("Alpha"), std::string::npos) << outline;
+    EXPECT_NE(outline.find("Beta"), std::string::npos) << outline;
+    // symbol ref under signatures → a single line (no body newline), not the
+    // full multi-line excerpt the Full format would return for the same ref.
+    const std::string sig = j["refs"][1]["source"].get<std::string>();
+    EXPECT_EQ(sig.find('\n'), std::string::npos) << sig;
+    EXPECT_NE(sig.find("Alpha"), std::string::npos) << sig;
+}
+
 // -- Actual MCP server tools/call dispatch (B6) ------------------------------
 //
 // The prior context tests called handle_context directly. These drive the real
@@ -1369,6 +1635,34 @@ TEST_F(ContextWireFixture, WireMalformedRefIsolated) {
     ASSERT_EQ(r.payload["unresolved"].size(), 1u);
     EXPECT_EQ(r.payload["unresolved"][0]["reason"], "invalid_ref");
     EXPECT_EQ(r.payload["unresolved"][0]["role"], "bad");
+}
+
+// A mixed working set over the real tools/call wire: one targeted symbol ref
+// hydrates to its source, one file-only ref hydrates to the file's outline,
+// with roles and input order preserved. This is the transport-level door the
+// feature actually ships through.
+TEST_F(ContextWireFixture, WireMixedSourceAndOutlineManifest) {
+    auto r = load({{"r",
+                    {{{"f", "dup_a.go"}, {"s", "Dup"}, {"role", "modify"}},
+                     {{"f", "ghost.go"}, {"role", "pattern"}}}}});
+    ASSERT_FALSE(r.is_error) << r.payload.dump();
+    ASSERT_EQ(r.payload["refs"].size(), 2u) << r.payload.dump();
+    EXPECT_EQ(r.payload["unresolved"].size(), 0u) << r.payload.dump();
+    // First ref: targeted body of Dup in dup_a.go.
+    EXPECT_EQ(r.payload["refs"][0]["file"], "dup_a.go");
+    EXPECT_EQ(r.payload["refs"][0]["role"], "modify");
+    EXPECT_NE(r.payload["refs"][0]["source"].get<std::string>().find("return 1"),
+              std::string::npos)
+        << r.payload["refs"][0].dump();
+    // Second ref: file-only outline of ghost.go lists GhostOnly by kind, no body.
+    const std::string outline =
+        r.payload["refs"][1]["source"].get<std::string>();
+    EXPECT_EQ(r.payload["refs"][1]["role"], "pattern");
+    EXPECT_NE(outline.find("GhostOnly"), std::string::npos) << outline;
+    EXPECT_NE(outline.find("function"), std::string::npos) << outline;
+    EXPECT_EQ(outline.find("return 7"), std::string::npos)
+        << "outline must not copy the body: " << outline;
+    EXPECT_EQ(r.payload["stats"]["symbols_hydrated"], 1) << r.payload.dump();
 }
 
 TEST_F(ContextWireFixture, WireUnsupportedVersionStructured) {
