@@ -1613,6 +1613,70 @@ TEST(CIEngine, BuildStructureRoutesUnknownToOther) {
     EXPECT_EQ(s.docs, 0);
 }
 
+// Parity gap #2 (2026-07-13 batch-2 close): Go caps the structure category
+// LISTS at code=30/tests=20/config=15/docs=10/other=10 before emit
+// (codebase_intelligence_tools.go:776-780), and the compact line reports
+// len(capped list), so the emitted per-category figure is the capped length,
+// not the true count. Verified against the reference binary: a fixture with
+// 41 code / 25 config / 20 other files emits `categories: code=30 ... config=15`
+// and a 10-long other list. The C++ count-based shape clamps the SAME way so the
+// numbers agree; only `other` was clamped before this (305b7fa).
+TEST(CIEngine, BuildStructureCapsCategoryCountsToGoListLimits) {
+    CodebaseIntelligenceEngine engine;
+    CodebaseIntelligenceParams params;
+    params.mode = "structure";
+
+    std::vector<std::string> file_paths;
+    for (int i = 0; i < 40; ++i) file_paths.push_back("/proj/pkg/code" + std::to_string(i) + ".go");
+    for (int i = 0; i < 30; ++i) file_paths.push_back("/proj/pkg/m" + std::to_string(i) + "_test.go");
+    for (int i = 0; i < 25; ++i) file_paths.push_back("/proj/config/c" + std::to_string(i) + ".json");
+    for (int i = 0; i < 20; ++i) file_paths.push_back("/proj/docs/d" + std::to_string(i) + ".md");
+    for (int i = 0; i < 20; ++i) file_paths.push_back("/proj/asset_" + std::to_string(i));
+
+    auto resp = engine.build_structure(params, {}, file_paths, {},
+                                       PathAttrRegistry::builtin(), "/proj");
+    ASSERT_TRUE(resp.structure_analysis.has_value());
+    const auto& s = *resp.structure_analysis;
+
+    // file_count is the true census (uncapped); only the category figures cap.
+    EXPECT_EQ(s.file_count, 135);
+    // Go's per-category caps, applied to the count-based shape.
+    EXPECT_EQ(s.code, 30);
+    EXPECT_EQ(s.tests, 20);
+    EXPECT_EQ(s.config, 15);
+    EXPECT_EQ(s.docs, 10);
+    EXPECT_EQ(s.other, 10);
+}
+
+// Parity gap #3 (2026-07-13 batch-2 close): Go's build_structure categorizer
+// (categorizeFile, codebase_intelligence_tools.go:820-821) matches "/test/" and
+// "/tests/" DIRECTORY segments, so a test-support helper with a non-test
+// basename (src/tests/helper.py) is bucketed as TEST. The C++ search classifier
+// (classify_file) is basename-only — matching Go's separate search classifier
+// (engine.go:103) — so build_structure must NOT reuse it verbatim for the
+// directory-segment rule. Pin: src/tests/helper.py -> tests, src/test/a.go ->
+// tests, while /testing/ (no "/test/" substring) stays code.
+TEST(CIEngine, BuildStructureDetectsTestDirectorySegments) {
+    CodebaseIntelligenceEngine engine;
+    CodebaseIntelligenceParams params;
+    params.mode = "structure";
+
+    std::vector<std::string> file_paths = {
+        "/proj/src/tests/helper.py",  // "/tests/" dir -> test (Go categorizeFile)
+        "/proj/app/test/boot.go",     // "/test/" dir -> test
+        "/proj/src/testing/util.go",  // "/testing/" -> code (no "/test/" substring)
+        "/proj/src/app.go",           // code
+    };
+
+    auto resp = engine.build_structure(params, {}, file_paths, {},
+                                       PathAttrRegistry::builtin(), "/proj");
+    ASSERT_TRUE(resp.structure_analysis.has_value());
+    const auto& s = *resp.structure_analysis;
+
+    EXPECT_EQ(s.tests, 2);  // helper.py + boot.go
+    EXPECT_EQ(s.code, 2);   // util.go + app.go
+}
+
 // ===========================================================================
 // D4 — single count census across modes (repo-qa ANALYSIS-insight-verification)
 // ===========================================================================

@@ -78,6 +78,14 @@ std::string_view file_extension(std::string_view path);
 /// Classifies a file by its path and extension.
 FileCategory classify_file(std::string_view path);
 
+/// Structure-mode categorizer (Go `categorizeFile`,
+/// codebase_intelligence_tools.go:813). Identical to classify_file except it
+/// also buckets a file as Test when its path contains a "/test/" or "/tests/"
+/// directory segment — the rule the search classifier (engine.go classifyFile,
+/// basename-only) deliberately omits. Only build_structure uses this; search
+/// ranking keeps the basename-only classify_file.
+FileCategory categorize_file(std::string_view path);
+
 /// Returns a ranking score adjustment for a file's extension.
 double score_file_type(std::string_view path);
 

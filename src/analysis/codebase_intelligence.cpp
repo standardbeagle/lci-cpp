@@ -8,7 +8,7 @@
 #include <lci/analysis/module_analyzer.h>
 #include <lci/analysis/token_budget.h>
 #include <lci/reference.h>
-#include <lci/search/search_options.h>  // classify_file / FileCategory
+#include <lci/search/search_options.h>  // classify_file / categorize_file / FileCategory
 
 #include <absl/container/flat_hash_set.h>
 
@@ -438,10 +438,13 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
         ++top_dir_files[top];
         auto dot = rel.rfind('.');
         if (dot != std::string::npos) ++types_count[rel.substr(dot)];
-        // Categorize through the canonical classify_file rule (1:1 FileCategory
-        // mapping) instead of loose substring matching. This fixes the review
-        // finding where rel.find("/test") wrongly matched "/testing" and
-        // rel.find(".md") matched a mid-path ".md". FileCategory::Unknown
+        // Categorize through the structure-mode rule (Go categorizeFile): the
+        // 1:1 FileCategory mapping of the extension switch, PLUS the "/test/"
+        // and "/tests/" DIRECTORY-segment match the search classifier omits.
+        // The old code used rel.find("/test") which wrongly matched "/testing";
+        // categorize_file keeps Go's exact substring set ("/test/" and
+        // "/tests/", both requiring the trailing slash) so "/testing/" stays
+        // code while "src/tests/helper.py" is a test. FileCategory::Unknown
         // (no recognized extension: bare README, LICENSE, Makefile, ...) routes
         // to the "other" bucket, matching Go categorizeFile's default return
         // "other" (codebase_intelligence_tools.go:846) — never to code.
@@ -463,7 +466,7 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
             ++s.other;
             continue;
         }
-        switch (classify_file(rel)) {
+        switch (categorize_file(rel)) {
             case FileCategory::Test: ++s.tests; break;
             case FileCategory::Documentation: ++s.docs; break;
             case FileCategory::Config: ++s.config; break;
@@ -471,10 +474,18 @@ CodebaseIntelligenceResponse CodebaseIntelligenceEngine::build_structure(
             case FileCategory::Unknown: ++s.other; break;
         }
     }
-    // Go parity: FileCategories.Other is limitSlice(Other, 10) before emit
-    // (codebase_intelligence_tools.go:780). The count-based C++ shape clamps to
-    // the same cap so the emitted category figure matches Go's list length.
-    if (s.other > 10) s.other = 10;
+    // Go parity: each structure category LIST is capped before emit —
+    // code=30/tests=20/config=15/docs=10/other=10 (limitSlice,
+    // codebase_intelligence_tools.go:776-780) — and the compact line reports
+    // the capped length, not the true count (formatter_compact.go:568). The
+    // C++ count-based shape clamps every bucket to the same limit so the
+    // emitted figures match Go's list lengths (verified on the reference
+    // binary: 41 code files -> `code=30`). file_count stays the true census.
+    s.code = s.code > 30 ? 30 : s.code;
+    s.tests = s.tests > 20 ? 20 : s.tests;
+    s.config = s.config > 15 ? 15 : s.config;
+    s.docs = s.docs > 10 ? 10 : s.docs;
+    s.other = s.other > 10 ? 10 : s.other;
     s.dir_count = static_cast<int>(all_dirs.size());
     s.types.assign(types_count.begin(), types_count.end());
     std::sort(s.types.begin(), s.types.end(),

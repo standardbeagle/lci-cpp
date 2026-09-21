@@ -386,6 +386,21 @@ bool is_test_file(std::string_view path) {
     return classify_file(path) == FileCategory::Test;
 }
 
+// Go's structure-mode categorizer (categorizeFile, codebase_intelligence_tools
+// .go:813) buckets a file as Test when its lowercased path contains a "/test/"
+// or "/tests/" directory SEGMENT, in addition to classify_file's basename
+// markers. A bare ".py" under src/tests/ therefore counts as a test here even
+// though the search classifier (engine.go classifyFile, basename-only) would
+// call it code. "/testing/" has no "/test/" substring (needs the trailing
+// slash), so it correctly stays out — matching Go's exact string set.
+FileCategory categorize_file(std::string_view path) {
+    if (text::ascii_contains_ci(path, "/test/") ||
+        text::ascii_contains_ci(path, "/tests/")) {
+        return FileCategory::Test;
+    }
+    return classify_file(path);
+}
+
 // -- SearchEngine -------------------------------------------------------------
 
 SearchEngine::SearchEngine(MasterIndex& index, const SynonymTable& synonyms)
