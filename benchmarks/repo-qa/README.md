@@ -93,6 +93,42 @@ The validator queries every label and category in `annotations/<repo>/` through
 `semantic_annotations` and checks the returned symbol, path, category, labels,
 and tags.
 
+## Stage banks (unbiased, approval-gated)
+
+Beyond the tier ladder above, this directory holds a three-stage,
+preregistration-style measurement suite built with the
+`design-unbiased-benchmarks` / `audit-benchmark-evidence` methodology. Each stage
+pins a `run-config.json`, isolates one variable (the agent's navigation surface),
+scores against an LCI-independent oracle, and is **informational until approved
+and powered** — no cell is silently re-run and none is scored when it never ran.
+
+| Stage | Where | What it measures | Status |
+|---|---|---|---|
+| **1 exploration** | `exploration/` | cited-evidence precision/recall/F1 (find the right code) | pinned, smoke-instrumented, **0 executed** (approval not granted) — `ANALYSIS-exploration-stage1.md` |
+| **2 claim validation** | `exploration/scoring/claim_validation.py`, `scripts/score_claim_validation.py` | does LCI's *answer* hold vs an independent oracle | instrument present, **PENDING** baseline (no committed ledger/report) |
+| **3 edits** | `edits/` | all-three-gates pass (behaviour ∧ convention ∧ blast) on a *produced patch* | pinned, two-arm smoke **PASS**, **0 executed** (approval not granted) — `edits/REPORT.md` |
+
+Stage-3 pinned config + artifacts + the two-arm pre-flight smoke:
+
+```bash
+# structural bank validation (no provider)
+/usr/bin/python3 scripts/validate_edit_tasks.py
+# one-task/two-arm pipeline smoke (must print SMOKE PASS; deterministic, no provider/toolchain)
+/usr/bin/python3 scripts/edit_pipeline_smoke.py --out-dir edits/results/smoke
+# re-derive baseline scores.json + aggregate.json from the committed ledger (deterministic)
+/usr/bin/python3 scripts/edit_baseline_ledger.py
+# the paid grid itself (guarded; refuses to launch without approval + creds + --live)
+python3 scripts/exploration_runner.py edit-smoke   # SKIPs unless opted in + capable
+python3 scripts/exploration_runner.py edit-run --model <approved> --timeout <cap> \
+    --corpus-root .work/exploration \
+    --records edits/results/baseline/run-records.jsonl --work-root .work/edits-run
+```
+
+How the three stages jointly gate an LCI optimisation PR (non-gameable policy,
+no hard threshold before variance supports it) is defined in
+`../../docs/benchmarks/stage-gated-lci-pr-policy.md`. Forged corpora, raw
+transcripts and credentials are never committed (`.work/` is gitignored).
+
 ## Caveats
 
 - The installed `~/.local/bin/lci` (0.7.0 release) predates the MCP newline
