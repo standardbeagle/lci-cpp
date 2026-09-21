@@ -474,19 +474,35 @@ TEST_F(ServerLifecycleTest, ReindexKeepsPriorGenerationReadableAndPublishesOnce)
     // is harmless.
     release.store(true, std::memory_order_release);
 
+    // Gate the final assertions on the worker's real completion, NOT on the
+    // snapshot-publish edge. index_directory() bumps snapshot_publish_count()
+    // inside its commit, while handle_reindex's thread still has to return,
+    // build the successor SearchEngine and atomically republish it under mu_
+    // (the run opened by storing search_engine_ = nullptr, so /status.ready
+    // stays false until that republish) and clear indexing_active_. Poll
+    // /status until it reports ready under a bounded deadline, and assert the
+    // wait succeeded before touching any post-run state.
+    bool worker_done = false;
     const auto commit_deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (indexer_->snapshot_publish_count() == publish_before &&
-           std::chrono::steady_clock::now() < commit_deadline) {
+    while (std::chrono::steady_clock::now() < commit_deadline) {
+        auto status = post("/status");
+        if (status.contains("ready") && status["ready"].get<bool>()) {
+            worker_done = true;
+            break;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    ASSERT_TRUE(worker_done)
+        << "reindex worker never republished the engine within the deadline";
 
-    // Exactly one snapshot published across the whole /reindex. A pre-clear
-    // would publish an extra empty generation, making the delta two.
+    // The run is finished and the live state is stable: exactly one snapshot
+    // published across the whole /reindex. A pre-clear would have published an
+    // extra empty generation, making the delta two.
     EXPECT_EQ(indexer_->snapshot_publish_count(), publish_before + 1)
         << "an empty snapshot was published before the commit (pre-clear bug)";
 
-    // Final state healthy: the symbol still resolves and the server is back.
+    // Final state healthy: the symbol still resolves and the server is ready.
     EXPECT_FALSE(indexer_->search_definitions("Calculator").empty());
     auto status = post("/status");
     ASSERT_TRUE(status.contains("ready"));
