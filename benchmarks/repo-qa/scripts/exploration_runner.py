@@ -34,7 +34,7 @@ for _p in (EXPLORATION_ROOT, HERE, EDITS_RUNNER):
 
 import exploration_corpus_forge as forge  # noqa: E402
 from runner import toolsets  # noqa: E402
-from runner.adapter import ClaudeCliAdapter  # noqa: E402
+from runner.adapter import ClaudeCliAdapter, OpencodeAdapter  # noqa: E402
 from runner.run import (  # noqa: E402
     CLAIM_VALIDATION_MODE,
     BaseConfig,
@@ -98,19 +98,44 @@ def _lci_mcp_config(lci_bin):
     return path
 
 
+def _adapter_factory(args, *, claude_bin=None, lci_bin=None, mcp_config=None):
+    """One arm->adapter function for every command and both providers.
+
+    The arm contract is identical across providers and is enforced twice: the
+    baseline is handed no way to reach LCI (no MCP config, no registered
+    server), and `runner.gate` re-checks what was actually emitted. Only the
+    mechanism differs -- a CLI allowlist for Claude, a deny-by-default tools
+    map for opencode.
+    """
+    provider = getattr(args, "provider", "claude")
+    if provider == "opencode":
+        opencode_bin = getattr(args, "opencode_bin", "opencode")
+
+        def opencode_for(arm):
+            if arm == toolsets.BASELINE:
+                return OpencodeAdapter(opencode_bin=opencode_bin)
+            return OpencodeAdapter(opencode_bin=opencode_bin, lci_bin=lci_bin)
+
+        return opencode_for
+
+    resolved = claude_bin or args.claude_bin
+
+    def claude_for(arm):
+        if arm == toolsets.BASELINE:
+            return ClaudeCliAdapter(claude_bin=resolved)
+        return ClaudeCliAdapter(claude_bin=resolved, mcp_config=mcp_config)
+
+    return claude_for
+
+
 def _cmd_run(args):
     base = _base_config(args)
-    adapter = ClaudeCliAdapter(
-        claude_bin=args.claude_bin,
-        mcp_config=_lci_mcp_config(args.lci_bin),
-    )
     arms = (toolsets.TREATMENT, toolsets.BASELINE) if args.arm == "both" else (args.arm,)
-
-    def adapter_for(arm):
-        # Baseline gets no LCI MCP server at all -- belt-and-braces with the gate.
-        if arm == toolsets.BASELINE:
-            return ClaudeCliAdapter(claude_bin=args.claude_bin)
-        return adapter
+    # Baseline gets no LCI server at all -- belt-and-braces with the gate.
+    adapter_for = _adapter_factory(
+        args, lci_bin=args.lci_bin,
+        mcp_config=_lci_mcp_config(args.lci_bin) if args.provider == "claude" else None,
+    )
 
     count = 0
     for task in _load_tasks(args.tasks_dir, only=args.task):
@@ -130,13 +155,15 @@ def _cmd_run(args):
 
 
 def _cmd_smoke(args):
-    claude_bin = shutil.which(args.claude_bin)
+    agent_bin_name = args.opencode_bin if args.provider == "opencode" else args.claude_bin
+    agent_bin = shutil.which(agent_bin_name)
+    claude_bin = agent_bin if args.provider == "claude" else None
     lci_bin = args.lci_bin if os.path.isfile(args.lci_bin) else shutil.which(args.lci_bin)
     live = args.live or os.environ.get("EXPLORATION_RUNNER_LIVE") == "1"
 
     reasons = []
-    if not claude_bin:
-        reasons.append(f"claude CLI {args.claude_bin!r} not found")
+    if not agent_bin:
+        reasons.append(f"{args.provider} CLI {agent_bin_name!r} not found")
     if not lci_bin:
         reasons.append(f"lci binary {args.lci_bin!r} not found")
     if not live:
@@ -151,12 +178,10 @@ def _cmd_smoke(args):
         return 2
     task = tasks[0]
     base = _base_config(args)
-    mcp_config = _lci_mcp_config(lci_bin)
-
-    def adapter_for(arm):
-        if arm == toolsets.BASELINE:
-            return ClaudeCliAdapter(claude_bin=claude_bin)
-        return ClaudeCliAdapter(claude_bin=claude_bin, mcp_config=mcp_config)
+    mcp_config = _lci_mcp_config(lci_bin) if args.provider == "claude" else None
+    adapter_for = _adapter_factory(
+        args, claude_bin=claude_bin, lci_bin=lci_bin, mcp_config=mcp_config,
+    )
 
     results = run_task_both_arms(
         task, adapter_for, base,
@@ -260,6 +285,11 @@ def main(argv=None):
     parser.add_argument("--system-prompt", default=DEFAULT_SYSTEM_PROMPT)
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--claude-bin", default="claude")
+    parser.add_argument("--opencode-bin", default="opencode")
+    parser.add_argument(
+        "--provider", choices=("claude", "opencode"), default="claude",
+        help="agent CLI backing BOTH arms (arm-shared: never set per arm)",
+    )
     parser.add_argument(
         "--lci-bin",
         default=os.path.join(
