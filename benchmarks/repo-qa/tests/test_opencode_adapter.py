@@ -251,3 +251,27 @@ class CheckoutConfinementTest(unittest.TestCase):
     def test_an_invalid_call_without_a_named_tool_stays_invalid(self):
         from runner.adapter import attempted_tool_call
         self.assertEqual(attempted_tool_call("invalid", {"error": "x"})[0], "invalid")
+
+
+class RequestTimeoutTest(unittest.TestCase):
+    """opencode's own header and chunk timeouts default to the cell deadline,
+    so a hung provider request used to consume the whole cell."""
+
+    def test_the_cells_provider_gets_timeouts_shorter_than_the_cell_deadline(self):
+        from runner.adapter import PROVIDER_CHUNK_TIMEOUT_MS, PROVIDER_HEADER_TIMEOUT_MS
+        config = opencode_workspace_config(
+            BASELINE_TOOLS, model="cline-pass/cline-pass/deepseek-v4.1-flash")
+        options = config["provider"]["cline-pass"]["options"]
+        self.assertEqual(options["headerTimeout"], PROVIDER_HEADER_TIMEOUT_MS)
+        self.assertEqual(options["chunkTimeout"], PROVIDER_CHUNK_TIMEOUT_MS)
+        self.assertLess(PROVIDER_CHUNK_TIMEOUT_MS, 300_000)
+
+    def test_the_provider_key_is_the_id_before_the_first_slash(self):
+        config = opencode_workspace_config(BASELINE_TOOLS, model="opencode-go/qwen3.8-flash")
+        self.assertEqual(list(config["provider"]), ["opencode-go"])
+
+    def test_the_lci_server_gets_a_timeout_longer_than_opencodes_default(self):
+        from runner.adapter import LCI_MCP_TIMEOUT_MS
+        config = opencode_workspace_config(TREATMENT_TOOLS, require_lci(self))
+        self.assertEqual(config["mcp"]["lci"]["timeout"], LCI_MCP_TIMEOUT_MS)
+        self.assertGreater(LCI_MCP_TIMEOUT_MS, 5000)

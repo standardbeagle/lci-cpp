@@ -366,9 +366,23 @@ def lci_mcp_tool_ids(lci_bin, timeout=60):
         f"to deny, and registering the server unchecked would widen the arm")
 
 
-def opencode_workspace_config(allowed_tools, lci_bin=None):
+# opencode's headerTimeout and chunkTimeout both default to 300000 ms, the
+# same length as the cell deadline. A provider request that stops sending
+# bytes was therefore never detected by opencode: the cell deadline killed the
+# whole cell first. Both providers used by the pilot (cline-pass, opencode-go)
+# produced such hung requests mid-session. At 60 s a hung request fails while
+# the cell still has time left.
+PROVIDER_HEADER_TIMEOUT_MS = 60_000
+PROVIDER_CHUNK_TIMEOUT_MS = 60_000
+# opencode's default MCP request timeout is 5000 ms. The first LCI call on a
+# fresh checkout starts and indexes the per-root server, which can take longer.
+LCI_MCP_TIMEOUT_MS = 60_000
+
+
+def opencode_workspace_config(allowed_tools, lci_bin=None, model=None):
     """Full opencode config for one arm. The LCI MCP server is registered only
-    when the arm's allowlist actually names LCI tools."""
+    when the arm's allowlist actually names LCI tools. When `model` is given,
+    request timeouts are set for its provider (the id before the first `/`)."""
     wants_lci = any(t.startswith("mcp__lci__") for t in allowed_tools)
     if wants_lci and not lci_bin:
         raise ValueError("treatment arm requires lci_bin to register the MCP server")
@@ -384,9 +398,16 @@ def opencode_workspace_config(allowed_tools, lci_bin=None):
                        "external_directory": "deny"},
         "tools": opencode_tools_map(allowed_tools),
     }
+    if model:
+        provider = model.split("/", 1)[0]
+        config["provider"] = {provider: {"options": {
+            "headerTimeout": PROVIDER_HEADER_TIMEOUT_MS,
+            "chunkTimeout": PROVIDER_CHUNK_TIMEOUT_MS,
+        }}}
     if wants_lci:
         config["mcp"]["lci"] = {
             "type": "local", "command": [lci_bin, "mcp"], "enabled": True,
+            "timeout": LCI_MCP_TIMEOUT_MS,
         }
         # The server serves its whole surface; the arm is narrower. Deny every
         # served tool the allowlist does not name, or the treatment arm gets
@@ -465,7 +486,8 @@ class OpencodeAdapter:
             config_path = os.path.join(state_dir, "opencode.json")
             with open(config_path, "w") as handle:
                 json.dump(
-                    opencode_workspace_config(request.allowed_tools, self.lci_bin),
+                    opencode_workspace_config(request.allowed_tools, self.lci_bin,
+                                              request.model),
                     handle, indent=2, sort_keys=True,
                 )
             environment = opencode_stream.isolated_environment(
