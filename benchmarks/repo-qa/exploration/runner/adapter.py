@@ -241,3 +241,169 @@ def _extract_tool_calls(events):
                 raise ValueError("tool_use input must be an object")
             calls.append(ToolCall(name, arguments))
     return calls
+
+
+# --- opencode -------------------------------------------------------------
+#
+# The opencode surface names its tools and arguments differently from the
+# Claude CLI, and the arms / gate are both written in the Claude vocabulary.
+# Normalising at the adapter boundary keeps ONE allowlist and ONE gate for
+# both providers: `runner.toolsets` stays the single source of arm truth and
+# `gate.enforce` keeps re-checking what the agent actually emitted.
+#
+# Both tables below are derived from REAL recorded opencode streams (1,262
+# tool calls across the 160 executed discovery cells under
+# results/discovery/, opencode 1.18.x), never hand-imagined -- the `filePath`
+# and `include` spellings are exactly the kind of drift a hand-written fixture
+# reproduces wrongly (bench-harness-oracle-independence rule 9a).
+#
+# An UNMAPPED name or argument passes through verbatim so the gate rejects it.
+# Never map an unknown tool onto an allowed one: that would convert a
+# disjointness violation into a clean run.
+_OPENCODE_NATIVE_TOOLS = {"read": "Read", "grep": "Grep", "glob": "Glob"}
+_OPENCODE_MCP_PREFIX = "lci_"
+
+# Observed counts in the recorded corpus, for the reader who wonders why only
+# these two: read.filePath 340/340, grep.include 144/262 (`glob` in the Claude
+# vocabulary). grep.flags (1/262) is deliberately NOT mapped -- it has no
+# canonical equivalent, so it stays unknown and the gate flags it.
+_OPENCODE_ARGUMENTS = {
+    "Read": {"filePath": "file_path"},
+    "Grep": {"include": "glob"},
+}
+
+
+def canonical_tool_name(name):
+    """opencode tool id -> the allowlist/gate vocabulary (or verbatim)."""
+    if name in _OPENCODE_NATIVE_TOOLS:
+        return _OPENCODE_NATIVE_TOOLS[name]
+    if name.startswith(_OPENCODE_MCP_PREFIX):
+        return "mcp__lci__" + name[len(_OPENCODE_MCP_PREFIX):]
+    return name
+
+
+def canonical_arguments(tool, arguments):
+    """Rename an opencode call's arguments into the gate's schema vocabulary."""
+    if not isinstance(arguments, dict):
+        return arguments
+    mapping = _OPENCODE_ARGUMENTS.get(tool, {})
+    return {mapping.get(key, key): value for key, value in arguments.items()}
+
+
+# Native opencode tool ids, verified against the installed opencode (1.18.x)
+# and shared verbatim with scripts/bench.py NATIVE_TOOL_IDS. Anything not
+# granted by the arm is denied explicitly, so neither arm can reach the
+# other's mechanism (bench-harness-oracle-independence rule 12).
+OPENCODE_NATIVE_TOOL_IDS = (
+    "apply_patch", "bash", "edit", "glob", "grep", "lsp", "question", "read",
+    "skill", "task", "todowrite", "webfetch", "websearch", "write",
+)
+
+_CANONICAL_TO_OPENCODE = {v: k for k, v in _OPENCODE_NATIVE_TOOLS.items()}
+
+
+def opencode_tools_map(allowed_tools):
+    """The opencode `tools` map for an arm's allowlist: deny-by-default.
+
+    Every native tool the arm does not grant is explicitly disabled. MCP tools
+    (`mcp__lci__*`) are not native and are governed by whether the server is
+    registered at all, so they do not appear here.
+    """
+    granted = set()
+    for tool in allowed_tools:
+        if tool.startswith("mcp__"):
+            continue
+        native = _CANONICAL_TO_OPENCODE.get(tool)
+        if native is None:
+            raise ValueError(
+                f"allowlist names native tool {tool!r} with no opencode id; refusing "
+                f"to launch an arm whose surface cannot be enforced")
+        granted.add(native)
+    return {name: False for name in OPENCODE_NATIVE_TOOL_IDS if name not in granted}
+
+
+def opencode_workspace_config(allowed_tools, lci_bin=None):
+    """Full opencode config for one arm. The LCI MCP server is registered only
+    when the arm's allowlist actually names LCI tools."""
+    wants_lci = any(t.startswith("mcp__lci__") for t in allowed_tools)
+    if wants_lci and not lci_bin:
+        raise ValueError("treatment arm requires lci_bin to register the MCP server")
+    config = {
+        "$schema": "https://opencode.ai/config.json",
+        # A host-registered aggregator would re-expose denied tools.
+        "mcp": {"slop-mcp": {"enabled": False}},
+        "permission": {"edit": "deny", "webfetch": "deny"},
+        "tools": opencode_tools_map(allowed_tools),
+    }
+    if wants_lci:
+        config["mcp"]["lci"] = {
+            "type": "local", "command": [lci_bin, "mcp"], "enabled": True,
+        }
+    return config
+
+
+class OpencodeAdapter:
+    """Real adapter over the installed `opencode` CLI.
+
+    Mirrors ClaudeCliAdapter's contract so the runner, the gate and the record
+    schema are provider-agnostic: same AgentRequest in, same AgentResult out.
+    Three things differ from the Claude path and each is deliberate:
+
+    * The arm's surface is enforced by an opencode `tools` map written per
+      cell (deny-by-default), not by a CLI allowlist flag.
+    * Tool names and arguments are normalised back into the Claude vocabulary
+      so `gate.enforce` keeps working unchanged on what was actually emitted.
+    * All opencode state (XDG config/state/data/cache) is redirected OUTSIDE
+      the measured checkout, while PWD and cwd stay inside it. The config file
+      itself also lives outside, so the corpus the arms are scored on is never
+      mutated by the harness.
+    """
+
+    def __init__(self, opencode_bin="opencode", lci_bin=None, state_root=None):
+        self.opencode_bin = opencode_bin
+        self.lci_bin = lci_bin
+        self.state_root = state_root
+
+    def _state_dir(self, request):
+        import tempfile
+        parent = self.state_root or tempfile.gettempdir()
+        os.makedirs(parent, exist_ok=True)
+        return tempfile.mkdtemp(prefix="opencode-cell-", dir=parent)
+
+    def run(self, request):
+        import shutil
+        import tempfile
+        from runner import opencode_stream
+
+        state_dir = self._state_dir(request)
+        try:
+            config_path = os.path.join(state_dir, "opencode.json")
+            with open(config_path, "w") as handle:
+                json.dump(
+                    opencode_workspace_config(request.allowed_tools, self.lci_bin),
+                    handle, indent=2, sort_keys=True,
+                )
+            environment = opencode_stream.isolated_environment(
+                state_dir, config_path=config_path, pwd=request.checkout_dir,
+            )
+            prompt = (
+                request.system_prompt + "\n\n" + request.tool_instructions
+                + "\n\n" + request.prompt
+            )
+            outcome = opencode_stream.run_cell(
+                self.opencode_bin, request.checkout_dir, environment,
+                request.model, prompt, request.timeout_seconds,
+            )
+        finally:
+            shutil.rmtree(state_dir, ignore_errors=True)
+
+        calls = tuple(
+            ToolCall(canonical_tool_name(name),
+                     canonical_arguments(canonical_tool_name(name), arguments))
+            for name, arguments in outcome["tool_calls"]
+        )
+        return AgentResult(
+            outcome["status_hint"], outcome["answer"] or None, calls,
+            outcome["tokens"]["input"], outcome["tokens"]["output"],
+            outcome["transcript"],
+        )
