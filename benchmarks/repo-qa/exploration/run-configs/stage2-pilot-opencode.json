@@ -1,0 +1,248 @@
+{
+  "schema": "claim_validation_run_config_v1",
+  "config_id": "stage2-pilot-opencode",
+  "stage": 2,
+  "derived_from": "stage2-baseline",
+  "purpose": "Stage-2 PILOT: a 24-cell paired claim-validation run on a derived 6-claim subset, executed on two opencode models. Answers whether the corrected instrument produces differentiated output at all, and whether two independent models agree; it is NOT powered for a per-category rate and must never be reported as one.",
+  "status": "approved_pending_execution",
+  "provenance": {
+    "harness": {
+      "runner_module": "benchmarks/repo-qa/exploration/runner",
+      "adapter": "runner.adapter.ClaudeCliAdapter",
+      "orchestrator": "benchmarks/repo-qa/scripts/exploration_runner.py",
+      "ledger_generator": "benchmarks/repo-qa/scripts/claim_baseline_ledger.py",
+      "runner_mode": "claim-validation",
+      "answer_schema_version": "claim_validation_answer_v1",
+      "smoke_command": "exploration_runner.py claim-smoke (one claim, both arms)",
+      "grid_command": "exploration_runner.py claim-run (full bank, both arms)",
+      "isolation_gate": "runner.gate.enforce (tool_not_allowed / path_escape / sealed_path)",
+      "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+      "claim_answer_instruction": "Return one JSON object {verdict: true|false|unsupported, evidence: [{path, line}], rationale}; cite only files in the checkout."
+    },
+    "scorer": {
+      "module": "benchmarks/repo-qa/exploration/scoring/claim_validation.py",
+      "entrypoint": "benchmarks/repo-qa/scripts/score_claim_validation.py",
+      "score_schema_version": "claim_validation_score_v1",
+      "score_set_schema_version": "claim_validation_score_set_v1",
+      "aggregate_schema_version": "claim_validation_aggregate_v1",
+      "primary_metric": "verdict accuracy and grounded-verdict accuracy vs the independent, forged-coordinate oracle; citation precision/recall/F1",
+      "judge": "none (no LLM judge; deterministic verdict + evidence-anchor scoring)",
+      "evidence_rule": {
+        "evidence_min_valid": 1,
+        "evidence_min_recall": 0.0
+      }
+    },
+    "task_bank": {
+      "dir": "benchmarks/repo-qa/exploration/tasks",
+      "schema_version": "exploration_task_v1",
+      "schema_file": "benchmarks/repo-qa/exploration/schema/exploration-task.schema.json",
+      "schema_file_sha256": "sha256:cbde51eb3b6b645761534e55ac71b72ca4edf786109b519d87d577a3ac1e444c",
+      "task_count": 30,
+      "claim_fields_required": [
+        "claim",
+        "request",
+        "author.verdict",
+        "author.category",
+        "author.anchor_classification"
+      ],
+      "per_corpus": {
+        "next.js": 11,
+        "pocketbase": 9,
+        "scikit-learn": 10
+      },
+      "per_author_verdict": {
+        "true": 10,
+        "false": 10,
+        "unsupported": 10
+      },
+      "per_category": {
+        "true": 5,
+        "wrong-layer": 5,
+        "misleading-doc": 5,
+        "dead-code": 5,
+        "false-premise": 5,
+        "unsupported": 5
+      },
+      "claim_task_digest_recipe": "runner.run._claim_digest(canonical {schema,id,claim,request,manifest_ref,output_schema})"
+    }
+  },
+  "corpora": [
+    {
+      "corpus_id": "pocketbase",
+      "language": "go",
+      "source_commit": "d438c6a96a0252ff9df62c1cfe193480ed9ff15d",
+      "seed": 7,
+      "forge_version": "1",
+      "reference_tree_hash": "65119ec1226bdb6e2a45791e41f5a1c099d9bb5baf65200d1ece813bae26840d"
+    },
+    {
+      "corpus_id": "scikit-learn",
+      "language": "python",
+      "source_commit": "0885712e436b07cd04d60e955101aaf6a8cbb709",
+      "seed": 7,
+      "forge_version": "1",
+      "reference_tree_hash": "2c8e1660624b4aaf6d8288ff7ae000754f33a887b48d1669cf137594de3cee61"
+    },
+    {
+      "corpus_id": "next.js",
+      "language": "typescript",
+      "source_commit": "97532172c065ca2b49dd79d1fa44c3a0b864065b",
+      "seed": 7,
+      "forge_version": "1",
+      "reference_tree_hash": "e3a6fc4e730e68a50db223cfa5205cba7e2d8d25c8283e7d8d98945154742af5"
+    }
+  ],
+  "seeds": [
+    7
+  ],
+  "forge": {
+    "script": "benchmarks/repo-qa/scripts/exploration_corpus_forge.py",
+    "registry": "benchmarks/repo-qa/exploration/corpora.json",
+    "registry_schema_version": "exploration_corpora_v1",
+    "registry_sha256": "sha256:0cdc5a3608c13bccfe180f5ffb622ba5274dc511709438120ec195fea2fa4a0a",
+    "forge_version_pinned_by_bank": "1",
+    "reference_forge_version": "1"
+  },
+  "subject_binary": {
+    "name": "lci",
+    "built_from_checkout_commit": "df958dd",
+    "reported_version": "0.10.1",
+    "path": "build/release/src/lci",
+    "invocation": "lci mcp (stdio), registered as server 'lci' via --mcp-config"
+  },
+  "arms": {
+    "treatment": {
+      "description": "LCI MCP semantic-navigation tools + Read; answers structured claims",
+      "allowlist": [
+        "Read",
+        "mcp__lci__browse_file",
+        "mcp__lci__callers",
+        "mcp__lci__find_files",
+        "mcp__lci__get_context",
+        "mcp__lci__inspect_symbol",
+        "mcp__lci__list_symbols",
+        "mcp__lci__references",
+        "mcp__lci__search"
+      ],
+      "denied": [
+        "Bash",
+        "Edit",
+        "Write"
+      ]
+    },
+    "baseline": {
+      "description": "Lexical Grep + Glob + Read only; no LCI server attached",
+      "allowlist": [
+        "Glob",
+        "Grep",
+        "Read"
+      ],
+      "denied": [
+        "Bash",
+        "Edit",
+        "Write",
+        "mcp__lci__*"
+      ]
+    }
+  },
+  "task_subset": {
+    "rule": "one claim per author category, two per corpus, seed-7 shuffle with id tie-breaks",
+    "generator": "benchmarks/repo-qa/scripts/select_pilot_claims.py",
+    "pinned_by_test": "benchmarks/repo-qa/tests/test_select_pilot_claims.py::SelectionTest::test_reproduces_the_committed_subset",
+    "reproduce": "/usr/bin/python3 benchmarks/repo-qa/scripts/select_pilot_claims.py",
+    "task_count": 6,
+    "tasks": [
+      {
+        "id": "skl-estimator-copy",
+        "corpus": "scikit-learn",
+        "category": "dead-code",
+        "verdict": "true"
+      },
+      {
+        "id": "pb-signed-token-mint-verify",
+        "corpus": "pocketbase",
+        "category": "false-premise",
+        "verdict": "false"
+      },
+      {
+        "id": "pb-realtime-fanout-hub",
+        "corpus": "pocketbase",
+        "category": "misleading-doc",
+        "verdict": "unsupported"
+      },
+      {
+        "id": "nx-redirect-status-codes",
+        "corpus": "next.js",
+        "category": "true",
+        "verdict": "true"
+      },
+      {
+        "id": "nx-rewrite-claim-boundary",
+        "corpus": "next.js",
+        "category": "unsupported",
+        "verdict": "unsupported"
+      },
+      {
+        "id": "skl-conditional-method",
+        "corpus": "scikit-learn",
+        "category": "wrong-layer",
+        "verdict": "false"
+      }
+    ],
+    "note": "Derived, not chosen: a hand-picked subset would let the selector choose the result. Re-drawing requires changing a committed rule and its test."
+  },
+  "models": {
+    "intended": [
+      "opencode-go/deepseek-v4.1-flash",
+      "opencode-go/qwen3.8-flash"
+    ],
+    "arm_shared": true,
+    "note": "Model is arm-shared WITHIN each pair, so each model is its own complete paired experiment and the tool surface stays the only manipulated variable across arms. Running two is a robustness check on the instrument, not a model contest, and satisfies the one-real-cell-per-model-tier rule before any rate is published.",
+    "id_probe": "`opencode models` 2026-09-22 lists both ids verbatim under opencode-go; an unserved id yields a zero-event stream, not an error, so the probe is recorded."
+  },
+  "repetitions": {
+    "per_cell": 1,
+    "note": "reps=1 matches stage 1/2. With n=1 per (claim, arm, model) no spread exists, so no lift rule may be applied to this pilot -- see analysis_constraints."
+  },
+  "budget": {
+    "planned_total_cells": 24,
+    "cells_formula": "6 claims x 2 arms x 2 models x 1 rep",
+    "time_budget_seconds_per_cell": 600,
+    "time_budget_seconds_total": 14400,
+    "spending_ceiling_usd": 2.0,
+    "estimated_spend_usd": 0.17,
+    "estimate_basis": "Measured, not guessed: mean per-cell tokens over the 160 executed discovery cells in results/discovery/ (input 33542, output 918, cache_read 135791, cache_write 4168) priced at the models.dev opencode-go rates of 2026-09-22. deepseek-v4.1-flash $0.0719/12 cells, qwen3.8-flash $0.1016/12 cells. The reference class is discovery questions on other models, disclosed as inherited.",
+    "ceiling_note": "The ceiling is a hard stop roughly 12x the estimate, not a forecast. It was set by the harness, not named by the approver."
+  },
+  "approval": {
+    "status": "granted",
+    "granted_by": "Andy Brummer (repo owner), in-session direction 2026-09-22",
+    "granted_scope": "Run the 12-cell pilot on opencode-go deepseek-v4.1-flash and qwen3.8-flash (both, hence 24 cells), after fixing the instrument defects.",
+    "execution_state": "approved_pending_execution"
+  },
+  "instrument_defects": {
+    "arm_disjointness": {
+      "status": "fixed",
+      "task": "01M1W0147178Z2PZNZ6ZQQQBRR",
+      "commit": "32931e2",
+      "evidence": "Both arms' opencode tools maps deny every native tool the arm does not grant; neither arm is a superset of the other. For THIS runner the disjointness is re-established in exploration/runner/adapter.py and asserted both directions in tests/test_opencode_adapter.py::ArmDisjointnessTest, and the runner's gate independently re-checks every emitted call."
+    },
+    "unfiltered_grep_baseline": {
+      "status": "does_not_apply_at_this_level",
+      "reasoning": "The finding is tool-level: raw grep scored recall 1.0 with precision 0.05-0.56, so an LCI win measured a filtering step the baseline never received. This pilot is AGENT-level -- the baseline arm is an agent holding Grep/Glob/Read that performs its own filtering before answering, so both arms are handed the same class of post-processing. Recorded rather than assumed, so a reader can dispute it."
+    }
+  },
+  "analysis_constraints": [
+    "No lift, effect size or significance claim: n=1 per cell yields no spread, and a degenerate spread manufactures exceptions (see the minimum-successes gate).",
+    "No per-category rate: one claim per category cannot support one.",
+    "Report per-model results separately AND their agreement; disagreement between the two models is a finding about the instrument, not a model ranking.",
+    "A provider failure is a named non-result (provider_error / provider_timeout / provider_quota / malformed_provider_stream / exit_N), never a wrong answer.",
+    "A tool-isolation violation is a rejected cell, never a scored answer."
+  ],
+  "execution": {
+    "executed": false,
+    "reason": "config pinned; smoke not yet run",
+    "cells_planned": 24,
+    "cells_executed": 0
+  }
+}
