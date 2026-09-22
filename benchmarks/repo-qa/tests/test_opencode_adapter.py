@@ -202,3 +202,52 @@ class LciSurfaceNarrowingTest(unittest.TestCase):
         from runner.adapter import lci_mcp_tool_ids
         with self.assertRaises(Exception):
             lci_mcp_tool_ids("/bin/true")
+
+
+class CheckoutConfinementTest(unittest.TestCase):
+    """A live treatment cell read the task answer key, the scorer and the
+    other arm's transcript by climbing out of a checkout that sits inside the
+    lci-cpp repository. These pin the two controls that stop it."""
+
+    def test_both_arms_deny_reads_outside_the_project_root(self):
+        for allowlist, lci in ((BASELINE_TOOLS, None), (TREATMENT_TOOLS, require_lci(self))):
+            config = opencode_workspace_config(allowlist, lci)
+            self.assertEqual(config["permission"]["external_directory"], "deny")
+
+    def test_a_checkout_inside_a_repository_becomes_its_own_project(self):
+        import subprocess
+        import tempfile
+        from runner.adapter import own_git_project
+        with tempfile.TemporaryDirectory() as outer:
+            subprocess.run(["git", "init", "-q"], cwd=outer, check=True)
+            checkout = os.path.join(outer, "nested", "checkout")
+            os.makedirs(checkout)
+            with open(os.path.join(checkout, "main.go"), "w") as handle:
+                handle.write("package main\n")
+
+            def toplevel():
+                return subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=checkout,
+                                      capture_output=True, text=True, check=True).stdout.strip()
+
+            self.assertEqual(os.path.realpath(toplevel()), os.path.realpath(outer),
+                             "precondition: the checkout resolves to the enclosing repo")
+            own_git_project(checkout)
+            self.assertEqual(os.path.realpath(toplevel()), os.path.realpath(checkout))
+            # corpus files are untouched: the commit is empty
+            status = subprocess.run(["git", "ls-files"], cwd=checkout,
+                                    capture_output=True, text=True, check=True).stdout
+            self.assertEqual(status, "")
+            own_git_project(checkout)  # idempotent
+
+    def test_a_refused_call_is_reported_under_the_tool_actually_attempted(self):
+        from runner.adapter import ToolCall, attempted_tool_call
+        name, arguments = attempted_tool_call(
+            "invalid", {"tool": "bash", "error": "Model tried to call unavailable tool 'bash'."})
+        self.assertEqual(name, "bash")
+        call = ToolCall(canonical_tool_name(name), canonical_arguments(canonical_tool_name(name), arguments))
+        violations = gate.enforce([call], BASELINE_TOOLS, os.getcwd())
+        self.assertEqual([(v["name"], v["reason"]) for v in violations], [("bash", "tool_not_allowed")])
+
+    def test_an_invalid_call_without_a_named_tool_stays_invalid(self):
+        from runner.adapter import attempted_tool_call
+        self.assertEqual(attempted_tool_call("invalid", {"error": "x"})[0], "invalid")

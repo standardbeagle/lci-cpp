@@ -282,6 +282,19 @@ def canonical_tool_name(name):
     return name
 
 
+def attempted_tool_call(name, arguments):
+    """opencode records a refused tool call as a pseudo-tool named `invalid`
+    whose arguments carry the tool the model actually tried. Report the call
+    under that tool so the gate names the real attempt (e.g. `bash`). The
+    arguments are kept unchanged as evidence, so the gate verdict does not
+    change: an attempt on a non-allowlisted tool is still `tool_not_allowed`.
+    """
+    if name == "invalid" and isinstance(arguments, dict) and isinstance(
+            arguments.get("tool"), str) and arguments["tool"]:
+        return arguments["tool"], arguments
+    return name, arguments
+
+
 def canonical_arguments(tool, arguments):
     """Rename an opencode call's arguments into the gate's schema vocabulary."""
     if not isinstance(arguments, dict):
@@ -363,7 +376,12 @@ def opencode_workspace_config(allowed_tools, lci_bin=None):
         "$schema": "https://opencode.ai/config.json",
         # A host-registered aggregator would re-expose denied tools.
         "mcp": {"slop-mcp": {"enabled": False}},
-        "permission": {"edit": "deny", "webfetch": "deny"},
+        # external_directory confines every file tool to opencode's project
+        # root. That is only the checkout once the checkout is its own git
+        # project (see own_git_project); otherwise opencode resolves the
+        # enclosing repository and the whole of it counts as "inside".
+        "permission": {"edit": "deny", "webfetch": "deny",
+                       "external_directory": "deny"},
         "tools": opencode_tools_map(allowed_tools),
     }
     if wants_lci:
@@ -381,6 +399,30 @@ def opencode_workspace_config(allowed_tools, lci_bin=None):
             for name in lci_mcp_tool_ids(lci_bin) if name not in granted
         })
     return config
+
+
+def own_git_project(checkout_dir):
+    """Make the checkout its own git project for opencode.
+
+    opencode identifies its project by walking up to the nearest git
+    repository. The checkout has no .git, so opencode resolved the enclosing
+    lci-cpp repository instead: its project root became the repo root, the
+    answer keys under benchmarks/repo-qa became readable "inside" files, and
+    every cell refreshed all of lci-cpp's sibling worktrees before its first
+    turn. An empty root commit is enough for opencode's project identity and
+    costs the same on every corpus size. The checkout is recopied fresh by
+    corpus.prepare_checkout for every arm, so nothing carries between arms.
+    """
+    if os.path.isdir(os.path.join(checkout_dir, ".git")):
+        return
+    git_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(["git", "init", "-q"], cwd=checkout_dir, env=git_env, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=exploration-harness",
+         "-c", "user.email=exploration-harness@invalid",
+         "commit", "-q", "--allow-empty", "--no-verify", "-m", "exploration checkout"],
+        cwd=checkout_dir, env=git_env, check=True,
+    )
 
 
 class OpencodeAdapter:
@@ -417,6 +459,8 @@ class OpencodeAdapter:
         from runner import opencode_stream
 
         state_dir = self._state_dir(request)
+        own_git_project(request.checkout_dir)
+        outcome = None
         try:
             config_path = os.path.join(state_dir, "opencode.json")
             with open(config_path, "w") as handle:
@@ -436,12 +480,23 @@ class OpencodeAdapter:
                 request.model, prompt, request.timeout_seconds,
             )
         finally:
-            shutil.rmtree(state_dir, ignore_errors=True)
+            # A cell that did not answer keeps its state dir: opencode writes
+            # its log there, and deleting it destroyed the only evidence of
+            # why a cell stalled.
+            if outcome is not None and outcome["status_hint"] == "ok":
+                shutil.rmtree(state_dir, ignore_errors=True)
+        if outcome["status_hint"] != "ok":
+            outcome["transcript"]["state_dir"] = state_dir
+            outcome["transcript"]["opencode_log_dir"] = os.path.join(
+                state_dir, ".xdg-data-home", "opencode", "log")
 
         calls = tuple(
             ToolCall(canonical_tool_name(name),
                      canonical_arguments(canonical_tool_name(name), arguments))
-            for name, arguments in outcome["tool_calls"]
+            for name, arguments in (
+                attempted_tool_call(name, arguments)
+                for name, arguments in outcome["tool_calls"]
+            )
         )
         return AgentResult(
             outcome["status_hint"], outcome["answer"] or None, calls,
