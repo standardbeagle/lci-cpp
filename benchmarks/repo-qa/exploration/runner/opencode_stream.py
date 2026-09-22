@@ -144,5 +144,10 @@ def run_cell(executable, checkout_dir, environment, model, prompt, timeout_secon
             "returncode": process.returncode,
             "stderr": (raw_stderr or "")[-4000:],
             "provider_error": metadata["provider_error"],
+            # AgentResult carries only input and output tokens. Providers report
+            # most of a long session's prompt as cache reads, so the full split
+            # is kept here; without it the record under-counts usage and no
+            # spend can be derived from it.
+            "token_usage_full": dict(metadata["tokens"]),
         },
     }
