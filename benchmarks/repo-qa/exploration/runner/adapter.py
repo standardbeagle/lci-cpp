@@ -322,6 +322,37 @@ def opencode_tools_map(allowed_tools):
     return {name: False for name in OPENCODE_NATIVE_TOOL_IDS if name not in granted}
 
 
+def lci_mcp_tool_ids(lci_bin, timeout=60):
+    """Every tool the LCI MCP server actually serves, asked of the binary.
+
+    Registering the server exposes its WHOLE surface, which is wider than the
+    arm's allowlist, so the denial list has to be built from what the server
+    really serves. A committed snapshot would go stale silently the next time
+    a tool is added (bench-harness-oracle-independence rule 8a), and a stale
+    snapshot here would silently widen the treatment arm. There is no
+    fallback: failing to enumerate raises.
+    """
+    request = "\n".join([
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                               "clientInfo": {"name": "exploration-runner", "version": "1"}}}),
+        json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+    ]) + "\n"
+    proc = subprocess.run([lci_bin, "mcp"], input=request, capture_output=True,
+                          text=True, timeout=timeout)
+    for line in proc.stdout.splitlines():
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if message.get("id") == 2 and "result" in message:
+            return sorted(t["name"] for t in message["result"]["tools"])
+    raise ValueError(
+        f"{lci_bin} mcp did not answer tools/list; cannot determine which LCI tools "
+        f"to deny, and registering the server unchecked would widen the arm")
+
+
 def opencode_workspace_config(allowed_tools, lci_bin=None):
     """Full opencode config for one arm. The LCI MCP server is registered only
     when the arm's allowlist actually names LCI tools."""
@@ -339,6 +370,16 @@ def opencode_workspace_config(allowed_tools, lci_bin=None):
         config["mcp"]["lci"] = {
             "type": "local", "command": [lci_bin, "mcp"], "enabled": True,
         }
+        # The server serves its whole surface; the arm is narrower. Deny every
+        # served tool the allowlist does not name, or the treatment arm gets
+        # tools the registered arm never granted -- which the isolation gate
+        # then rejects mid-run as a violation, losing the cell.
+        granted = {t[len("mcp__lci__"):] for t in allowed_tools
+                   if t.startswith("mcp__lci__")}
+        config["tools"].update({
+            f"lci_{name}": False
+            for name in lci_mcp_tool_ids(lci_bin) if name not in granted
+        })
     return config
 
 

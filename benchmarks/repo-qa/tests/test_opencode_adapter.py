@@ -35,6 +35,17 @@ from runner.adapter import (  # noqa: E402
 )
 from runner.toolsets import BASELINE_TOOLS, TREATMENT_TOOLS  # noqa: E402
 
+# Registering the LCI server now means ASKING it what it serves, so any test
+# that builds a treatment config needs the real binary.
+LCI_BIN = os.path.join(os.path.dirname(os.path.dirname(BENCH_ROOT)),
+                       "build", "release", "src", "lci")
+
+
+def require_lci(case):
+    if not os.path.isfile(LCI_BIN):
+        case.skipTest(f"lci binary not built at {LCI_BIN}")
+    return LCI_BIN
+
 
 class ArmDisjointnessTest(unittest.TestCase):
     """Rule 12: the treatment must not be able to reach the baseline's
@@ -55,8 +66,9 @@ class ArmDisjointnessTest(unittest.TestCase):
         self.assertNotIn("lci", config["mcp"])
 
     def test_treatment_registers_the_lci_server_at_the_given_binary(self):
-        config = opencode_workspace_config(TREATMENT_TOOLS, "/opt/lci")
-        self.assertEqual(config["mcp"]["lci"]["command"], ["/opt/lci", "mcp"])
+        lci = require_lci(self)
+        config = opencode_workspace_config(TREATMENT_TOOLS, lci)
+        self.assertEqual(config["mcp"]["lci"]["command"], [lci, "mcp"])
         self.assertTrue(config["mcp"]["lci"]["enabled"])
 
     def test_treatment_without_a_binary_refuses_to_launch(self):
@@ -70,7 +82,8 @@ class ArmDisjointnessTest(unittest.TestCase):
 
         treatment, baseline = granted(TREATMENT_TOOLS), granted(BASELINE_TOOLS)
         self.assertTrue(baseline - treatment, "baseline must hold a tool the treatment lacks")
-        self.assertIn("lci", opencode_workspace_config(TREATMENT_TOOLS, "/opt/lci")["mcp"])
+        lci = require_lci(self)
+        self.assertIn("lci", opencode_workspace_config(TREATMENT_TOOLS, lci)["mcp"])
         self.assertNotIn("lci", opencode_workspace_config(BASELINE_TOOLS)["mcp"])
 
     def test_both_arms_deny_every_escape_hatch(self):
@@ -157,3 +170,35 @@ class GateIntegrationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LciSurfaceNarrowingTest(unittest.TestCase):
+    """Registering the LCI MCP server exposes its WHOLE surface, which is
+    wider than the arm. The config must close that gap, or the gate rejects a
+    non-allowlisted call mid-run and the cell is lost."""
+
+    def setUp(self):
+        self.LIVE = require_lci(self)
+
+    def test_every_served_tool_outside_the_allowlist_is_denied(self):
+        from runner.adapter import lci_mcp_tool_ids
+        config = opencode_workspace_config(TREATMENT_TOOLS, self.LIVE)
+        granted = {t[len("mcp__lci__"):] for t in TREATMENT_TOOLS
+                   if t.startswith("mcp__lci__")}
+        for name in lci_mcp_tool_ids(self.LIVE):
+            key = f"lci_{name}"
+            if name in granted:
+                self.assertNotIn(key, config["tools"], f"{name} is allowlisted")
+            else:
+                self.assertIs(config["tools"][key], False, f"{name} must be denied")
+
+    def test_the_observed_violation_tool_is_denied(self):
+        # index_stats is what a live treatment cell actually reached for, and
+        # the gate rejected the whole run for it.
+        config = opencode_workspace_config(TREATMENT_TOOLS, self.LIVE)
+        self.assertIs(config["tools"]["lci_index_stats"], False)
+
+    def test_enumeration_failure_raises_rather_than_widening_the_arm(self):
+        from runner.adapter import lci_mcp_tool_ids
+        with self.assertRaises(Exception):
+            lci_mcp_tool_ids("/bin/true")
