@@ -1,0 +1,559 @@
+{
+  "arms": {
+    "baseline": {
+      "answered": 4,
+      "categories": {
+        "dead-code": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 1,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 1
+        },
+        "false-premise": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 1,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 1
+        },
+        "misleading-doc": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 1,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 1
+        },
+        "true": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 1,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 1
+        },
+        "unsupported": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 1,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 1
+        },
+        "wrong-layer": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 1,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 1
+        }
+      },
+      "citation": {
+        "f1": 0.36111111111111116,
+        "precision": 0.2693452380952381,
+        "recall": 0.625
+      },
+      "count": 6,
+      "false_premise_rate": 0.0,
+      "grounded_accuracy": 0.16666666666666666,
+      "tool_calls": {
+        "max": 17,
+        "mean": 6.666666666666667,
+        "median": 6.0,
+        "min": 0,
+        "n": 6,
+        "total": 40
+      },
+      "unsupported_rate": 0.0,
+      "verdict_accuracy": 0.16666666666666666
+    },
+    "treatment": {
+      "answered": 2,
+      "categories": {
+        "dead-code": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 1,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 1
+        },
+        "false-premise": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 1,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 1
+        },
+        "misleading-doc": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 1,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 1
+        },
+        "true": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 1,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 1
+        },
+        "unsupported": {
+          "confusion": {
+            "false": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 1,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 1
+        },
+        "wrong-layer": {
+          "confusion": {
+            "false": {
+              "false": 1,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "true": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            },
+            "unsupported": {
+              "false": 0,
+              "invalid": 0,
+              "true": 0,
+              "unsupported": 0
+            }
+          },
+          "count": 1
+        }
+      },
+      "citation": {
+        "f1": 0.4909090909090909,
+        "precision": 0.38888888888888884,
+        "recall": 0.75
+      },
+      "count": 6,
+      "false_premise_rate": 0.5,
+      "grounded_accuracy": 0.16666666666666666,
+      "tool_calls": {
+        "max": 20,
+        "mean": 10,
+        "median": 12.0,
+        "min": 0,
+        "n": 6,
+        "total": 60
+      },
+      "unsupported_rate": 0.0,
+      "verdict_accuracy": 0.16666666666666666
+    }
+  },
+  "attempts": [
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "config_error",
+          "tool_calls": 0
+        },
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "config_error",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-redirect-status-codes::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "config_error",
+          "tool_calls": 0
+        },
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "config_error",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-redirect-status-codes::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "config_error",
+          "tool_calls": 0
+        },
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "config_error",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-rewrite-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "config_error",
+          "tool_calls": 0
+        },
+        {
+          "duration_seconds": 0.0,
+          "input_tokens": null,
+          "output_tokens": null,
+          "status": "config_error",
+          "tool_calls": 0
+        }
+      ],
+      "run_key": "nx-rewrite-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 74.730145,
+          "input_tokens": 60,
+          "output_tokens": 2236,
+          "status": "answered",
+          "tool_calls": 11
+        }
+      ],
+      "run_key": "pb-realtime-fanout-hub::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 130.50781,
+          "input_tokens": 54,
+          "output_tokens": 4674,
+          "status": "tool_violation",
+          "tool_calls": 16
+        }
+      ],
+      "run_key": "pb-realtime-fanout-hub::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 44.951753,
+          "input_tokens": 30,
+          "output_tokens": 983,
+          "status": "answered",
+          "tool_calls": 5
+        }
+      ],
+      "run_key": "pb-signed-token-mint-verify::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 65.832258,
+          "input_tokens": 42,
+          "output_tokens": 1642,
+          "status": "tool_violation",
+          "tool_calls": 10
+        }
+      ],
+      "run_key": "pb-signed-token-mint-verify::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 69.298587,
+          "input_tokens": 30,
+          "output_tokens": 3257,
+          "status": "answered",
+          "tool_calls": 7
+        }
+      ],
+      "run_key": "skl-conditional-method::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 177.869656,
+          "input_tokens": 72,
+          "output_tokens": 6813,
+          "status": "answered",
+          "tool_calls": 14
+        }
+      ],
+      "run_key": "skl-conditional-method::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 153.969417,
+          "input_tokens": 66,
+          "output_tokens": 6937,
+          "status": "answered",
+          "tool_calls": 17
+        }
+      ],
+      "run_key": "skl-estimator-copy::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    },
+    {
+      "attempts": [
+        {
+          "duration_seconds": 281.762002,
+          "input_tokens": 72,
+          "output_tokens": 9940,
+          "status": "answered",
+          "tool_calls": 20
+        }
+      ],
+      "run_key": "skl-estimator-copy::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1"
+    }
+  ],
+  "compatibility": {
+    "forge_manifest": "1",
+    "mode": "claim-validation",
+    "model": "opencode-go/qwen3.8-flash",
+    "run_settings": {
+      "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+      "timeout_seconds": 600
+    },
+    "schema_version": "claim_validation_answer_v1",
+    "scoring_settings": {
+      "system_prompt": "You are exploring an unfamiliar code checkout to answer a question about where specific behaviour lives. Ground every claim in a concrete file and location you found in THIS checkout; do not answer from prior memory of any upstream project. Conclude with the answer the question asks for.",
+      "timeout_seconds": 600
+    },
+    "task_bank_digest": "sha256:5cc00f410d557ed8e57c6c68d2aeb93793f13fe5b51d799f999921e7c47ff3f6"
+  },
+  "deltas": {
+    "citation_f1": 0.12979797979797975,
+    "citation_precision": 0.11954365079365076,
+    "citation_recall": 0.125,
+    "false_premise_rate": 0.5,
+    "grounded_accuracy": 0.0,
+    "unsupported_rate": 0.0,
+    "verdict_accuracy": 0.0
+  },
+  "pairing": {
+    "paired_count": 4,
+    "unpaired": [
+      {
+        "arm": "baseline",
+        "run_key": "nx-redirect-status-codes::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "config_error",
+        "task_id": "nx-redirect-status-codes"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-redirect-status-codes::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "config_error",
+        "task_id": "nx-redirect-status-codes"
+      },
+      {
+        "arm": "baseline",
+        "run_key": "nx-rewrite-claim-boundary::baseline::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "config_error",
+        "task_id": "nx-rewrite-claim-boundary"
+      },
+      {
+        "arm": "treatment",
+        "run_key": "nx-rewrite-claim-boundary::treatment::seed-7::mode-claim-validation::schema-claim_validation_answer_v1",
+        "seed": 7,
+        "status": "config_error",
+        "task_id": "nx-rewrite-claim-boundary"
+      }
+    ],
+    "unpaired_count": 4
+  },
+  "schema": "claim_validation_aggregate_v1"
+}

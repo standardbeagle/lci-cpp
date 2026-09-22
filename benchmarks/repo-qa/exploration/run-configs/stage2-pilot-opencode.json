@@ -4,7 +4,7 @@
   "stage": 2,
   "derived_from": "stage2-baseline",
   "purpose": "Stage-2 PILOT: a 24-cell paired claim-validation run on a derived 6-claim subset, executed on two opencode models. Answers whether the corrected instrument produces differentiated output at all, and whether two independent models agree; it is NOT powered for a per-category rate and must never be reported as one.",
-  "status": "approved_pending_execution",
+  "status": "executed",
   "provenance": {
     "harness": {
       "runner_module": "benchmarks/repo-qa/exploration/runner",
@@ -219,7 +219,7 @@
     "status": "granted",
     "granted_by": "Andy Brummer (repo owner), in-session direction 2026-09-22",
     "granted_scope": "Run the 12-cell pilot on opencode-go deepseek-v4.1-flash and qwen3.8-flash (both, hence 24 cells), after fixing the instrument defects.",
-    "execution_state": "approved_pending_execution"
+    "execution_state": "executed"
   },
   "instrument_defects": {
     "arm_disjointness": {
@@ -243,10 +243,28 @@
     "next.js cells are blocked by an absolute symlink in the forged corpus (task 01M34T6RMY39ABDFZEHKH87448) and are reported as config_error non-results. The subset is not re-drawn."
   ],
   "execution": {
-    "executed": false,
-    "reason": "deviations recorded; run pending",
+    "executed": true,
+    "run_date": "2026-09-22",
     "cells_planned": 24,
-    "cells_executed": 0
+    "cells_recorded": 24,
+    "by_status": {
+      "answered": 12,
+      "tool_violation": 4,
+      "config_error": 8,
+      "timeout": 0,
+      "provider_error": 0
+    },
+    "records": [
+      "results/exploration-stage2-pilot/run-records-cline-pass_cline-pass_deepseek-v4_1-flash.jsonl",
+      "results/exploration-stage2-pilot/run-records-opencode-go_qwen3_8-flash.jsonl"
+    ],
+    "scores": [
+      "results/exploration-stage2-pilot/scores-cline-pass_cline-pass_deepseek-v4_1-flash/",
+      "results/exploration-stage2-pilot/scores-opencode-go_qwen3_8-flash/"
+    ],
+    "report": "ANALYSIS-exploration-stage2-pilot.md",
+    "provider_spend_usd": null,
+    "provider_spend_note": "Not measured: records kept input and output tokens only and dropped cache reads (fixed in c6f36e4 for later runs). Pre-registered estimate $0.17."
   },
   "deviations_before_scoring": [
     {
