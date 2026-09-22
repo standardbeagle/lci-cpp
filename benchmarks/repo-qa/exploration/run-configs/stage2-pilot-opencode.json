@@ -193,12 +193,13 @@
   },
   "models": {
     "intended": [
-      "opencode-go/deepseek-v4.1-flash",
+      "cline-pass/cline-pass/deepseek-v4.1-flash",
       "opencode-go/qwen3.8-flash"
     ],
     "arm_shared": true,
     "note": "Model is arm-shared WITHIN each pair, so each model is its own complete paired experiment and the tool surface stays the only manipulated variable across arms. Running two is a robustness check on the instrument, not a model contest, and satisfies the one-real-cell-per-model-tier rule before any rate is published.",
-    "id_probe": "`opencode models` 2026-09-22 lists both ids verbatim under opencode-go; an unserved id yields a zero-event stream, not an error, so the probe is recorded."
+    "id_probe": "`opencode models` 2026-09-22 lists both ids verbatim under opencode-go; an unserved id yields a zero-event stream, not an error, so the probe is recorded.",
+    "routes_note": "deepseek-v4.1-flash runs on the cline-pass account at the owner's direction. qwen3.8-flash stays on opencode-go because cline-pass does not serve it (`opencode models cline-pass`, 2026-09-22, lists qwen3.7-max, qwen3.7-plus and qwen3.8-max only). The account was tested as a cause of cell failures and ruled out: cells failed the same way on both accounts."
   },
   "repetitions": {
     "per_cell": 1,
@@ -237,12 +238,43 @@
     "No per-category rate: one claim per category cannot support one.",
     "Report per-model results separately AND their agreement; disagreement between the two models is a finding about the instrument, not a model ranking.",
     "A provider failure is a named non-result (provider_error / provider_timeout / provider_quota / malformed_provider_stream / exit_N), never a wrong answer.",
-    "A tool-isolation violation is a rejected cell, never a scored answer."
+    "A tool-isolation violation is a rejected cell, never a scored answer.",
+    "Report answer_envelope counts per arm and per model, and report every headline number twice: all envelopes, and bare only. A difference between the two is a formatting effect, not a comprehension effect.",
+    "next.js cells are blocked by an absolute symlink in the forged corpus (task 01M34T6RMY39ABDFZEHKH87448) and are reported as config_error non-results. The subset is not re-drawn."
   ],
   "execution": {
     "executed": false,
-    "reason": "config pinned; smoke not yet run",
+    "reason": "deviations recorded; run pending",
     "cells_planned": 24,
     "cells_executed": 0
-  }
+  },
+  "deviations_before_scoring": [
+    {
+      "change": "provider route for deepseek-v4.1-flash moved from opencode-go to cline-pass",
+      "reason": "owner direction; account later ruled out as the failure cause"
+    },
+    {
+      "change": "opencode checkouts get their own git root commit; permission.external_directory=deny",
+      "reason": "opencode resolved the checkout to the enclosing lci-cpp repository; a live treatment cell read the task answer key, the scorer and the other arm's transcript (all rejected by the gate as path_escape, none scored)",
+      "commit": "1133f8d"
+    },
+    {
+      "change": "LCI MCP tools outside the arm allowlist are denied, enumerated from the live server",
+      "reason": "registering the server exposed all 15 tools; a live cell called index_stats and was rejected",
+      "commit": "737368a"
+    },
+    {
+      "change": "provider headerTimeout and chunkTimeout 60000 ms; LCI MCP timeout 60000 ms",
+      "reason": "opencode defaults (300000 ms) equal the cell deadline, so a provider request that stopped sending bytes consumed the whole cell; observed on both accounts",
+      "commit": "0554e5e"
+    },
+    {
+      "change": "claim answers are extracted from fenced or prose-wrapped envelopes when exactly one answer object is present; every record carries answer_envelope",
+      "reason": "a treatment answer that was a valid answer object inside prose and a ```json fence was scored malformed_output; strict parsing penalises the arm that explores longer. Two records existed under the strict rule, neither scored. The strict rule stays reproducible by filtering answer_envelope == bare"
+    },
+    {
+      "change": "per-cell deadline restored to the registered 600 s",
+      "reason": "a 300 s deadline was used during diagnosis only"
+    }
+  ]
 }
