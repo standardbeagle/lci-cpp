@@ -38,6 +38,57 @@ def _unsafe_citation_path(path):
             or sealed_artifacts.is_sealed_path(path))
 
 
+ANSWER_FIELDS = frozenset({"verdict", "evidence", "rationale"})
+
+# Envelope classes: how the answer object was delivered. The object contract
+# is the same for all three; only its surroundings differ. Recording the class
+# on every record keeps the strict rule (bare only) reproducible by filtering.
+ENVELOPE_BARE = "bare"
+ENVELOPE_FENCED = "fenced"
+ENVELOPE_PROSE_WRAPPED = "prose_wrapped"
+
+
+def extract_claim_answer(text):
+    """Return ``(value, envelope, reason)`` for a raw claim answer string.
+
+    A reply that is exactly one JSON value is ``bare``. Otherwise each
+    top-level JSON object embedded in the text is decoded with
+    ``json.JSONDecoder.raw_decode`` from its opening brace, and the reply is
+    accepted only when exactly one decoded object has the answer's field set.
+    It is ``fenced`` when that object sits inside a Markdown code fence and
+    ``prose_wrapped`` otherwise. No candidate is ``invalid_json``; more than
+    one is ``ambiguous_answer``. An object cut off before its closing brace
+    does not decode, so a truncated answer is never accepted as a fragment.
+    """
+    stripped = text.strip()
+    try:
+        return json.loads(stripped), ENVELOPE_BARE, None
+    except (TypeError, json.JSONDecodeError):
+        pass
+    decoder = json.JSONDecoder()
+    candidates = []
+    index = 0
+    while True:
+        start = text.find("{", index)
+        if start < 0:
+            break
+        try:
+            value, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            index = start + 1
+            continue
+        if isinstance(value, dict) and set(value) == ANSWER_FIELDS:
+            candidates.append((value, start, end))
+        index = end
+    if not candidates:
+        return None, None, "invalid_json"
+    if len(candidates) > 1:
+        return None, None, "ambiguous_answer"
+    value, start, end = candidates[0]
+    fenced = text.rfind("```", 0, start) >= 0 and text.find("```", end) >= 0
+    return value, (ENVELOPE_FENCED if fenced else ENVELOPE_PROSE_WRAPPED), None
+
+
 def parse_claim_answer_result(value):
     """Return ``(answer, canonical, reason)`` for one claim answer.
 
@@ -47,11 +98,10 @@ def parse_claim_answer_result(value):
     `canonical` carries deduped, normalised citations. On rejection both are
     ``None`` and `reason` names the failing check."""
     if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except (TypeError, json.JSONDecodeError):
-            return None, None, "invalid_json"
-    if not isinstance(value, dict) or set(value) != {"verdict", "evidence", "rationale"}:
+        value, _envelope, reason = extract_claim_answer(value)
+        if reason is not None:
+            return None, None, reason
+    if not isinstance(value, dict) or set(value) != ANSWER_FIELDS:
         return None, None, "fields"
     verdict = value["verdict"]
     evidence = value["evidence"]

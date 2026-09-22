@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from runner import corpus, gate, record, toolsets
-from scoring.claim_validation import parse_claim_answer_result
+from scoring.claim_validation import extract_claim_answer, parse_claim_answer_result
 from task_digest import task_digest
 
 EXPLORATION_MODE = "exploration"
@@ -186,6 +186,7 @@ def run_task(task, arm, adapter, base, *, corpus_root, records_path, work_root,
     token_usage = {"input": result.input_tokens, "output": result.output_tokens}
 
     structured_answer = None
+    answer_envelope = None
     if result.status_hint == "timeout":
         status, violations, error = record.STATUS_TIMEOUT, [], "timeout"
     elif result.status_hint == "provider_error":
@@ -198,6 +199,7 @@ def run_task(task, arm, adapter, base, *, corpus_root, records_path, work_root,
             status, error = record.STATUS_PROVIDER_ERROR, "empty_answer"
         elif mode == CLAIM_VALIDATION_MODE:
             structured_answer, output_error = _parse_claim_answer(result.final_answer)
+            answer_envelope = extract_claim_answer(result.final_answer)[1]
             if output_error:
                 status, error = record.STATUS_MALFORMED_OUTPUT, output_error
             else:
@@ -217,12 +219,13 @@ def run_task(task, arm, adapter, base, *, corpus_root, records_path, work_root,
         error=error,
         violations=violations,
         structured_answer=structured_answer,
+        answer_envelope=answer_envelope,
     )
 
 
 def _finish(records_path, rec, *, status, manifest_id, started, ended, final_answer,
             tool_calls, token_usage, transcript_ref, error, violations,
-            structured_answer=None):
+            structured_answer=None, answer_envelope=None):
     rec["manifest_id"] = manifest_id
     rec["status"] = status
     rec["started_at"] = started.isoformat() if started else None
@@ -235,6 +238,7 @@ def _finish(records_path, rec, *, status, manifest_id, started, ended, final_ans
     rec["error"] = error
     rec["violations"] = violations
     rec["structured_answer"] = structured_answer
+    rec["answer_envelope"] = answer_envelope
     record.append_record(records_path, rec)
     return rec
 

@@ -1,0 +1,8 @@
+Based on my exploration of this checkout:
+
+- The duplication helper is `clone` in `sklearn/base.py:46`, which delegates to `_clone_parametrized` (`sklearn/base.py:100`). That helper reads config via `estimator.get_params(deep=False)` (`sklearn/base.py:127`) and reconstructs `klass(**new_object_params)` (`sklearn/base.py:131`), so fitted attributes are dropped.
+- The mixin that defines how an estimator reports its configuration is `BaseEstimator` (`sklearn/base.py:165`), which defines `get_params` (`sklearn/base.py:248`) and `_get_param_names` (`sklearn/base.py:219`), plus `__sklearn_clone__` (`sklearn/base.py:444`).
+
+```json
+{"verdict":"true","evidence":[{"path":"sklearn/base.py","line":46},{"path":"sklearn/base.py","line":100},{"path":"sklearn/base.py","line":165},{"path":"sklearn/base.py","line":248}],"rationale":"The canonical unfitted-duplicate helper is clone (sklearn/base.py:46), delegating to _clone_parametrized (sklearn/base.py:100), which copies configuration via estimator.get_params(deep=False) (line 127) and rebuilds klass(**params) (line 131), dropping all fitted state. Configuration reporting is owned by the BaseEstimator mixin (sklearn/base.py:165) through get_params (sklearn/base.py:248) and _get_param_names (line 219). Both are connected production entrypoints (clone/get_params have hundreds of call sites); the randomly-suffixed duplicate modules merely import them (e.g. sklearn/model_selection/_search_6wpfvf.py:30), so they cannot own this behavior."}
+```
