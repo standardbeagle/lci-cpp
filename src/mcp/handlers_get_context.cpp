@@ -524,8 +524,9 @@ ToolResult handle_get_context(const nlohmann::json& params,
                 };
                 absl::flat_hash_set<uint64_t> visited;
                 visited.insert(static_cast<uint64_t>(sym->id));
-                ctx["call_tree"] =
-                    build_tree(sym.get(), max_depth - 1, visited);
+                // max_depth counts callee levels below the root, so the
+                // root's own call gets the whole budget.
+                ctx["call_tree"] = build_tree(sym.get(), max_depth, visited);
             }
 
             contexts.push_back(std::move(ctx));
