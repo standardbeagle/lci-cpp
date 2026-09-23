@@ -1,5 +1,6 @@
 #include <lci/parser/parser.h>
 
+#include <lci/core/text.h>
 #include <lci/language_map.h>
 
 #include <tree_sitter/api.h>
@@ -34,7 +35,9 @@ bool language_from_extension(std::string_view ext, Language& out) {
     // superset (the table classifies .h/.hpp/.hxx/.hh as Cpp).
     // .tsx needs the TSX grammar: the plain TypeScript grammar cannot parse
     // JSX, and the centralized table folds .tsx into LangId::TypeScript.
-    if (ext == ".tsx") {
+    // Case-insensitive like the table lookup below: `.TSX` otherwise fell
+    // through to the TypeScript grammar, which cannot parse JSX.
+    if (text::ascii_lower(ext) == ".tsx") {
         out = Language::Tsx;
         return true;
     }
