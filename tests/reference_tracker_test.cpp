@@ -245,8 +245,41 @@ TEST(ReferenceTrackerTest, GetSymbolAtLine) {
 
     auto at_line_15 = snapshot->get_symbol_at_line(1, 15);
     ASSERT_NE(at_line_15, nullptr);
+    EXPECT_EQ(at_line_15->symbol.name, "Inner");
 
     EXPECT_EQ(snapshot->get_symbol_at_line(1, 100), nullptr);
+}
+
+// The enclosing symbol is the INNERMOST one. The first covering symbol in
+// file order is the outermost container, so every hit inside a C++
+// `namespace lci { ... }` used to resolve to the namespace and a
+// `symbol_types=function` search filtered every row out. A local variable
+// declared on the line must not shadow its enclosing function; it is the
+// answer only when no container covers the line.
+TEST(ReferenceTrackerTest, GetSymbolAtLineReturnsInnermostContainer) {
+    ReferenceTracker rt;
+    std::vector<Symbol> symbols = {
+        make_sym("lci", SymbolType::Namespace, 1, 1, 100),
+        make_sym("Engine", SymbolType::Class, 1, 5, 60),
+        make_sym("run", SymbolType::Method, 1, 10, 20),
+        make_sym("count", SymbolType::Variable, 1, 12, 12),
+        make_sym("helper", SymbolType::Function, 1, 70, 80),
+        make_sym("kGlobal", SymbolType::Variable, 1, 120, 120),
+    };
+    rt.process_file(1, "engine.cpp", symbols, {}, {});
+    auto snapshot = rt.pin();
+
+    auto name_at = [&](int line) {
+        auto sym = snapshot->get_symbol_at_line(1, line);
+        return sym ? std::string(sym->symbol.name) : std::string("<none>");
+    };
+    EXPECT_EQ(name_at(2), "lci");
+    EXPECT_EQ(name_at(6), "Engine");
+    EXPECT_EQ(name_at(15), "run");
+    EXPECT_EQ(name_at(12), "run") << "a local must not shadow its function";
+    EXPECT_EQ(name_at(75), "helper");
+    EXPECT_EQ(name_at(120), "kGlobal");
+    EXPECT_EQ(name_at(200), "<none>");
 }
 
 TEST(ReferenceTrackerTest, RemoveFile) {
