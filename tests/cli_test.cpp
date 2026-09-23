@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include <lci/cli/commands.h>
+#include <lci/config.h>
 #include <lci/core/portable.h>
 #include <lci/core/subprocess.h>
 #include <lci/language_map.h>
@@ -401,6 +402,36 @@ TEST(CliConfigInitTest, MinimalKdlCreatesFile) {
     // Minimal should not have a project { } block
     EXPECT_EQ(content.find("project {"), std::string::npos);
     std::remove(test_file.c_str());
+}
+
+// An include or exclude section REPLACES the built-in list, so a template
+// that ships either one active silently narrows what a fresh project
+// indexes (the full template used to index only *.rs/*.zig/*.lua).
+TEST(CliConfigInitTest, GeneratedConfigsKeepDefaultIncludeAndExclude) {
+    const lci::Config defaults = lci::make_default_config();
+    for (bool minimal : {false, true}) {
+        std::string test_file =
+            (std::filesystem::temp_directory_path() /
+             (minimal ? "lci_test_init_defaults_min.kdl"
+                      : "lci_test_init_defaults_full.kdl"))
+                .string();
+        std::remove(test_file.c_str());
+
+        GlobalFlags flags;
+        ASSERT_EQ(run_config_init(flags, "kdl", test_file, false, minimal), 0);
+
+        std::ifstream ifs(test_file);
+        ASSERT_TRUE(ifs.good());
+        std::string content((std::istreambuf_iterator<char>(ifs)),
+                            std::istreambuf_iterator<char>());
+        std::remove(test_file.c_str());
+
+        std::string error;
+        lci::Config parsed = lci::parse_kdl_content(content, error);
+        ASSERT_TRUE(error.empty()) << "minimal=" << minimal << ": " << error;
+        EXPECT_EQ(parsed.include, defaults.include) << "minimal=" << minimal;
+        EXPECT_EQ(parsed.exclude, defaults.exclude) << "minimal=" << minimal;
+    }
 }
 
 TEST(CliConfigInitTest, YamlFormatIsRejected) {
