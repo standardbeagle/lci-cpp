@@ -90,10 +90,13 @@ void CallGraph::tarjan_scc() {
                     }
                     ++n_comps_;
                 }
+                // `v` is a reference into the frame pop_back destroys; copy
+                // it before popping.
+                const int done = v;
                 dfs.pop_back();
                 if (!dfs.empty()) {
                     int parent = dfs.back().first;
-                    lowlink[parent] = std::min(lowlink[parent], lowlink[v]);
+                    lowlink[parent] = std::min(lowlink[parent], lowlink[done]);
                 }
             }
         }
