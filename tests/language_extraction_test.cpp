@@ -1249,16 +1249,87 @@ end
         return -1;
     };
 
+    // Exact values: a lower bound let the keyword-token double count
+    // (`if` statement + its anonymous `if` token) pass unnoticed.
     // base 1 + if + elsif
-    EXPECT_GE(cc_of("classify"), 3);
+    EXPECT_EQ(cc_of("classify"), 3);
     // base 1 + modifier-if + while + until
-    EXPECT_GE(cc_of("scan"), 4);
+    EXPECT_EQ(cc_of("scan"), 4);
     // base 1 + 2x when + rescue
-    EXPECT_GE(cc_of("dispatch"), 4);
+    EXPECT_EQ(cc_of("dispatch"), 4);
     // base 1 + 2x modifier-if + && + || + ternary
-    EXPECT_GE(cc_of("gates"), 6);
+    EXPECT_EQ(cc_of("gates"), 6);
     // no branch points at all
     EXPECT_EQ(cc_of("plain"), 1);
+}
+
+// One `if` is one decision point in every language: complexity 2. The
+// counter matched node types by name, and every grammar also emits an
+// anonymous keyword token typed `if`, so each `if` statement counted twice
+// (complexity 3). One loop likewise scores 2.
+TEST(LanguageExtractionTest, OneBranchScoresTwoInEveryLanguage) {
+    struct Case {
+        Language lang;
+        std::string_view ext;
+        std::string_view src;
+    };
+    const Case cases[] = {
+        {Language::Go, ".go",
+         "package m\nfunc Branch(x int) int {\n\tif x > 0 {\n\t\treturn 1\n\t}\n\treturn 0\n}\n"
+         "func Loop(x int) {\n\tfor x > 0 {\n\t\tx--\n\t}\n}\n"},
+        {Language::Python, ".py",
+         "def Branch(x):\n    if x > 0:\n        return 1\n    return 0\n\n"
+         "def Loop(x):\n    while x > 0:\n        x -= 1\n"},
+        {Language::JavaScript, ".js",
+         "function Branch(x) {\n  if (x > 0) { return 1; }\n  return 0;\n}\n"
+         "function Loop(x) {\n  while (x > 0) { x--; }\n}\n"},
+        {Language::TypeScript, ".ts",
+         "function Branch(x: number): number {\n  if (x > 0) { return 1; }\n  return 0;\n}\n"
+         "function Loop(x: number): void {\n  for (;x > 0;) { x--; }\n}\n"},
+        {Language::Java, ".java",
+         "class K {\n  int Branch(int x) {\n    if (x > 0) { return 1; }\n    return 0;\n  }\n"
+         "  void Loop(int x) {\n    while (x > 0) { x--; }\n  }\n}\n"},
+        {Language::CSharp, ".cs",
+         "class K {\n  int Branch(int x) {\n    if (x > 0) { return 1; }\n    return 0;\n  }\n"
+         "  void Loop(int x) {\n    while (x > 0) { x--; }\n  }\n}\n"},
+        {Language::C, ".c",
+         "int Branch(int x) {\n  if (x > 0) { return 1; }\n  return 0;\n}\n"
+         "void Loop(int x) {\n  while (x > 0) { x--; }\n}\n"},
+        {Language::Cpp, ".cpp",
+         "int Branch(int x) {\n  if (x > 0) { return 1; }\n  return 0;\n}\n"
+         "void Loop(int x) {\n  for (; x > 0; --x) {}\n}\n"},
+        {Language::Rust, ".rs",
+         "fn Branch(x: i32) -> i32 {\n    if x > 0 { return 1; }\n    0\n}\n"
+         "fn Loop(mut x: i32) {\n    while x > 0 { x -= 1; }\n}\n"},
+        {Language::Kotlin, ".kt",
+         "fun Branch(x: Int): Int {\n    if (x > 0) { return 1 }\n    return 0\n}\n"
+         "fun Loop(y: Int) {\n    var x = y\n    while (x > 0) { x -= 1 }\n}\n"},
+        {Language::PHP, ".php",
+         "<?php\nfunction Branch($x) {\n  if ($x > 0) { return 1; }\n  return 0;\n}\n"
+         "function Loop($x) {\n  while ($x > 0) { $x--; }\n}\n"},
+        {Language::Zig, ".zig",
+         "fn Branch(x: i32) i32 {\n    if (x > 0) {\n        return 1;\n    }\n    return 0;\n}\n"
+         "fn Loop(y: i32) void {\n    var x = y;\n    while (x > 0) {\n        x -= 1;\n    }\n}\n"},
+        {Language::Ruby, ".rb",
+         "def Branch(x)\n  if x > 0\n    return 1\n  end\n  0\nend\n\n"
+         "def Loop(x)\n  while x > 0\n    x -= 1\n  end\nend\n"},
+    };
+    for (const auto& c : cases) {
+        if (!parse(c.lang, c.src)) {
+            ADD_FAILURE() << c.ext << " parser unavailable";
+            continue;
+        }
+        auto r = extract(c.lang, c.ext, c.src, std::string("cc") + std::string(c.ext));
+        for (std::string_view name : {"Branch", "Loop"}) {
+            const Symbol* s = find_symbol(r, name);
+            ASSERT_NE(s, nullptr) << c.ext << " " << name;
+            int cc = -1;
+            for (const auto& [key, cx] : r.complexity) {
+                if (key.line == s->line && key.column == s->column) cc = cx;
+            }
+            EXPECT_EQ(cc, 2) << c.ext << " " << name;
+        }
+    }
 }
 
 // Pins Ruby `module` extraction, which is served by the shared "module" /
