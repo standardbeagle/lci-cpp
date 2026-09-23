@@ -1118,11 +1118,15 @@ std::string UnifiedExtractor::extract_doc_comment(TSNode node) {
 void UnifiedExtractor::count_complexity_point(TSNode node,
                                               std::string_view node_type) {
     if (complexity_stack_.empty()) return;
+    // Only named nodes are decision points. Every bundled grammar also emits
+    // ANONYMOUS keyword tokens whose type is the keyword itself (`if`,
+    // `for`, `while`, `when`, `rescue`), so matching on the type alone
+    // counted each `if` statement twice: once for `if_statement` and once
+    // for its `if` token. Ruby's bare names (if, while, when, rescue,
+    // conditional, binary, ...) are named statement nodes and still count.
+    if (!ts_node_is_named(node)) return;
     int& top = complexity_stack_.back();
 
-    // The bare names (if, while, when, rescue, conditional, binary, …) are
-    // tree-sitter-ruby's; no other bundled grammar emits them, so they cannot
-    // double-count elsewhere.
     if (node_type == "if_statement" || node_type == "if_expression" ||
         node_type == "if" || node_type == "unless" || node_type == "elsif" ||
         node_type == "if_modifier" || node_type == "unless_modifier") {
@@ -1132,6 +1136,8 @@ void UnifiedExtractor::count_complexity_point(TSNode node,
                node_type == "for_in_statement" ||
                node_type == "while_statement" ||
                node_type == "do_while_statement" ||
+               node_type == "while_expression" ||   // Rust
+               node_type == "for_expression" ||     // Rust
                node_type == "for" || node_type == "while" ||
                node_type == "until" ||
                node_type == "while_modifier" ||
