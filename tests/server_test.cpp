@@ -205,6 +205,24 @@ TEST(SocketPathTest, ProjectSpecificPath) {
 #endif
 }
 
+// One tree, one socket: every spelling of a root must hash the same, or
+// `lci -r .`, `lci -r ./` and a bare `lci` each spawn their own server.
+TEST(SocketPathTest, RootSpellingsShareOneSocket) {
+    auto base = lci::test::unique_temp_dir("lci_socket_spelling_");
+    std::filesystem::create_directories(base / "proj" / "sub");
+    const std::string proj = (base / "proj").string();
+    const std::string canonical = get_socket_path_for_root(proj);
+    for (const std::string& spelling :
+         {proj + "/", proj + "/.", proj + "/./", proj + "/sub/..",
+          (base / "." / "proj").string()}) {
+        EXPECT_EQ(get_socket_path_for_root(spelling), canonical) << spelling;
+    }
+    EXPECT_NE(get_socket_path_for_root((base / "proj" / "sub").string()),
+              canonical);
+    std::error_code ec;
+    std::filesystem::remove_all(base, ec);
+}
+
 TEST(SocketPathTest, EmptyRootFallsBack) {
     auto path = get_socket_path_for_root("");
     EXPECT_EQ(path, get_socket_path());
