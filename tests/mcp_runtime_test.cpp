@@ -118,6 +118,42 @@ static std::string high_cc_go_function(std::string_view pkg,
 // is dropped, while the production twin (identical cc) is still reported. This
 // exercises the production McpRuntime object, not a hand-built engine, so it
 // pins the wiring rather than the mechanism.
+// Direct @lci: labels must seed the propagator. The annotator keys
+// annotations by a synthetic (file, line, column) position, and warmup
+// looked them up by the real EnhancedSymbol id, so no explicit label ever
+// seeded propagation.
+TEST(McpRuntimeSeedingTest, SeedsDirectLciLabelsOntoTheAnnotatedSymbol) {
+    auto dir = lci::test::unique_temp_dir("lci_runtime_labels_");
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "api.go")
+        << "package api\n"
+           "\n"
+           "// @lci:labels[critical]\n"
+           "func Handle() {\n"
+           "}\n";
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+
+    McpRuntime runtime(indexer);
+    runtime.warmup(indexer);
+
+    auto snapshot = indexer.ref_tracker().pin();
+    auto handle = snapshot->find_symbol_by_name("Handle");
+    ASSERT_NE(handle, nullptr);
+    bool critical = false;
+    for (const auto& l : runtime.propagator.get_labels(handle->id)) {
+        if (l.label == "critical") critical = true;
+    }
+    EXPECT_TRUE(critical)
+        << "an explicit @lci:labels[critical] must seed the propagator";
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
 TEST(McpRuntimeAttrRegistryTest, CiEngineReceivesProjectAttributesIntoHealthGate) {
     auto dir = lci::test::unique_temp_dir("lci_runtime_attr_");
     std::filesystem::create_directories(dir / "micro");
