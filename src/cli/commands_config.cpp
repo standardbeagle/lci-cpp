@@ -135,20 +135,22 @@ naming {
     component_function_extensions ".js" ".jsx" ".mjs" ".cjs" ".tsx" ".vue" ".svelte"
 }
 
-// Include specific file patterns (REPLACES the built-in defaults;
-// an include section, once present, must name at least one pattern)
-include {
-    "*.rs"                         // Rust files
-    "*.zig"                        // Zig files
-    "*.lua"                        // Lua scripts
-}
+// Include specific file patterns. An include section REPLACES the
+// built-in defaults, so uncomment it only to narrow indexing to exactly
+// these patterns (once present, it must name at least one pattern).
+// include {
+//     "*.rs"                         // Rust files
+//     "*.zig"                        // Zig files
+// }
 
-// Exclude specific patterns (REPLACES the ~110 built-in default excludes).
+// Exclude specific patterns. An exclude section REPLACES the ~110 built-in
+// default excludes (node_modules, build output, ...), so copy the defaults
+// from `lci config show` into it before adding project paths.
 // Note: all hidden directories (.*/) are skipped regardless of this list.
-exclude {
-    "**/my-large-data/**"          // Project-specific exclusions
-    "**/*.generated.ts"            // Generated TypeScript
-}
+// exclude {
+//     "**/my-large-data/**"          // Project-specific exclusions
+//     "**/*.generated.ts"            // Generated TypeScript
+// }
 )";
         }
     } else {
@@ -172,9 +174,11 @@ exclude {
         std::printf(
             "  - Adjust memory limits: index.max_total_size_mb\n");
         std::printf(
-            "  - Add project exclusions: exclude { \"**/my-folder/**\" }\n");
+            "  - Replace the exclude list: exclude { \"**/my-folder/**\" }\n"
+            "    (replaces the built-in excludes; see `lci config show`)\n");
         std::printf(
-            "  - Include additional languages: include { \"*.rs\" }\n");
+            "  - Restrict indexing to patterns: include { \"*.rs\" }\n"
+            "    (replaces the built-in include set)\n");
     }
 
     return 0;
