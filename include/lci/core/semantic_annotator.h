@@ -72,7 +72,17 @@ class SemanticAnnotator {
                              std::string_view content,
                              const std::vector<Symbol>& symbols);
 
-    /// Returns the annotation for a specific symbol, or nullptr.
+    /// The key annotations are stored under: the symbol's POSITION packed as
+    /// (file_id << 32 | line << 16 | column), not its indexed
+    /// EnhancedSymbol::id. Every get_annotation / is_excluded caller builds
+    /// its key with this function; passing a real symbol id finds nothing.
+    static SymbolID annotation_key(FileID file_id, int line, int column) {
+        return (static_cast<SymbolID>(file_id) << 32) |
+               (static_cast<SymbolID>(line) << 16) |
+               static_cast<SymbolID>(column);
+    }
+
+    /// Returns the annotation stored under `annotation_key(...)`, or nullptr.
     const SemanticAnnotation* get_annotation(FileID file_id,
                                              SymbolID symbol_id) const;
 

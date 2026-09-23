@@ -1259,10 +1259,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             auto annot_at = [&](FileID fid, int line,
                                 int column) -> const SemanticAnnotation* {
                 if (sem_annotator == nullptr) return nullptr;
-                SymbolID key = (static_cast<SymbolID>(fid) << 32) |
-                               (static_cast<SymbolID>(line) << 16) |
-                               static_cast<SymbolID>(column);
-                return sem_annotator->get_annotation(fid, key);
+                return sem_annotator->get_annotation(
+                    fid, SemanticAnnotator::annotation_key(fid, line, column));
             };
             auto has_label = [](const SemanticAnnotation* a,
                                 std::string_view l) {
@@ -1480,12 +1478,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             enum class Disp { None, Suppress, Confirmed };
             auto disposition = [&](FileID fid, int line, int column) -> Disp {
                 if (sem_annotator == nullptr) return Disp::None;
-                // SemanticAnnotator's synthetic symbol key (see
-                // extract_annotations): (file<<32)|(line<<16)|column.
-                SymbolID key = (static_cast<SymbolID>(fid) << 32) |
-                               (static_cast<SymbolID>(line) << 16) |
-                               static_cast<SymbolID>(column);
-                const auto* a = sem_annotator->get_annotation(fid, key);
+                const auto* a = sem_annotator->get_annotation(
+                    fid, SemanticAnnotator::annotation_key(fid, line, column));
                 if (a == nullptr) return Disp::None;
                 for (const auto& l : a->labels) {
                     if (l == "dead" || l == "unused") return Disp::Confirmed;

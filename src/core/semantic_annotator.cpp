@@ -114,9 +114,8 @@ void SemanticAnnotator::extract_annotations(
     for (const auto& symbol : symbols) {
         auto* annotation = extract_symbol_annotation(file_id, symbol, lines);
         if (annotation) {
-            SymbolID sym_id = static_cast<SymbolID>(file_id) << 32 |
-                              static_cast<SymbolID>(symbol.line) << 16 |
-                              static_cast<SymbolID>(symbol.column);
+            SymbolID sym_id =
+                annotation_key(file_id, symbol.line, symbol.column);
 
             annotation->file_id = file_id;
             annotation->symbol_id = sym_id;

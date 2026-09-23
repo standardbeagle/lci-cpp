@@ -329,16 +329,11 @@ std::vector<PropagationInfo> get_propagation_labels(
     }
 
     // Direct @lci: annotations on this object: full strength, bidirectional.
-    // SemanticAnnotator keys its internal map by a SYNTHETIC id —
-    // (file_id<<32 | line<<16 | column) — computed at extraction time
-    // (semantic_annotator.cpp's extract_annotations), NOT the real indexed
-    // EnhancedSymbol::id used everywhere else in this file. The lookup key
-    // must be rebuilt the same way or get_annotation() silently misses.
+    // Annotations are keyed by position (SemanticAnnotator::annotation_key),
+    // not by the indexed EnhancedSymbol::id used everywhere else here.
     if (annotator != nullptr && target != nullptr) {
-        SymbolID annotation_key =
-            (static_cast<SymbolID>(oid.file_id) << 32) |
-            (static_cast<SymbolID>(target->symbol.line) << 16) |
-            static_cast<SymbolID>(target->symbol.column);
+        const SymbolID annotation_key = SemanticAnnotator::annotation_key(
+            oid.file_id, target->symbol.line, target->symbol.column);
         if (const auto* annotation =
                 annotator->get_annotation(oid.file_id, annotation_key)) {
             for (const auto& label : annotation->labels) {
