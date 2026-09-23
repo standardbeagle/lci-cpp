@@ -96,6 +96,19 @@ TEST(LanguageMap, ParserAgreesWithTable) {
     EXPECT_FALSE(parser::language_from_extension(".unknownext", out));
 }
 
+// The table lookup is case-insensitive, so the TSX special case must be too:
+// `.TSX` used to get the plain TypeScript grammar, which cannot parse JSX.
+TEST(LanguageMap, TsxGrammarIsCaseInsensitive) {
+    for (std::string_view ext : {".tsx", ".TSX", ".Tsx"}) {
+        parser::Language out{};
+        ASSERT_TRUE(parser::language_from_extension(ext, out)) << ext;
+        EXPECT_EQ(out, parser::Language::Tsx) << ext;
+    }
+    parser::Language ts{};
+    ASSERT_TRUE(parser::language_from_extension(".TS", ts));
+    EXPECT_EQ(ts, parser::Language::TypeScript);
+}
+
 // -- Consumer: git::get_language_from_path ----------------------------------
 
 TEST(LanguageMap, GitLanguageAgreesWithTable) {
