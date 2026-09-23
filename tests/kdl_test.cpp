@@ -162,5 +162,29 @@ TEST(KdlTest, CollectsEveryStringArgument) {
               nodes[0].string_args());
 }
 
+// portable::parse_double accepts a numeric prefix, so the lexer used to read
+// `max_rss_mb 4.0.96` as 4 and `idle_timeout_sec 1..800` as 1 with no
+// diagnostic. Both directions: well-formed numbers keep their value, and a
+// malformed run is a parse error naming the text.
+TEST(KdlTest, WellFormedNumbersKeepTheirValue) {
+    auto nodes = parse_ok("a 4096\nb 0.85\nc -3\nd 1.\n");
+    ASSERT_EQ(4u, nodes.size());
+    EXPECT_DOUBLE_EQ(4096, nodes[0].args[0].num_val);
+    EXPECT_DOUBLE_EQ(0.85, nodes[1].args[0].num_val);
+    EXPECT_DOUBLE_EQ(-3, nodes[2].args[0].num_val);
+    EXPECT_DOUBLE_EQ(1, nodes[3].args[0].num_val);
+}
+
+TEST(KdlTest, MalformedNumberIsAParseError) {
+    for (const char* src : {"max_rss_mb 4.0.96\n", "idle_timeout_sec 1..800\n",
+                            "x -\n", "y +\n"}) {
+        std::string error;
+        kdl::parse(src, error);
+        ASSERT_FALSE(error.empty()) << src;
+        EXPECT_NE(error.find("malformed number"), std::string::npos)
+            << src << " -> " << error;
+    }
+}
+
 }  // namespace
 }  // namespace lci
