@@ -446,15 +446,35 @@ ReferenceTracker::Snapshot::find_symbol_by_file_and_name(
 ReferenceTracker::Snapshot::SymbolHandle
 ReferenceTracker::Snapshot::get_symbol_at_line(
     FileID file_id, int line) const {
-    auto file_syms = symbols.get_symbols_by_file(file_id);
-    for (SymbolID sid : file_syms) {
-        if (const auto* s = symbols.get(sid)) {
-            if (s->symbol.line <= line && line <= s->symbol.end_line) {
-                return {shared_from_this(), s};
-            }
+    // Innermost covering symbol: the narrowest line span, and on a tie the
+    // later start (the nested one). Returning the first covering symbol in
+    // file order picked the outermost container, so every C++ hit inside
+    // `namespace lci { ... }` resolved to the namespace. Variables (C/C++
+    // locals and parameters are Variable symbols) never shadow an enclosing
+    // container; one is returned only when nothing else covers the line.
+    const EnhancedSymbol* best = nullptr;
+    const EnhancedSymbol* best_variable = nullptr;
+    auto narrower = [](const EnhancedSymbol* a, const EnhancedSymbol* b) {
+        if (b == nullptr) return true;
+        const int span_a = a->symbol.end_line - a->symbol.line;
+        const int span_b = b->symbol.end_line - b->symbol.line;
+        if (span_a != span_b) return span_a < span_b;
+        return a->symbol.line > b->symbol.line;
+    };
+    for (SymbolID sid : symbols.get_symbols_by_file(file_id)) {
+        const auto* s = symbols.get(sid);
+        if (s == nullptr || s->symbol.line > line || line > s->symbol.end_line) {
+            continue;
+        }
+        if (s->symbol.type == SymbolType::Variable) {
+            if (narrower(s, best_variable)) best_variable = s;
+        } else if (narrower(s, best)) {
+            best = s;
         }
     }
-    return nullptr;
+    if (best == nullptr) best = best_variable;
+    if (best == nullptr) return nullptr;
+    return {shared_from_this(), best};
 }
 
 // ---------------------------------------------------------------------------
