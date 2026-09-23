@@ -399,18 +399,12 @@ void IndexServer::handle_reindex(const httplib::Request& req,
     // successor thread covers it.
     indexing_active_.store(true, std::memory_order_release);
     swap_indexing_thread(std::thread([this, root_path] {
-        // Keep the previous engine aside so a failed run can restore it:
-        // publishing a half-built engine over a cleared index reported
-        // ready:true for an index that was never built.
-        SearchEngine* prev_engine = nullptr;
-        std::unique_ptr<SearchEngine> prev_owned;
-        {
-            std::unique_lock engine_lock(mu_);
-            prev_engine = search_engine_.load(std::memory_order_acquire);
-            prev_owned = std::move(owned_search_engine_);
-            search_engine_.store(nullptr, std::memory_order_release);
-        }
-
+        // The previously published engine stays published for the whole
+        // run. `search_engine_` is the readiness flag `require_ready` tests
+        // (no handler dereferences it), and index_directory() keeps the old
+        // generation readable, so nulling it here made every read route
+        // answer 503 until the run committed.
+        //
         // No indexer_->clear() here: index_directory() opens its own bulk
         // window and keeps the previously published generation readable
         // for the whole run; a pre-clear publishes empty snapshots up
@@ -453,11 +447,6 @@ void IndexServer::handle_reindex(const httplib::Request& req,
                          "bulk run holds the index); keeping the previous "
                          "engine\n",
                          root_path.c_str());
-            {
-                std::unique_lock engine_lock(mu_);
-                owned_search_engine_ = std::move(prev_owned);
-                search_engine_.store(prev_engine, std::memory_order_release);
-            }
             indexing_active_.store(false, std::memory_order_release);
             return;
         }
