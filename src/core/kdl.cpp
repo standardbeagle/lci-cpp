@@ -160,10 +160,21 @@ class Lexer {
         }
 
         std::string text(src_.substr(start, pos_ - start));
+        // parse_double accepts a numeric prefix, so `4.0.96` would read as 4
+        // and `1..800` as 1. A number is digits with at most one '.', and
+        // anything else in the run is a malformed value, not a smaller one.
+        size_t digits = 0, dots = 0;
+        for (char ch : text) {
+            if (ch == '.') ++dots;
+            else if (ch != '-' && ch != '+') ++digits;
+        }
         double val = 0;
         // portable::parse_double, not std::from_chars: libc++ (macOS) leaves
         // the floating-point from_chars overload deleted.
-        if (!portable::parse_double(text, val)) val = 0;
+        if (digits == 0 || dots > 1 || !portable::parse_double(text, val)) {
+            return {TokenKind::Error, "malformed number '" + text + "'", 0,
+                    false};
+        }
         return {TokenKind::Number, std::move(text), val, false};
     }
 
@@ -242,9 +253,11 @@ class Parser {
     void set_error() {
         if (!error_.empty()) return;  // keep first error
         error_ = "line " + std::to_string(cur_.line) +
-                 ": unrecognized token '" + cur_.text +
-                 "' (note: KDL-v2 '#'-prefixed values like #true/#false are "
-                 "not supported; use bare true/false)";
+                 ": unrecognized token '" + cur_.text + "'";
+        if (!cur_.text.empty() && cur_.text.front() == '#') {
+            error_ += " (note: KDL-v2 '#'-prefixed values like #true/#false "
+                      "are not supported; use bare true/false)";
+        }
     }
 
     Node parse_node() {
