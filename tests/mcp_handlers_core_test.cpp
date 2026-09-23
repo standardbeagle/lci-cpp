@@ -497,6 +497,46 @@ TEST_F(GetContextPurityTest, PurityOmittedWithoutAnalyzer) {
     EXPECT_FALSE(json["contexts"][0].contains("purity"));
 }
 
+// max_depth counts callee levels below the root: 1 lists direct callees, 2
+// also their callees. build_tree was called with max_depth-1, so the default
+// (1) returned `children:[]` even when the symbol had callees.
+TEST(GetContextCallTreeTest, MaxDepthCountsCalleeLevels) {
+    auto dir = lci::test::unique_temp_dir("lci_call_tree_");
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "chain.go")
+        << "package main\n\nfunc Top() {\n\tMid()\n}\n\n"
+           "func Mid() {\n\tLeaf()\n}\n\nfunc Leaf() {}\n";
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+
+    auto tree_for = [&](int max_depth) {
+        nlohmann::json params;
+        params["name"] = "Top";
+        params["include_call_hierarchy"] = true;
+        if (max_depth > 0) params["max_depth"] = max_depth;
+        auto result = handle_get_context(params, indexer);
+        EXPECT_FALSE(result.is_error) << result.text;
+        auto json = nlohmann::json::parse(result.text);
+        EXPECT_FALSE(json["contexts"].empty()) << result.text;
+        return json["contexts"][0]["call_tree"];
+    };
+
+    auto one = tree_for(0);  // default max_depth = 1
+    ASSERT_EQ(one["children"].size(), 1u) << one.dump();
+    EXPECT_EQ(one["children"][0]["root"], "Mid");
+    EXPECT_TRUE(one["children"][0]["children"].empty()) << one.dump();
+
+    auto two = tree_for(2);
+    ASSERT_EQ(two["children"].size(), 1u) << two.dump();
+    ASSERT_EQ(two["children"][0]["children"].size(), 1u) << two.dump();
+    EXPECT_EQ(two["children"][0]["children"][0]["root"], "Leaf");
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
 // Finding 2: the rich (mode=full) get_context path never called
 // engine.set_graph_propagator/set_semantic_annotator even though McpRuntime
 // seeds a real GraphPropagator at warmup, so propagation_labels/
