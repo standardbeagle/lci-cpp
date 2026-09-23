@@ -168,10 +168,17 @@ std::string get_socket_path_for_root(const std::string& root) {
     if (root.empty()) {
         return get_socket_path();
     }
+    // Canonical form, the same one the CLI uses to compare a live server's
+    // root: hashing the raw absolute path gave `.`, `./` and `$PWD` three
+    // sockets, so one tree was indexed by three servers.
     std::error_code ec;
-    auto abs_root = std::filesystem::absolute(root, ec);
+    auto abs_root = std::filesystem::weakly_canonical(
+        std::filesystem::absolute(root, ec), ec);
     if (ec) {
         return get_socket_path();
+    }
+    if (!abs_root.has_filename() && abs_root != abs_root.root_path()) {
+        abs_root = abs_root.parent_path();  // drop a trailing separator
     }
     const std::string abs_str = abs_root.string();
     const uint32_t hash = hash_project_root(abs_str);
