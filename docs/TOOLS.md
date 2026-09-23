@@ -93,7 +93,8 @@ metadata.
 | `max_per_file` | integer | 0 | Cap matches per file (0 = no cap). |
 | `semantic` | boolean | true | Split-term and synonym fan-out when `patterns` is empty. Split terms match case-insensitively so `export dialog` finds `ExportDialog`. |
 | `languages` | array | (empty) | Language filter (aliases ok), e.g. `["go","python"]`. |
-| `filter` | string | (empty) | Exclude-pattern for files. |
+| `filter` | string | (empty) | Include ONLY matching files: comma-separated languages, extensions or globs, e.g. `go`, `md,*.yml`, `src/**/*.py`. |
+| `path` | string | (empty) | Root-relative scope: directory prefix (`src/http`) or glob (`**/*.kt`). |
 
 **Output** (default): `{results[], other_files{}, showing, total_matches}`.
 `results[]` groups hits per file: `{file, hits[]}`. Each hit: `line`, `match`
@@ -135,8 +136,10 @@ identifier-coverage ranking.
 
 **Notable**: case-insensitive by default; regex auto-fallback (0.7 score
 penalty) when a pattern *looks* regex-y; `refs`/`breadcrumbs` only attach to
-matches with normalized score ≥ 0.5; enclosing symbol resolved O(1) via
-`get_symbol_at_line` (stable empty fields when a match is outside any symbol).
+matches with normalized score ≥ 0.5; the enclosing symbol is the innermost
+symbol whose line range covers the match (a local variable only when nothing
+else covers the line), resolved by a scan of the file's symbols in the pinned
+snapshot (stable empty fields when a match is outside any symbol).
 
 **Errors**: missing `pattern` and `patterns`; unrecognized `include` token.
 
@@ -363,11 +366,11 @@ Index status + health.
 - **detailed** / **health** → adds `component_health`
   (`symbol_index_ready`, `trigram_index_ready`, `ref_tracker_ready`,
   `call_graph_populated`, `file_content_store_ready`, `reference_stats`) +
-  `warnings[]` + `memory_usage`.
+  `warnings[]`; **detailed** also adds `memory_usage`.
 - **progress** → summary with an inline `progress` object during indexing.
 
-**Not applicable**: index unavailable. (`include_watch_mode` accepted but
-unused.)
+**Not applicable**: index unavailable. `include_watch_mode` is not a
+parameter; passing it is an unknown-parameter error.
 
 ---
 
@@ -464,6 +467,7 @@ I/O, throws), with transitive call-graph analysis.
 |-------|------|---------|-------------|
 | `mode` | string | `summary` | `symbol`, `file`, `pure`, `impure`, `category`, `summary`. |
 | `symbol_name` | string | (empty) | For `symbol` mode. |
+| `symbol_id` | string | (empty) | For `symbol` mode, instead of `symbol_name`. |
 | `file_path` | string | (empty) | For `file` mode (or symbol lookup). |
 | `category` | string | (empty) | For `category` mode. |
 | `include_reasons` | boolean | false | Impurity reason strings. |
