@@ -88,7 +88,7 @@
       {
         "kind": "command",
         "name": "working-context-tests",
-        "specJson": "{\"argv\":[\"bash\",\"-c\",\"set -euo pipefail\\ncontext_repo=\\\"$(git rev-parse --show-toplevel)\\\"\\ntman run -- python3 -m unittest discover -s \\\"$context_repo/tests/working_context\\\" -v\"],\"expect_exit\":0,\"timeout_seconds\":3600}",
+        "specJson": "{\"argv\":[\"bash\",\"-c\",\"set -euo pipefail\\ncontext_repo=\\\"$(git rev-parse --show-toplevel)\\\"\\ntman run -- /usr/bin/python3 -m unittest discover -s \\\"$context_repo/tests/working_context\\\" -v\"],\"expect_exit\":0,\"timeout_seconds\":3600}",
         "required": true,
         "allowSkip": false,
         "maxAttempts": 3,
@@ -141,7 +141,7 @@
       {
         "kind": "command",
         "name": "working-context-tests",
-        "specJson": "{\"argv\":[\"bash\",\"-c\",\"set -euo pipefail\\ncontext_repo=\\\"$(git rev-parse --show-toplevel)\\\"\\ntman run -- python3 -m unittest discover -s \\\"$context_repo/tests/working_context\\\" -v\"],\"expect_exit\":0,\"timeout_seconds\":3600}",
+        "specJson": "{\"argv\":[\"bash\",\"-c\",\"set -euo pipefail\\ncontext_repo=\\\"$(git rev-parse --show-toplevel)\\\"\\ntman run -- /usr/bin/python3 -m unittest discover -s \\\"$context_repo/tests/working_context\\\" -v\"],\"expect_exit\":0,\"timeout_seconds\":3600}",
         "required": true,
         "allowSkip": false,
         "maxAttempts": 3,
@@ -150,7 +150,7 @@
       {
         "kind": "command",
         "name": "tool-surface",
-        "specJson": "{\"argv\":[\"bash\",\"-c\",\"set -euo pipefail\\ncontext_repo=\\\"$(git rev-parse --show-toplevel)\\\"\\ntman run -- python3 -m pytest \\\"$context_repo/benchmarks/repo-qa/tests/test_tool_surface.py\\\"\"],\"expect_exit\":0,\"timeout_seconds\":3600}",
+        "specJson": "{\"argv\":[\"bash\",\"-c\",\"set -euo pipefail\\ncontext_repo=\\\"$(git rev-parse --show-toplevel)\\\"\\ntman run -- /usr/bin/python3 -m pytest \\\"$context_repo/benchmarks/repo-qa/tests/test_tool_surface.py\\\"\"],\"expect_exit\":0,\"timeout_seconds\":3600}",
         "required": true,
         "allowSkip": false,
         "maxAttempts": 3,
@@ -213,7 +213,7 @@
       {
         "kind": "command",
         "name": "working-context-tests",
-        "specJson": "{\"argv\":[\"bash\",\"-c\",\"set -euo pipefail\\ncontext_repo=\\\"$(git rev-parse --show-toplevel)\\\"\\ntman run -- python3 -m unittest discover -s \\\"$context_repo/tests/working_context\\\" -v\"],\"expect_exit\":0,\"timeout_seconds\":3600}",
+        "specJson": "{\"argv\":[\"bash\",\"-c\",\"set -euo pipefail\\ncontext_repo=\\\"$(git rev-parse --show-toplevel)\\\"\\ntman run -- /usr/bin/python3 -m unittest discover -s \\\"$context_repo/tests/working_context\\\" -v\"],\"expect_exit\":0,\"timeout_seconds\":3600}",
         "required": true,
         "allowSkip": false,
         "maxAttempts": 3,
@@ -222,7 +222,7 @@
       {
         "kind": "command",
         "name": "tool-surface",
-        "specJson": "{\"argv\":[\"bash\",\"-c\",\"set -euo pipefail\\ncontext_repo=\\\"$(git rev-parse --show-toplevel)\\\"\\ntman run -- python3 -m pytest \\\"$context_repo/benchmarks/repo-qa/tests/test_tool_surface.py\\\"\"],\"expect_exit\":0,\"timeout_seconds\":3600}",
+        "specJson": "{\"argv\":[\"bash\",\"-c\",\"set -euo pipefail\\ncontext_repo=\\\"$(git rev-parse --show-toplevel)\\\"\\ntman run -- /usr/bin/python3 -m pytest \\\"$context_repo/benchmarks/repo-qa/tests/test_tool_surface.py\\\"\"],\"expect_exit\":0,\"timeout_seconds\":3600}",
         "required": true,
         "allowSkip": false,
         "maxAttempts": 3,
@@ -453,7 +453,7 @@
       {
         "kind": "command",
         "name": "bench-unit-tests",
-        "specJson": "{\"argv\": [\"bash\", \"-c\", \"set -euo pipefail\\nrepo=\\\"$(git rev-parse --show-toplevel)\\\"\\ntman run -- python3 -m unittest discover -s \\\"$repo/benchmarks/repo-qa/tests\\\" -t \\\"$repo\\\" -v\"], \"expect_exit\": 0, \"timeout_seconds\": 1800}",
+        "specJson": "{\"argv\": [\"bash\", \"-c\", \"set -euo pipefail\\nrepo=\\\"$(git rev-parse --show-toplevel)\\\"\\ntman run -- /usr/bin/python3 -m unittest discover -s \\\"$repo/benchmarks/repo-qa/tests\\\" -t \\\"$repo\\\" -v\"], \"expect_exit\": 0, \"timeout_seconds\": 1800}",
         "required": true,
         "allowSkip": false,
         "maxAttempts": 3,
