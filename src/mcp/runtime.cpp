@@ -82,7 +82,9 @@ void McpRuntime::warmup(MasterIndex& index) {
         for (FileID fid : index.get_all_file_ids()) {
             for (const auto& es : ann_rt_snap->get_file_enhanced_symbols(fid)) {
                 if (!es) continue;
-                const auto* ann = annotator.get_annotation(fid, es->id);
+                const auto* ann = annotator.get_annotation(
+                    fid, SemanticAnnotator::annotation_key(
+                             fid, es->symbol.line, es->symbol.column));
                 if (!ann) continue;
                 for (const auto& lbl : ann->labels) {
                     propagator.seed_label(es->id, lbl, 1.0);
