@@ -1842,6 +1842,60 @@ TEST(ServerLifecycleTest, ShutdownConvergesWhileBulkReindexParked) {
     indexer.set_post_parse_hook(nullptr);
 }
 
+TEST(ServerLifecycleTest, ReadRoutesStayServedDuringBulkReindex) {
+    // index_directory() keeps the previous generation readable for the
+    // whole bulk window, so /reindex must keep the readiness flag
+    // published too. It used to store a null engine first, and every read
+    // route answered 503 until the run committed.
+    TempDir tmp;
+    tmp.write_file("a.go", "package main\nfunc Before() {}\n");
+    Config config;
+    config.project.root = tmp.path().string();
+    MasterIndex indexer(config);
+    indexer.index_directory(config.project.root);
+    SearchEngine engine(indexer);
+    IndexServer server(config, indexer, &engine);
+    server.set_socket_path(test::next_test_server_address());
+    ASSERT_TRUE(server.start());
+
+    std::atomic<bool> in_window{false};
+    std::atomic<bool> release{false};
+    indexer.set_post_parse_hook([&] {
+        in_window.store(true, std::memory_order_release);
+        const auto give_up =
+            std::chrono::steady_clock::now() + std::chrono::seconds{30};
+        while (!release.load(std::memory_order_acquire) &&
+               !indexer.stop_requested() &&
+               std::chrono::steady_clock::now() < give_up) {
+            std::this_thread::yield();
+        }
+    });
+
+    auto cli = test::make_test_http_client(server.socket_path());
+    {
+        auto res = cli.Post("/reindex",
+                            nlohmann::json{{"path", config.project.root}}
+                                .dump(),
+                            "application/json");
+        ASSERT_TRUE(res);
+        ASSERT_EQ(res->status, 200);
+    }
+    ASSERT_TRUE(wait_until(
+        [&] { return in_window.load(std::memory_order_acquire); },
+        std::chrono::milliseconds(10000)))
+        << "reindex never reached the parked bulk window";
+
+    auto during = cli.Post("/search", R"({"pattern":"Before"})",
+                           "application/json");
+    release.store(true, std::memory_order_release);
+    ASSERT_TRUE(during);
+    EXPECT_EQ(during->status, 200) << during->body;
+    EXPECT_NE(during->body.find("Before"), std::string::npos) << during->body;
+
+    EXPECT_TRUE(server.shutdown());
+    indexer.set_post_parse_hook(nullptr);
+}
+
 // -- /reindex validation (S4) ---------------------------------------------------
 //
 // The reindex path is client-controlled; an unvalidated path yielded an
