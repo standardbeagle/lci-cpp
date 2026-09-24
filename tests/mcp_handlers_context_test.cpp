@@ -3105,6 +3105,52 @@ TEST_F(ContextTracePurityFixture, NonFunctionSideEffectsIsUnavailableNotPure) {
     EXPECT_EQ(p.value("reason", ""), "not_a_function") << w->dump();
 }
 
+// A constructor is a callable the analyzer records; its available evidence must
+// not be discarded as "not a function". PHP names its constructor distinctly
+// (`__construct`), so it is selectable by file+symbol without the class-name
+// collision.
+TEST_F(ContextTracePurityFixture, ConstructorPurityIsAvailableNotDiscarded) {
+    write_file(temp_dir_ / "box.php",
+               "<?php\nclass Box {\n    public function __construct() {}\n}\n");
+    Config config;
+    config.project.root = temp_dir_.string();
+    indexer_ = std::make_unique<MasterIndex>(config);
+    indexer_->index_directory(temp_dir_.string());
+    analyzer_ = std::make_unique<SideEffectAnalyzer>("generic");
+    analyzer_->populate_from_index(*indexer_);
+
+    auto j = load({{"r", {ref_of("box.php", "__construct", {"side_effects"})}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    const nlohmann::json* c = find_ref(j, "box.php", "__construct");
+    ASSERT_TRUE(c != nullptr) << j.dump();
+    ASSERT_TRUE(c->contains("purity")) << c->dump();
+    EXPECT_TRUE((*c)["purity"]["available"].get<bool>())
+        << "a constructor with an analyzer record must serve available "
+           "evidence, not 'not_a_function': "
+        << c->dump();
+    EXPECT_TRUE((*c)["purity"]["is_pure"].get<bool>()) << c->dump();
+}
+
+// With format=outline a symbol ref is listed rather than extracted; an
+// unavailable purity block must still name WHY it is unavailable.
+TEST_F(ContextTraceFixture, SideEffectsUnderOutlineIsUnavailableWithReason) {
+    nlohmann::json manifest = {
+        {"r", {ref("target.go", "Target", {"side_effects"})}}};
+    nlohmann::json params = {{"operation", "load"},
+                             {"format", "outline"},
+                             {"from_string", manifest.dump()}};
+    auto result = handle_context(params, *indexer_, temp_dir_.string());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+    const nlohmann::json* r = find_ref(j, "target.go", "Target");
+    ASSERT_TRUE(r != nullptr) << j.dump();
+    ASSERT_TRUE(r->contains("purity")) << r->dump();
+    const auto& p = (*r)["purity"];
+    EXPECT_FALSE(p["available"].get<bool>()) << r->dump();
+    EXPECT_FALSE(p.value("reason", "").empty())
+        << "an unavailable purity block must name why: " << r->dump();
+}
+
 // The `tests` expansion reuses the existing heuristic (Test<Name> naming and
 // test-file path patterns); it is a heuristic match, NOT a claim of complete
 // test coverage. This pins the supported pattern and that absence is empty.
@@ -3188,6 +3234,8 @@ TEST(ParseExpansionDirective, ValidationRejectsUnknownMalformedAndDeep) {
                 std::string::npos);
     EXPECT_TRUE(expansion_directive_error("callers:0").find("not a positive") !=
                 std::string::npos);
+    EXPECT_TRUE(expansion_directive_error("callers:2147483648")
+                    .find("exceeds") != std::string::npos);
     EXPECT_TRUE(expansion_directive_error("signature:2").find("does not support") !=
                 std::string::npos);
     EXPECT_TRUE(expansion_directive_error("dependencies:3").find("direct-only") !=

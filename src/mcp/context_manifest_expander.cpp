@@ -93,11 +93,17 @@ std::string expansion_directive_error(std::string_view directive) {
         return "directive '" + type + "' depth '" + depth_str +
                "' is not a positive integer";
     }
-    // Parse into a wider type so an absurd literal cannot overflow.
+    // Parse into a wider type, rejecting a value beyond the int range the
+    // parser can represent: silently letting stoi fail would downgrade an
+    // absurd depth to 1 with no signal.
+    constexpr unsigned long long kMaxDepth = 2147483647ULL;
     unsigned long long v = 0;
     for (char c : depth_str) {
         v = v * 10 + static_cast<unsigned long long>(c - '0');
-        if (v > 1000000000ULL) break;
+        if (v > kMaxDepth) {
+            return "directive '" + type + "' depth '" + depth_str +
+                   "' exceeds the supported maximum";
+        }
     }
     if (v < 1) {
         return "directive '" + type + "' depth '" + depth_str +
@@ -429,6 +435,11 @@ ExpansionEngine::HydrateResult ExpansionEngine::hydrate_reference(
         if (hr.source.empty()) {
             return {{}, 0, "no symbols found for outline: " + ref.file,
                     RefResolution::Resolved};
+        }
+        {
+            auto snap = index_.ref_tracker().pin();
+            auto sym = snap->get_enhanced_symbol(rs.id);
+            populate_purity(hr, sym.get());
         }
         int tokens = static_cast<int>(hr.source.size()) / 4;
         return {std::move(hr), tokens, {}, RefResolution::Resolved};
@@ -771,7 +782,12 @@ std::vector<HydratedRef> ExpansionEngine::expand_references(
 
         std::string key = identity_key(hr, project_root);
         if (tally.emitted_keys && tally.emitted_keys->contains(key)) {
-            tally.deduped.emplace_back(std::move(key), "references");
+            // Preserve both the directive and the reference kind on the
+            // surviving entry, exactly as a newly-emitted site would carry.
+            tally.deduped.emplace_back(key, "references");
+            tally.deduped.emplace_back(
+                std::move(key),
+                std::string("reference:") + std::string(to_string(site.type)));
             continue;
         }
         if (tally.visited_used >= tally.visited_cap) {
@@ -834,7 +850,8 @@ void ExpansionEngine::populate_purity(HydratedRef& hr,
         return;
     }
     if (sym->symbol.type != SymbolType::Function &&
-        sym->symbol.type != SymbolType::Method) {
+        sym->symbol.type != SymbolType::Method &&
+        sym->symbol.type != SymbolType::Constructor) {
         hr.purity.unavailability_reason = "not_a_function";
         return;
     }
@@ -862,9 +879,11 @@ void ExpansionEngine::populate_purity(HydratedRef& hr,
 void ExpansionEngine::request_side_effects(HydratedRef& hr) {
     hr.has_purity = true;
     // Symbol refs already carry a populated state (available, or a reason set
-    // during hydration). A ref with no symbol identity has nothing to look up.
-    if (hr.symbol.empty() && hr.purity.unavailability_reason.empty()) {
-        hr.purity.unavailability_reason = "no_symbol";
+    // during hydration). Defensively name a reason for any path that did not
+    // reach the analyzer, so an unavailable block is never emitted reason-less.
+    if (!hr.purity.available && hr.purity.unavailability_reason.empty()) {
+        hr.purity.unavailability_reason =
+            hr.symbol.empty() ? "no_symbol" : "no_side_effect_record";
     }
 }
 

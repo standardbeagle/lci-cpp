@@ -228,6 +228,12 @@ class ExpansionEngine {
         const ContextRef& ref, const std::string& project_root,
         FormatType format, ExpansionTally& tally);
 
+    /// Related tests by HEURISTIC match only: symbols named `Test<Symbol>` in a
+    /// test-path file (`_test.`, `test_`), plus callers of the selected symbol
+    /// whose name starts with `Test` in a test-path file. This is the current
+    /// supported naming/caller rule, NOT a claim of complete test coverage; a
+    /// project with a different test convention yields an empty result rather
+    /// than a guess.
     std::vector<HydratedRef> expand_tests(
         const ContextRef& ref, const std::string& project_root,
         FormatType format, ExpansionTally& tally);
