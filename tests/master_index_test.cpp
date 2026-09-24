@@ -9,8 +9,11 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -1231,6 +1234,106 @@ TEST(MasterIndexTest, IndexFileTwiceKeepsOneSymbolPerDefinition) {
     auto snap = mi.ref_tracker().pin();
     EXPECT_EQ(snap->find_symbols_by_name("Alpha").size(), 1u)
         << "re-indexing an already-indexed path duplicated its symbols";
+}
+
+// -- Side-effect results: atomic publish / no cancel leakage (IDX-2) ----------
+
+namespace {
+std::set<std::string> result_keys(const SideEffectAnalyzer& analyzer) {
+    std::set<std::string> keys;
+    for (const auto& [key, info] : analyzer.results()) keys.insert(key);
+    return keys;
+}
+bool has_function(const SideEffectAnalyzer& analyzer, std::string_view name) {
+    for (const auto& [key, info] : analyzer.results()) {
+        if (info.function_name == name) return true;
+    }
+    return false;
+}
+}  // namespace
+
+// IDX-2 criterion 1. The bulk run's side effects must not become visible to
+// readers until the commit path publishes them. The hook fires with the parse
+// done and the commit not yet started; a reader on another thread must still
+// observe the FULL pre-run generation (never a partial merge). At HEAD the
+// workers merged into the live analyzer during the parse, so the reader sees
+// the new file's record before the run has committed.
+TEST(MasterIndexTest, SideEffectsFrozenUntilCommit) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\nfunc First() { panic(\"x\") }\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    SideEffectAnalyzer sink("generic");
+    mi.set_side_effect_sink(&sink);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    const std::set<std::string> old_keys = result_keys(sink);
+    ASSERT_FALSE(old_keys.empty());
+    ASSERT_TRUE(has_function(sink, "First"));
+
+    dir.write_file("b.go", "package main\nfunc SecondFunc() { panic(\"y\") }\n");
+
+    std::mutex mu;
+    std::condition_variable cv;
+    bool parked = false;
+    bool release = false;
+    std::set<std::string> observed;
+    mi.set_post_parse_hook([&] {
+        std::unique_lock lock(mu);
+        parked = true;
+        cv.notify_all();
+        cv.wait(lock, [&] { return release; });
+    });
+
+    std::thread reader([&] {
+        std::unique_lock lock(mu);
+        cv.wait(lock, [&] { return parked; });
+        observed = result_keys(sink);
+        release = true;
+        cv.notify_all();
+    });
+
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    reader.join();
+
+    EXPECT_EQ(observed, old_keys)
+        << "a reader observed a generation before the commit published it";
+    EXPECT_TRUE(has_function(sink, "SecondFunc"))
+        << "the committed generation is missing the new run's record";
+    EXPECT_NE(result_keys(sink), old_keys)
+        << "the committed generation did not advance";
+}
+
+// IDX-2 criterion 2. A cancelled reindex must leave the side-effect results
+// byte-for-byte equal to the pre-run generation: the staged merge is
+// discarded, never published. At HEAD the parse had already merged the new
+// file's record into the live analyzer before the cancel checkpoint.
+TEST(MasterIndexTest, CancelledReindexLeavesSideEffectResultsUntouched) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\nfunc First() { panic(\"x\") }\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    SideEffectAnalyzer sink("generic");
+    mi.set_side_effect_sink(&sink);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    const std::set<std::string> old_keys = result_keys(sink);
+    ASSERT_FALSE(old_keys.empty());
+    ASSERT_FALSE(has_function(sink, "SecondFunc"));
+
+    dir.write_file("b.go", "package main\nfunc SecondFunc() { panic(\"y\") }\n");
+    mi.set_post_parse_hook([&] { mi.request_stop(); });
+
+    EXPECT_FALSE(mi.index_directory(dir.path().string()))
+        << "a cancelled reindex must not report success";
+    EXPECT_EQ(result_keys(sink), old_keys)
+        << "a cancelled reindex leaked partial side-effect records";
+    EXPECT_FALSE(has_function(sink, "SecondFunc"))
+        << "a cancelled reindex published the cancelled run's records";
 }
 
 }  // namespace
