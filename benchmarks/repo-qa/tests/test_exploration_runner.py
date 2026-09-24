@@ -15,6 +15,7 @@ The bullets these tests pin (one acceptance criterion each, at least):
   * append writes survive a torn/interrupted tail line.
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -248,6 +249,65 @@ class ClaimValidationModeTest(unittest.TestCase):
             parsed, error = run._parse_claim_answer(raw)
             self.assertIsNone(parsed)
             self.assertEqual(error, "malformed_claim_answer: citation")
+
+
+class CheckoutPathOpaquenessTest(unittest.TestCase):
+    """The agent works with the checkout as its cwd and reads in-checkout files
+    by absolute path, so the checkout's directory name is a prompt channel
+    reaching the model. Naming it from the run key leaks the task id, the mode
+    and the harness vocabulary (`claim-validation`, `paired`, `exploration`) --
+    a needle granularity the oracle-independence rule's prompt linter never
+    inspected. The directory must be opaque and derived from the run key alone;
+    resume and record keying stay on run_key."""
+
+    # Every give-away in the observed checkout path, plus `paired` (the arm
+    # slot the checkout key is built from). The task id is checked separately.
+    FORBIDDEN = ("claim", "exploration", "oracle", "annotation", "paired")
+
+    def test_checkout_path_leaks_no_task_id_or_harness_vocabulary(self):
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            task = fake_task()
+            adapter = FakeAgent(claim_result())
+            run.run_task(
+                task, toolsets.BASELINE, adapter, base_config(),
+                corpus_root=root,
+                records_path=os.path.join(root, "records.jsonl"),
+                work_root=os.path.join(root, "work"),
+                mode=run.CLAIM_VALIDATION_MODE,
+            )
+            checkout = adapter.calls[0].checkout_dir
+        self.assertNotIn(task["id"], checkout)
+        for needle in self.FORBIDDEN:
+            with self.subTest(needle=needle):
+                self.assertNotIn(needle, checkout)
+
+    def test_checkout_directory_name_is_the_run_key_hash(self):
+        key = record.run_key(
+            "pb-password-login-route", "paired", 7,
+            run.CLAIM_VALIDATION_MODE, run.CLAIM_VALIDATION_SCHEMA,
+        )
+        expected = "ck-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+        self.assertEqual(run.checkout_dir_name(key), expected)
+
+    def test_both_arms_share_one_opaque_checkout_directory(self):
+        with TemporaryDirectory() as root:
+            forge_fixture(root)
+            adapters = {
+                arm: FakeAgent(claim_result())
+                for arm in (toolsets.TREATMENT, toolsets.BASELINE)
+            }
+            run.run_task_both_arms(
+                fake_task(), lambda arm: adapters[arm], base_config(),
+                corpus_root=root, records_path=os.path.join(root, "records.jsonl"),
+                work_root=os.path.join(root, "work"),
+                mode=run.CLAIM_VALIDATION_MODE,
+            )
+            treatment = adapters[toolsets.TREATMENT].calls[0].checkout_dir
+            baseline = adapters[toolsets.BASELINE].calls[0].checkout_dir
+            exists = os.path.isdir(treatment)
+        self.assertEqual(treatment, baseline)
+        self.assertTrue(exists)
 
 
 class SealedArtifactInventoryTest(unittest.TestCase):

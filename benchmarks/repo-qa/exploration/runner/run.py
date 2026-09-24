@@ -45,6 +45,20 @@ def _safe_name(run_key):
     return run_key.replace("::", "__").replace("/", "_")
 
 
+def checkout_dir_name(run_key):
+    """Opaque, deterministic directory name for a run's clean checkout.
+
+    The agent's cwd and every file it reads by absolute path live under this
+    name, so the name is a prompt channel. Deriving it from the run key leaks
+    the task id, the mode and the harness vocabulary (`claim-validation`,
+    `paired`) to the model -- a needle granularity the prompt leak linter never
+    inspected. Hash the key instead; resume and record keying stay on run_key
+    and nothing reads this name back.
+    """
+    digest = hashlib.sha256(run_key.encode("utf-8")).hexdigest()
+    return "ck-" + digest[:16]
+
+
 def _write_transcript(work_root, run_key, transcript):
     directory = os.path.join(work_root, "transcripts")
     os.makedirs(directory, exist_ok=True)
@@ -143,7 +157,9 @@ def run_task(task, arm, adapter, base, *, corpus_root, records_path, work_root,
         mode if mode != EXPLORATION_MODE else None,
         schema_version if mode != EXPLORATION_MODE else None,
     )
-    checkout = os.path.join(work_root, "checkouts", _safe_name(checkout_key))
+    checkout = os.path.join(
+        work_root, "checkouts", checkout_dir_name(checkout_key)
+    )
     try:
         manifest, checkout_dir = corpus.prepare_checkout(
             corpus_root, task["manifest_ref"], checkout
