@@ -1,12 +1,16 @@
 #pragma once
 
+#include <atomic>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <absl/container/flat_hash_map.h>
 
 #include <lci/analysis/finding_suppressions.h>
+#include <lci/core/atomic_shared_ptr.h>
 #include <lci/side_effects.h>
 #include <lci/types.h>
 
@@ -58,6 +62,41 @@ struct FunctionAnalysisContext {
     std::vector<ResourceOp> resource_releases;
 
     std::vector<std::string> impurity_reasons;
+};
+
+/// Canonical per-function result map: key "file:line:column" -> record.
+using SideEffectResultMap = absl::flat_hash_map<std::string, SideEffectInfo>;
+
+/// Pinned reader view over one published generation of side-effect records.
+///
+/// Handlers hold this by value for the duration of one query. It owns a
+/// shared_ptr to the immutable map, so a concurrent publish (the bulk
+/// index's single snapshot swap) can never free the generation underneath
+/// an in-flight iteration — the previous contract returned a raw reference
+/// into the live map, which a reindex rehashed while handlers iterated it.
+class SideEffectResults {
+  public:
+    SideEffectResults() = default;
+    explicit SideEffectResults(std::shared_ptr<const SideEffectResultMap> map)
+        : map_(std::move(map)) {}
+
+    const SideEffectResultMap& map() const { return *map_; }
+    const SideEffectResultMap* operator->() const { return map_.get(); }
+    const SideEffectResultMap& operator*() const { return *map_; }
+
+    bool empty() const { return !map_ || map_->empty(); }
+    size_t size() const { return map_ ? map_->size() : 0; }
+    auto begin() const { return map_->begin(); }
+    auto end() const { return map_->end(); }
+
+    /// Keyed lookup within the pinned generation. Use this instead of
+    /// SideEffectAnalyzer::get_result when the returned pointer is stored
+    /// beyond one call — the handle guarantees the generation outlives it.
+    const SideEffectInfo* find(std::string_view file, int line,
+                               int column = 0) const;
+
+  private:
+    std::shared_ptr<const SideEffectResultMap> map_;
 };
 
 /// Two-phase conservative side-effect analyzer.
@@ -140,17 +179,37 @@ class SideEffectAnalyzer {
 
     // -- Results --------------------------------------------------------------
 
-    const absl::flat_hash_map<std::string, SideEffectInfo>& results() const {
-        return results_;
-    }
+    /// Lock-free read of the currently published generation. The returned
+    /// handle pins that generation for its lifetime, so callers iterate a
+    /// stable map even while a reindex swaps in the next one. In direct
+    /// (non-publishing) use the handle aliases the live staging map and
+    /// behaves exactly like the old `const Map&` accessor.
+    SideEffectResults results() const;
     const SideEffectInfo* get_result(std::string_view file, int line,
                                      int column = 0) const;
+
+    /// Bulk-index publication protocol (RCU, one swap on commit).
+    ///
+    /// `begin_staging` freezes the current results as the reader-visible
+    /// snapshot and marks the analyzer so subsequent writes (per-worker
+    /// merges, warmup population) land in a private staging map. Readers
+    /// keep seeing the frozen generation. `commit_staging` publishes the
+    /// staged results with a single atomic swap; `abort_staging` discards
+    /// them and restores the pre-run generation byte-for-byte. A cancelled
+    /// reindex therefore never leaks partial records to handlers.
+    void begin_staging();
+    void commit_staging();
+    void abort_staging();
+
+    /// One-shot publish for the warmup path: snapshots the current results
+    /// as the reader-visible generation (and enables read-from-snapshot).
+    void publish();
 
     /// Moves the accumulated per-function records out, leaving this
     /// analyzer empty and reusable. Used by the index pipeline's
     /// per-worker analyzers to drain each file's records into the shared
     /// analyzer without sharing mutable state across workers.
-    absl::flat_hash_map<std::string, SideEffectInfo> take_results() {
+    SideEffectResultMap take_results() {
         auto out = std::move(results_);
         results_.clear();
         return out;
@@ -160,7 +219,7 @@ class SideEffectAnalyzer {
     /// re-processed file's functions replace their old records (functions
     /// deleted from a file leave stale keys behind — same staleness the
     /// one-shot warmup pass had, now bounded per file instead of global).
-    void merge_results(absl::flat_hash_map<std::string, SideEffectInfo>&& other) {
+    void merge_results(SideEffectResultMap&& other) {
         for (auto& [key, info] : other) {
             results_.insert_or_assign(key, std::move(info));
         }
@@ -235,6 +294,21 @@ class SideEffectAnalyzer {
     FunctionAnalysisContext current_func_storage_;
     absl::flat_hash_map<std::string, SideEffectInfo> results_;
     SideEffectAnalyzerConfig config_;
+
+    /// RCU read side. `published_` holds the reader-visible generation;
+    /// `read_published_` gates whether readers come from it (bulk/warmup
+    /// publication) or from the live staging map (direct unit use, which
+    /// has no concurrency and must keep reflecting writes immediately).
+    mutable AtomicSharedPtr<const SideEffectResultMap> published_;
+    mutable std::atomic<bool> read_published_{false};
+    /// The immediately previous generation is retained until the next
+    /// publish cycle, so a raw `SideEffectInfo*` returned by get_result
+    /// stays valid for far longer than any single handler request even when
+    /// a reindex commits in between. Only the publisher thread touches it.
+    std::shared_ptr<const SideEffectResultMap> retired_;
+    /// Frozen pre-run generation, used to restore `results_` byte-for-byte
+    /// when a staged bulk run is cancelled.
+    std::shared_ptr<const SideEffectResultMap> pre_staging_;
 };
 
 /// Classifies an access sequence string (e.g. "RRWWRR") into a pattern type.

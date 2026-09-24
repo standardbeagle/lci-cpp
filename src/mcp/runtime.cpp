@@ -52,6 +52,12 @@ void McpRuntime::warmup(MasterIndex& index) {
     // is_pure).
     side_effects.propagate_transitive(index);
 
+    // Publish the augmented generation (AST facts + heuristic + transitive)
+    // with one atomic swap. This is the reader-visible commit for the MCP
+    // surface; handlers pin this snapshot and never touch the staging map
+    // the bulk pipeline wrote into.
+    side_effects.publish();
+
     // Seed GraphPropagator with the impure functions so transitive
     // purity propagates: any caller of an impure function is itself
     // impure unless its own purity overrides. Decay mode keeps strength

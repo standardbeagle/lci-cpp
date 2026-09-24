@@ -466,11 +466,80 @@ void SideEffectAnalyzer::record_channel_op(int line) {
         "channel operation at line " + std::to_string(line));
 }
 
+const SideEffectInfo* SideEffectResults::find(std::string_view file, int line,
+                                              int column) const {
+    if (!map_) return nullptr;
+    auto it = map_->find(make_result_key(file, line, column));
+    return it != map_->end() ? &it->second : nullptr;
+}
+
 const SideEffectInfo* SideEffectAnalyzer::get_result(std::string_view file,
                                                      int line,
                                                      int column) const {
-    auto it = results_.find(make_result_key(file, line, column));
-    return it != results_.end() ? &it->second : nullptr;
+    const std::string key = make_result_key(file, line, column);
+    if (!read_published_.load(std::memory_order_acquire)) {
+        // Direct mode: no concurrent publisher exists, so a pointer into the
+        // live staging map is stable for the caller's use.
+        auto it = results_.find(key);
+        return it != results_.end() ? &it->second : nullptr;
+    }
+    // Publishing mode: look up in the immutable published generation. The
+    // generation is held by `published_` or `retired_` until a later publish
+    // cycle, so the returned pointer stays valid across a commit.
+    auto snap = published_.load(std::memory_order_acquire);
+    if (!snap) return nullptr;
+    auto it = snap->find(key);
+    return it != snap->end() ? &it->second : nullptr;
+}
+
+SideEffectResults SideEffectAnalyzer::results() const {
+    if (read_published_.load(std::memory_order_acquire)) {
+        auto snap = published_.load(std::memory_order_acquire);
+        if (snap) return SideEffectResults(std::move(snap));
+    }
+    // Direct mode: alias the live staging map without copying. Safe because
+    // no concurrent publisher writes the staging map while `read_published_`
+    // is false — publication is what turns staging into the frozen side and
+    // redirects readers to the snapshot.
+    return SideEffectResults(std::shared_ptr<const SideEffectResultMap>(
+        &results_, [](const SideEffectResultMap*) {}));
+}
+
+void SideEffectAnalyzer::begin_staging() {
+    // Freeze the current generation for readers, then let writers keep
+    // mutating `results_` as a private staging map. The frozen copy is what
+    // every reader sees until commit/abort; the previous generation is
+    // retained so get_result pointers into it stay valid.
+    auto frozen = std::make_shared<const SideEffectResultMap>(results_);
+    retired_ = published_.load(std::memory_order_acquire);
+    published_.store(frozen, std::memory_order_release);
+    pre_staging_ = std::move(frozen);
+    read_published_.store(true, std::memory_order_release);
+}
+
+void SideEffectAnalyzer::commit_staging() {
+    retired_ = published_.load(std::memory_order_acquire);
+    published_.store(std::make_shared<const SideEffectResultMap>(results_),
+                     std::memory_order_release);
+    read_published_.store(true, std::memory_order_release);
+    pre_staging_.reset();
+}
+
+void SideEffectAnalyzer::abort_staging() {
+    if (pre_staging_) {
+        results_ = *pre_staging_;
+        retired_ = published_.load(std::memory_order_acquire);
+        published_.store(pre_staging_, std::memory_order_release);
+        pre_staging_.reset();
+    }
+    read_published_.store(true, std::memory_order_release);
+}
+
+void SideEffectAnalyzer::publish() {
+    retired_ = published_.load(std::memory_order_acquire);
+    published_.store(std::make_shared<const SideEffectResultMap>(results_),
+                     std::memory_order_release);
+    read_published_.store(true, std::memory_order_release);
 }
 
 // Forward-decl: anonymous-namespace classifier defined later in file.

@@ -1,5 +1,6 @@
 #include <lci/indexing/master_index.h>
 
+#include <lci/analysis/side_effect_analyzer.h>
 #include <lci/language_map.h>
 
 #include <absl/container/flat_hash_set.h>
@@ -182,7 +183,11 @@ bool MasterIndex::index_directory(const std::string& root) {
     // is_indexing_. Without it a single throw latched is_indexing_=1 and
     // every later reindex returned false for the life of the process.
     bool bulk_window_open = false;
+    bool side_effect_staging_open = false;
     auto unwind = make_scope_exit([&] {
+        if (side_effect_staging_open && side_effect_sink_) {
+            side_effect_sink_->abort_staging();
+        }
         if (bulk_window_open) set_bulk_indexing(false);
         is_indexing_.store(0, std::memory_order_release);
     });
@@ -207,6 +212,15 @@ bool MasterIndex::index_directory(const std::string& root) {
     Pipeline pipeline(config_, file_service_,
                       &trigram_index_, &ref_tracker_, &postings_index_);
     pipeline.set_side_effect_target(side_effect_sink_);
+
+    // Freeze the side-effect results readers see for the whole run and
+    // redirect the workers' merges into a private staging map. Readers keep
+    // answering from the pre-run generation until the commit path publishes
+    // (or a cancel restores it), so they never observe a torn rehash.
+    if (side_effect_sink_) {
+        side_effect_sink_->begin_staging();
+        side_effect_staging_open = true;
+    }
 
     // Wire the integrator with auxiliary indexes so symbol-aware paths
     // (import resolution, symbol location index) are populated as
@@ -268,6 +282,14 @@ bool MasterIndex::index_directory(const std::string& root) {
     symbol_location_index_.clear();
 
     pipeline.integrate();
+
+    // The run committed: publish the staged side-effect generation with one
+    // atomic swap. A reader that was mid-iteration over the pre-run
+    // generation keeps that snapshot pinned and is unaffected.
+    if (side_effect_staging_open && side_effect_sink_) {
+        side_effect_sink_->commit_staging();
+        side_effect_staging_open = false;
+    }
 
     // Publish the symbol-location index now: the pipeline has fully populated
     // it, and process_all_references reads it (find_symbol_id_at_position) to

@@ -80,6 +80,11 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
     auto rt_snap = ref.pin();
     const auto& registry = indexer.attr_registry();
     auto file_snap = indexer.load_snapshot();
+    // Pin one side-effect generation for the whole analysis. Unit.info
+    // pointers below are stored and used after the scan loop, so they must
+    // outlive every later lookup; the handle guarantees that even if a
+    // reindex publishes a new generation concurrently.
+    auto se_results = analyzer.results();
 
     // One production, kind-gated scoring unit per callable symbol with a
     // side-effect record.
@@ -126,8 +131,8 @@ ErrorHandlingAnalyzer::Result ErrorHandlingAnalyzer::analyze(
             // function not seated at column 0 (two same-line one-liners, any
             // indented method) — a silent under-count, never a fallback.
             const SideEffectInfo* info =
-                analyzer.get_result(file_path, es->symbol.line,
-                                    es->symbol.column);
+                se_results.find(file_path, es->symbol.line,
+                                es->symbol.column);
             if (!info) continue;
             Unit u;
             u.info = info;
