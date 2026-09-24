@@ -81,12 +81,32 @@ FileImportData ImportResolver::extract_file_imports(
 
 void ImportResolver::build_import_graph(
     std::span<const FileImportData> import_data) {
+    // BULK-only corpus clear (see header). The bulk pipeline has already
+    // cleared via ReferenceTracker::clear(); incremental callers must use
+    // replace_file_imports or they drop every other file (IDX-1).
     import_graph_.clear();
     for (const auto& d : import_data) {
         if (!d.bindings.empty()) {
             import_graph_[d.file_id] = d.bindings;
         }
     }
+}
+
+void ImportResolver::replace_file_imports(const FileImportData& import_data) {
+    // Incremental: touch this file only. Erase-then-insert so a file whose
+    // imports changed (or disappeared) drops its old bindings, and an entry
+    // with no bindings leaves no empty slot behind.
+    import_graph_.erase(import_data.file_id);
+    if (!import_data.bindings.empty()) {
+        import_graph_[import_data.file_id] = import_data.bindings;
+    }
+}
+
+std::vector<ImportBinding> ImportResolver::import_bindings(
+    FileID file_id) const {
+    auto it = import_graph_.find(file_id);
+    if (it == import_graph_.end()) return {};
+    return it->second;
 }
 
 SymbolID ImportResolver::resolve_symbol_reference(

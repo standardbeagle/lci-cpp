@@ -117,6 +117,22 @@ class PipelineIntegrationTest : public ::testing::Test {
             "        Config { name: name.to_string(), debug: false }\n"
             "    }\n"
             "}\n");
+        // Import-bearing Python package: the import graph is non-trivial only
+        // where a file actually carries bindings, and IDX-1 is about those
+        // bindings surviving an incremental reparse.
+        dir_.write_file("pkg/b.py",
+            "def _helper():\n"
+            "    return 1\n");
+        dir_.write_file("pkg/a.py",
+            "from pkg.b import _helper\n"
+            "\n"
+            "def run_a():\n"
+            "    return _helper()\n");
+        dir_.write_file("pkg/c.py",
+            "from pkg.b import _helper\n"
+            "\n"
+            "def run_c():\n"
+            "    return _helper()\n");
         dir_.write_file("config.json",
             "{\"name\": \"test-project\", \"version\": \"1.0\"}\n");
         dir_.write_file("README.md",
@@ -215,6 +231,51 @@ TEST_F(PipelineIntegrationTest, RespectGitignore) {
         EXPECT_EQ(r.path.find("debug.log"), std::string::npos)
             << "Gitignored file appeared in search results: " << r.path;
     }
+}
+
+// IDX-1: a bulk index and the incremental (index_file / watch) path must
+// produce byte-identical import graphs. Before the fix every index_file
+// cleared the whole graph and kept only the file just parsed, so the
+// incremental graph was whatever file happened to be indexed last.
+TEST_F(PipelineIntegrationTest, IncrementalAndBulkImportGraphsMatch) {
+    Config cfg = make_default_config();
+    cfg.project.root = dir_.path().string();
+
+    MasterIndex bulk(cfg);
+    ASSERT_TRUE(bulk.index_directory(dir_.path().string()));
+    auto bulk_snap = bulk.load_snapshot();
+
+    // Same corpus, built one file at a time through the incremental path.
+    MasterIndex inc(cfg);
+    for (const auto& [path, unused_id] : bulk_snap->file_map) {
+        ASSERT_TRUE(inc.index_file(path)) << path;
+    }
+
+    int files_with_imports = 0;
+    for (const auto& [path, bulk_id] : bulk_snap->file_map) {
+        FileID inc_id = inc.path_to_id(path);
+        ASSERT_NE(inc_id, FileID{0}) << "incremental index is missing " << path;
+
+        auto bulk_bindings = bulk.ref_tracker().get_import_bindings(bulk_id);
+        auto inc_bindings = inc.ref_tracker().get_import_bindings(inc_id);
+        ASSERT_EQ(bulk_bindings.size(), inc_bindings.size())
+            << "import binding count differs for " << path;
+        for (size_t i = 0; i < bulk_bindings.size(); ++i) {
+            EXPECT_EQ(bulk_bindings[i].imported_name,
+                      inc_bindings[i].imported_name) << path;
+            EXPECT_EQ(bulk_bindings[i].original_name,
+                      inc_bindings[i].original_name) << path;
+            EXPECT_EQ(bulk_bindings[i].source_file,
+                      inc_bindings[i].source_file) << path;
+            EXPECT_EQ(bulk_bindings[i].line_number,
+                      inc_bindings[i].line_number) << path;
+            EXPECT_EQ(bulk_bindings[i].is_wildcard,
+                      inc_bindings[i].is_wildcard) << path;
+        }
+        if (!bulk_bindings.empty()) ++files_with_imports;
+    }
+    EXPECT_GT(files_with_imports, 0)
+        << "fixture carries no import evidence; comparison proves nothing";
 }
 
 TEST_F(PipelineIntegrationTest, ReIndexingProducesSameResults) {

@@ -96,8 +96,25 @@ class ImportResolver {
                                         std::string_view file_path,
                                         std::string_view content);
 
-    /// Builds the import graph from collected data (single-threaded).
+    /// BULK path only. Rebuilds the whole graph, CLEARING every previously
+    /// recorded binding first. The bulk pipeline integrates the entire corpus
+    /// after ReferenceTracker::clear(), so the clear here is redundant there;
+    /// it is destructive anywhere else. This is the ONLY path that owns a
+    /// corpus-wide clear. Incremental callers (watch mode /
+    /// reparse_file_symbols) must call replace_file_imports() instead, or one
+    /// saved file wipes every other file's bindings (IDX-1).
     void build_import_graph(std::span<const FileImportData> import_data);
+
+    /// INCREMENTAL path. Replaces ONE file's recorded bindings: erases the
+    /// file's old entry, records the new one, and drops the entry when the
+    /// file no longer has any bindings. Never touches another file's
+    /// bindings. This owns the clear on the incremental path; the corpus-wide
+    /// clear belongs to build_import_graph (bulk) alone.
+    void replace_file_imports(const FileImportData& import_data);
+
+    /// Read-side view of one file's recorded bindings (empty when it has
+    /// none). Diagnostics/tests only — resolution reads the graph directly.
+    std::vector<ImportBinding> import_bindings(FileID file_id) const;
 
     /// Resolves which symbol a reference points to. `foreign_receiver`
     /// disables the unique-exported-candidate tier: for a call through an
@@ -436,7 +453,19 @@ class ReferenceTracker {
                               std::string_view content);
 
     /// Processes all stored references after all symbols have been indexed.
+    /// Import-graph ownership of the clear is decided by the bulk window:
+    ///   - inside a bulk window (the bulk pipeline clears then integrates the
+    ///     whole corpus), the queued import data IS the corpus, so
+    ///     build_import_graph() clears and rebuilds;
+    ///   - outside one (watch/update_file reparse, which queues just the
+    ///     saved file), only those files' entries are replaced.
     void process_all_references();
+
+    /// Bindings recorded for `file_id` (empty when none). Read-side diagnostic
+    /// view of the import graph.
+    std::vector<ImportBinding> get_import_bindings(FileID file_id) const {
+        return import_resolver_.import_bindings(file_id);
+    }
 
     /// Removes all symbols and references for a file.
     void remove_file(FileID file_id);

@@ -686,7 +686,18 @@ void ReferenceTracker::process_file_imports(
 }
 
 void ReferenceTracker::process_all_references() {
-    import_resolver_.build_import_graph(import_data_);
+    // Which path owns the clear (IDX-1). Inside a bulk window the queued
+    // import data is the whole corpus (build_import_graph clears + rebuilds).
+    // Outside one — the watch path / update_file reparse queues exactly the
+    // saved file — only that file's bindings may change; a corpus clear here
+    // used to wipe every other file's import bindings after one save.
+    if (bulk_indexing.load(std::memory_order_acquire) != 0) {
+        import_resolver_.build_import_graph(import_data_);
+    } else {
+        for (const auto& d : import_data_) {
+            import_resolver_.replace_file_imports(d);
+        }
+    }
     import_data_.clear();
 
     write_snapshot([&](Snapshot& s) {
