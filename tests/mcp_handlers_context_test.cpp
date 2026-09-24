@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <lci/config.h>
+#include <lci/analysis/side_effect_analyzer.h>
 #include <lci/context_manifest.h>
 #include <lci/core/context_lookup.h>
 #include <lci/idcodec.h>
@@ -2698,6 +2699,510 @@ TEST(ContextPinnedSnapshotTest, RelationshipsReadPinnedSnapshotNotLiveTracker) {
 }
 
 #endif  // !_WIN32
+
+// =============================================================================
+// Trace relationships from existing index evidence
+// (task 01M2VE7HFW5VVHXMVMT6HSCRY2)
+//
+// `references`, `dependencies` and `side_effects` expansions reuse existing
+// index evidence: ReferenceTracker reference sites, exact-SymbolID hydration,
+// and the SideEffectAnalyzer. These tests assert located source and typed
+// relationship provenance, that unavailable purity is DISTINCT from pure, and
+// that unknown or malformed directives are refused visibly rather than skipped.
+// Related-test discovery stays a naming/caller heuristic, not full coverage.
+// =============================================================================
+
+namespace {
+
+// True when a hydrated ref names `basename` (expansions carry the index's
+// absolute path; primaries carry the manifest's relative path).
+bool ref_is(const nlohmann::json& r, const std::string& basename,
+            const std::string& symbol) {
+    if (r.value("symbol", "") != symbol) return false;
+    const std::string f = r.value("file", "");
+    return f == basename ||
+           (f.size() > basename.size() &&
+            f.compare(f.size() - basename.size(), basename.size(), basename) ==
+                0 &&
+            f[f.size() - basename.size() - 1] == '/');
+}
+
+const nlohmann::json* find_ref(const nlohmann::json& j,
+                               const std::string& basename,
+                               const std::string& symbol) {
+    if (!j.contains("refs") || !j["refs"].is_array()) return nullptr;
+    for (const auto& r : j["refs"]) {
+        if (ref_is(r, basename, symbol)) return &r;
+    }
+    return nullptr;
+}
+
+// Builds one compact ref with expansion directives.
+nlohmann::json ref_of(const std::string& file, const std::string& symbol,
+                      std::vector<std::string> expansions) {
+    nlohmann::json x = nlohmann::json::array();
+    for (auto& e : expansions) x.push_back(e);
+    return nlohmann::json{{"f", file}, {"s", symbol}, {"x", x}};
+}
+
+}  // namespace
+
+class ContextTraceFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_ctx_trace_");
+        std::filesystem::create_directories(temp_dir_);
+        write_file(temp_dir_ / "target.go",
+                   "package p\n\nfunc Target() int { return 1 }\n");
+        // Mid calls Target; CallerA and CallerB call Mid, so Target is one hop
+        // from CallerA (a transitive analyzer would wrongly reach it).
+        write_file(temp_dir_ / "mid.go",
+                   "package p\n\nfunc Mid() int { return Target() }\n");
+        write_file(temp_dir_ / "caller_a.go",
+                   "package p\n\nfunc CallerA() int {\n\treturn Mid()\n}\n");
+        write_file(temp_dir_ / "caller_b.go",
+                   "package p\n\nfunc CallerB() int {\n\tMid()\n\treturn 0\n}\n");
+        // The same name `Dup` in two files; each file's caller binds to its
+        // own file's Dup by the same-file resolution rule.
+        write_file(temp_dir_ / "dup_a.go",
+                   "package p\n\nfunc Dup() int { return 1 }\n\n"
+                   "func UseA() int { return Dup() }\n");
+        write_file(temp_dir_ / "dup_b.go",
+                   "package p\n\nfunc Dup() int { return 2 }\n\n"
+                   "func UseB() int { return Dup() }\n");
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+    }
+    void TearDown() override {
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+    static void write_file(const std::filesystem::path& path,
+                           const std::string& content) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream out(path);
+        out << content;
+    }
+    nlohmann::json load(nlohmann::json manifest) {
+        nlohmann::json params = {{"operation", "load"},
+                                 {"from_string", manifest.dump()}};
+        auto result = handle_context(params, *indexer_, temp_dir_.string());
+        if (result.is_error) {
+            return nlohmann::json{{"__error__", result.text}};
+        }
+        return nlohmann::json::parse(result.text);
+    }
+    nlohmann::json ref(const std::string& f, const std::string& s,
+                       std::vector<std::string> expansions) {
+        nlohmann::json x = nlohmann::json::array();
+        for (auto& e : expansions) x.push_back(e);
+        return nlohmann::json{{"f", f}, {"s", s}, {"x", x}};
+    }
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+// A `references` expansion returns the source LOCATION of each reference site
+// (file + line) with the referencing line's source and a typed relationship
+// (references + the reference kind), not a bare non-empty payload.
+TEST_F(ContextTraceFixture, ReferencesExpansionReturnsLocatedSource) {
+    auto j = load({{"r", {ref("target.go", "Target", {"references"})}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    const nlohmann::json* site = find_ref(j, "mid.go", "Mid");
+    ASSERT_TRUE(site != nullptr)
+        << "a reference site must hydrate to its enclosing symbol: " << j.dump();
+    EXPECT_EQ((*site)["lines"]["start"], 3) << site->dump();
+    EXPECT_EQ((*site)["lines"]["end"], 3) << site->dump();
+    EXPECT_NE((*site)["source"].get<std::string>().find("Target()"),
+              std::string::npos)
+        << "the located reference source must contain the call site: "
+        << site->dump();
+    const std::string prov = (*site)["provenance"].dump();
+    EXPECT_NE(prov.find("references"), std::string::npos)
+        << "the relationship kind must be recorded as provenance: " << prov;
+    EXPECT_NE(prov.find("call"), std::string::npos)
+        << "the reference type must be recorded too: " << prov;
+}
+
+// The reference expansion must use the EXACT selected symbol: two same-name
+// `Dup` functions exist, but only dup_a's Dup is called from dup_a.go. The
+// other file's caller must never appear.
+TEST_F(ContextTraceFixture, ReferencesResolveExactSelectedSymbolAmongDuplicates) {
+    auto j = load({{"r", {ref("dup_a.go", "Dup", {"references"})}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_TRUE(find_ref(j, "dup_a.go", "UseA") != nullptr)
+        << "dup_a's own caller must be located: " << j.dump();
+    EXPECT_TRUE(find_ref(j, "dup_b.go", "UseB") == nullptr)
+        << "dup_b's caller calls the OTHER Dup; it must not be attributed to "
+           "the selected symbol: "
+        << j.dump();
+    EXPECT_EQ(j.dump().find("return 2"), std::string::npos)
+        << "the other same-name definition's body must never leak: " << j.dump();
+}
+
+// A `dependencies` expansion returns the explicitly typed direct callee,
+// hydrated by exact SymbolID, with a dependency provenance label.
+TEST_F(ContextTraceFixture, DependenciesExpansionReturnsTypedDirectCallee) {
+    auto j = load({{"r", {ref("caller_a.go", "CallerA", {"dependencies"})}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    const nlohmann::json* mid = find_ref(j, "mid.go", "Mid");
+    ASSERT_TRUE(mid != nullptr)
+        << "the direct callee must hydrate: " << j.dump();
+    EXPECT_NE((*mid)["source"].get<std::string>().find("func Mid"),
+              std::string::npos)
+        << mid->dump();
+    EXPECT_NE((*mid)["provenance"].dump().find("dependency:call"),
+              std::string::npos)
+        << "a direct call dependency must carry its explicit type: "
+        << mid->dump();
+    // Direct only: Target is one hop further and must not be pulled in.
+    EXPECT_TRUE(find_ref(j, "target.go", "Target") == nullptr)
+        << "dependencies must be direct, not a transitive walk: " << j.dump();
+}
+
+// A no-match expansion returns no relationship refs and no false claim; it is
+// not an error and not a fabricated entry.
+TEST_F(ContextTraceFixture, NoMatchReturnsNoRefsWithoutFalseClaim) {
+    // CallerB is never called, so incoming references are empty.
+    auto j = load({{"r", {ref("caller_b.go", "CallerB", {"references"})}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_TRUE(find_ref(j, "caller_b.go", "CallerB") != nullptr)
+        << "the primary still hydrates: " << j.dump();
+    EXPECT_EQ(j.value("expansion_errors", nlohmann::json::array()).size(), 0u)
+        << "a legitimate no-match is not an error: " << j.dump();
+    // No other symbol is pulled in as a fake reference.
+    for (const auto& r : j["refs"]) {
+        EXPECT_EQ(r.value("symbol", ""), "CallerB")
+            << "no phantom reference site may be emitted: " << j.dump();
+    }
+    // Target is a leaf: dependencies is legitimately empty.
+    auto leaf = load({{"r", {ref("target.go", "Target", {"dependencies"})}}});
+    ASSERT_FALSE(leaf.contains("__error__")) << leaf.dump();
+    EXPECT_EQ(leaf["refs"].size(), 1u) << leaf.dump();
+    EXPECT_EQ(leaf.value("expansion_errors", nlohmann::json::array()).size(),
+              0u)
+        << leaf.dump();
+}
+
+// The absence of purity evidence must be DISTINCT from a pure verdict: with no
+// analyzer wired, the side_effects expansion reports unavailable with a
+// reason, never is_pure.
+TEST_F(ContextTraceFixture, UnavailablePurityIsDistinctFromPure) {
+    auto j = load({{"r", {ref("target.go", "Target", {"side_effects"})}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    const nlohmann::json* r = find_ref(j, "target.go", "Target");
+    ASSERT_TRUE(r != nullptr) << j.dump();
+    ASSERT_TRUE(r->contains("purity"))
+        << "a requested side_effects expansion must serialize its state: "
+        << r->dump();
+    const auto& p = (*r)["purity"];
+    EXPECT_FALSE(p.value("available", true))
+        << "no analyzer means evidence is unavailable: " << p.dump();
+    EXPECT_FALSE(p.contains("is_pure"))
+        << "unavailable must never be serialized as pure: " << p.dump();
+    EXPECT_NE(p.value("reason", "").find("analyzer"), std::string::npos)
+        << "the unavailability reason must be named: " << p.dump();
+}
+
+// Unknown, malformed, and depth-exceeding directives are refused visibly in a
+// structured expansion_errors block instead of disappearing silently.
+TEST_F(ContextTraceFixture, UnsupportedDirectiveIsReportedNotSilentlySkipped) {
+    auto j = load({{"r", {ref("target.go", "Target", {"bogus"})}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    auto errs = j.value("expansion_errors", nlohmann::json::array());
+    ASSERT_FALSE(errs.empty())
+        << "an unknown directive must be refused visibly: " << j.dump();
+    bool named = false;
+    for (const auto& e : errs) {
+        if (e.value("directive", "") == "bogus") {
+            named = true;
+            EXPECT_NE(e.value("reason", "").find("unknown"), std::string::npos)
+                << e.dump();
+        }
+    }
+    EXPECT_TRUE(named) << j.dump();
+    EXPECT_TRUE(find_ref(j, "target.go", "Target") != nullptr)
+        << "a refused directive must not drop the primary: " << j.dump();
+}
+
+TEST_F(ContextTraceFixture, MalformedAndDepthExceedingDirectivesAreReported) {
+    // A non-integer depth is malformed.
+    auto malformed =
+        load({{"r", {ref("caller_a.go", "CallerA", {"callers:abc"})}}});
+    ASSERT_FALSE(malformed.contains("__error__")) << malformed.dump();
+    ASSERT_FALSE(
+        malformed.value("expansion_errors", nlohmann::json::array()).empty())
+        << "a malformed depth must be refused: " << malformed.dump();
+
+    // A depth on a direct-only directive exceeds what it supports.
+    auto too_deep =
+        load({{"r", {ref("caller_a.go", "CallerA", {"dependencies:3"})}}});
+    ASSERT_FALSE(too_deep.contains("__error__")) << too_deep.dump();
+    ASSERT_FALSE(
+        too_deep.value("expansion_errors", nlohmann::json::array()).empty())
+        << "a depth on a direct-only directive must be refused: "
+        << too_deep.dump();
+    EXPECT_TRUE(find_ref(too_deep, "mid.go", "Mid") == nullptr)
+        << "a refused directive must not still expand: " << too_deep.dump();
+}
+
+// MCP expansion integration over the real tools/call wire: the references
+// directive returns a located site end to end.
+class ContextTraceWireFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_ctx_trace_wire_");
+        std::filesystem::create_directories(temp_dir_);
+        write_file(temp_dir_ / "target.go",
+                   "package p\n\nfunc Target() int { return 1 }\n");
+        write_file(temp_dir_ / "mid.go",
+                   "package p\n\nfunc Mid() int { return Target() }\n");
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+        server_ = std::make_unique<McpServer>(config, *indexer_, nullptr);
+        register_context_handlers(*server_, indexer_.get());
+    }
+    void TearDown() override {
+        server_.reset();
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+    static void write_file(const std::filesystem::path& path,
+                           const std::string& content) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream out(path);
+        out << content;
+    }
+    nlohmann::json load(nlohmann::json manifest) {
+        nlohmann::json frame = {
+            {"jsonrpc", "2.0"},
+            {"id", 1},
+            {"method", "tools/call"},
+            {"params",
+             {{"name", "context"},
+              {"arguments",
+               {{"operation", "load"}, {"from_string", manifest.dump()}}}}}};
+        auto raw = server_->dispatch_wire(frame.dump());
+        auto resp = nlohmann::json::parse(raw);
+        if (resp.contains("result") && resp["result"].value("isError", false)) {
+            return nlohmann::json{
+                {"__error__",
+                 resp["result"]["content"][0]["text"].get<std::string>()}};
+        }
+        return nlohmann::json::parse(
+            resp["result"]["content"][0]["text"].get<std::string>());
+    }
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+    std::unique_ptr<McpServer> server_;
+};
+
+TEST_F(ContextTraceWireFixture, WireReferencesExpansionReturnsLocatedSource) {
+    auto j = load({{"r",
+                    {{{"f", "target.go"},
+                      {"s", "Target"},
+                      {"x", nlohmann::json::array({"references"})}}}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    const nlohmann::json* site = find_ref(j, "mid.go", "Mid");
+    ASSERT_TRUE(site != nullptr) << j.dump();
+    EXPECT_EQ((*site)["lines"]["start"], 3) << site->dump();
+    EXPECT_NE((*site)["source"].get<std::string>().find("Target()"),
+              std::string::npos)
+        << site->dump();
+}
+
+// A wired SideEffectAnalyzer serves REAL purity evidence: a function with no
+// effects is available+pure, a function calling a known I/O callee is
+// available+impure with its local category, and a non-function is unavailable
+// with a reason (never pure).
+class ContextTracePurityFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_ctx_trace_purity_");
+        std::filesystem::create_directories(temp_dir_);
+        write_file(temp_dir_ / "pure.go",
+                   "package p\n\n"
+                   "type Widget struct{}\n\n"
+                   "func Pure() int { return 1 }\n");
+        // `writeFile` classifies as an I/O callee by the analyzer's existing
+        // name heuristic; Impure never performs I/O itself.
+        write_file(temp_dir_ / "impure.go",
+                   "package p\n\nfunc writeFile() {}\n\n"
+                   "func Impure() { writeFile() }\n");
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+        analyzer_ = std::make_unique<SideEffectAnalyzer>("generic");
+        analyzer_->populate_from_index(*indexer_);
+    }
+    void TearDown() override {
+        analyzer_.reset();
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+    static void write_file(const std::filesystem::path& path,
+                           const std::string& content) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream out(path);
+        out << content;
+    }
+    nlohmann::json load(nlohmann::json manifest) {
+        nlohmann::json params = {{"operation", "load"},
+                                 {"from_string", manifest.dump()}};
+        auto result = handle_context(params, *indexer_, temp_dir_.string(),
+                                     analyzer_.get());
+        if (result.is_error) {
+            return nlohmann::json{{"__error__", result.text}};
+        }
+        return nlohmann::json::parse(result.text);
+    }
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+    std::unique_ptr<SideEffectAnalyzer> analyzer_;
+};
+
+TEST_F(ContextTracePurityFixture, SideEffectsExpansionReportsAvailablePurity) {
+    auto j = load({{"r", {ref_of("pure.go", "Pure", {"side_effects"})}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    const nlohmann::json* pure = find_ref(j, "pure.go", "Pure");
+    ASSERT_TRUE(pure != nullptr) << j.dump();
+    ASSERT_TRUE(pure->contains("purity")) << pure->dump();
+    EXPECT_TRUE((*pure)["purity"]["available"].get<bool>()) << pure->dump();
+    EXPECT_TRUE((*pure)["purity"]["is_pure"].get<bool>())
+        << "a no-effect function must read pure: " << pure->dump();
+
+    auto j2 = load({{"r", {ref_of("impure.go", "Impure", {"side_effects"})}}});
+    ASSERT_FALSE(j2.contains("__error__")) << j2.dump();
+    const nlohmann::json* impure = find_ref(j2, "impure.go", "Impure");
+    ASSERT_TRUE(impure != nullptr) << j2.dump();
+    ASSERT_TRUE(impure->contains("purity")) << impure->dump();
+    const auto& p = (*impure)["purity"];
+    EXPECT_TRUE(p["available"].get<bool>()) << impure->dump();
+    EXPECT_FALSE(p["is_pure"].get<bool>())
+        << "a function whose callee is I/O must read impure: " << impure->dump();
+    const std::string effects = p.value("local_effects", nlohmann::json::array())
+                                    .dump();
+    EXPECT_NE(effects.find("io"), std::string::npos) << impure->dump();
+}
+
+TEST_F(ContextTracePurityFixture, NonFunctionSideEffectsIsUnavailableNotPure) {
+    auto j = load({{"r", {ref_of("pure.go", "Widget", {"side_effects"})}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    const nlohmann::json* w = find_ref(j, "pure.go", "Widget");
+    ASSERT_TRUE(w != nullptr) << j.dump();
+    ASSERT_TRUE(w->contains("purity")) << w->dump();
+    const auto& p = (*w)["purity"];
+    EXPECT_FALSE(p["available"].get<bool>()) << w->dump();
+    EXPECT_FALSE(p.contains("is_pure")) << w->dump();
+    EXPECT_EQ(p.value("reason", ""), "not_a_function") << w->dump();
+}
+
+// The `tests` expansion reuses the existing heuristic (Test<Name> naming and
+// test-file path patterns); it is a heuristic match, NOT a claim of complete
+// test coverage. This pins the supported pattern and that absence is empty.
+class ContextTraceTestsFixture : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        temp_dir_ = lci::test::unique_temp_dir("lci_ctx_trace_tests_");
+        std::filesystem::create_directories(temp_dir_);
+        write_file(temp_dir_ / "subject.go",
+                   "package p\n\nfunc Compute() int { return 1 }\n\n"
+                   "func Solitary() int { return 2 }\n");
+        write_file(temp_dir_ / "subject_test.go",
+                   "package p\n\nfunc TestCompute() { Compute() }\n");
+        Config config;
+        config.project.root = temp_dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        indexer_->index_directory(temp_dir_.string());
+    }
+    void TearDown() override {
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(temp_dir_, ec);
+    }
+    static void write_file(const std::filesystem::path& path,
+                           const std::string& content) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream out(path);
+        out << content;
+    }
+    nlohmann::json load(nlohmann::json manifest) {
+        nlohmann::json params = {{"operation", "load"},
+                                 {"from_string", manifest.dump()}};
+        auto result = handle_context(params, *indexer_, temp_dir_.string());
+        if (result.is_error) {
+            return nlohmann::json{{"__error__", result.text}};
+        }
+        return nlohmann::json::parse(result.text);
+    }
+    std::filesystem::path temp_dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+};
+
+TEST_F(ContextTraceTestsFixture, TestsExpansionFindsRelatedTestHeuristically) {
+    auto j = load({{"r", {ref_of("subject.go", "Compute", {"tests"})}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    const nlohmann::json* t = find_ref(j, "subject_test.go", "TestCompute");
+    ASSERT_TRUE(t != nullptr)
+        << "the Test<Name> naming rule must locate a related test: " << j.dump();
+    EXPECT_NE((*t)["source"].get<std::string>().find("Compute()"),
+              std::string::npos)
+        << t->dump();
+}
+
+TEST_F(ContextTraceTestsFixture, TestsExpansionNoMatchIsEmptyNotFabricated) {
+    // Solitary has no Test<Name>: the expansion is legitimately empty, is not
+    // an error, and must not fabricate a match.
+    auto j = load({{"r", {ref_of("subject.go", "Solitary", {"tests"})}}});
+    ASSERT_FALSE(j.contains("__error__")) << j.dump();
+    EXPECT_TRUE(find_ref(j, "subject_test.go", "TestCompute") == nullptr)
+        << "an unrelated test must not be attributed: " << j.dump();
+    EXPECT_EQ(j.value("expansion_errors", nlohmann::json::array()).size(), 0u)
+        << "a legitimate no-match is not an error: " << j.dump();
+    for (const auto& r : j["refs"]) {
+        EXPECT_EQ(r.value("symbol", ""), "Solitary")
+            << "no phantom test ref may be emitted: " << j.dump();
+    }
+}
+
+// The directive validator is a pure function over the directive string; each
+// refusal names the reason.
+TEST(ParseExpansionDirective, ValidationRejectsUnknownMalformedAndDeep) {
+    EXPECT_TRUE(expansion_directive_error("bogus").find("unknown") !=
+                std::string::npos);
+    EXPECT_TRUE(expansion_directive_error("").find("empty") !=
+                std::string::npos);
+    EXPECT_TRUE(expansion_directive_error(":2").find("no type") !=
+                std::string::npos);
+    EXPECT_TRUE(expansion_directive_error("callers:abc").find("not a positive") !=
+                std::string::npos);
+    EXPECT_TRUE(expansion_directive_error("callers:").find("empty depth") !=
+                std::string::npos);
+    EXPECT_TRUE(expansion_directive_error("callers:0").find("not a positive") !=
+                std::string::npos);
+    EXPECT_TRUE(expansion_directive_error("signature:2").find("does not support") !=
+                std::string::npos);
+    EXPECT_TRUE(expansion_directive_error("dependencies:3").find("direct-only") !=
+                std::string::npos);
+}
+
+TEST(ParseExpansionDirective, ValidationAcceptsSupportedDirectives) {
+    for (const char* d :
+         {"callers", "callers:3", "callees:1", "references", "dependencies",
+          "implementations", "interface", "siblings", "tests", "doc",
+          "signature", "side_effects"}) {
+        EXPECT_TRUE(expansion_directive_error(d).empty())
+            << d << ": " << expansion_directive_error(d);
+    }
+}
 
 }  // namespace
 }  // namespace mcp
