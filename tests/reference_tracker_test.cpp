@@ -2417,6 +2417,153 @@ TEST(ReferenceTrackerTest, CollectCallersExcludesVariableDefinitionsFromList) {
     EXPECT_EQ(result.definitions[0]->symbol.type, SymbolType::Function);
 }
 
+// ---------------------------------------------------------------------------
+// Incremental import-graph update (IDX-1)
+// ---------------------------------------------------------------------------
+// The watch path reparses ONE file per save (MasterIndex::reparse_file_symbols
+// -> process_all_references) with no bulk window open. Before the fix the
+// import graph was cleared and rebuilt from just the queued files, so a single
+// save erased every other file's import bindings and import-only calls stopped
+// resolving. A foreign-receiver call resolves ONLY through the caller's own
+// import binding, so losing another file's binding is directly observable.
+
+Reference make_foreign_call(const char* name, int line) {
+    Reference r = make_call(1, name, line);
+    r.foreign_receiver = true;
+    return r;
+}
+
+TEST(ReferenceTrackerTest, IncrementalReparseKeepsOtherFilesImportBindings) {
+    ReferenceTracker rt;
+
+    auto target_at = [&](FileID fid, size_t idx) -> SymbolID {
+        auto snap = rt.pin();
+        auto it = snap->refs_by_file.find(fid);
+        if (it == snap->refs_by_file.end() || it->second.size() <= idx) {
+            return 0;
+        }
+        return it->second[idx].target_symbol;
+    };
+
+    // b.py defines _helper (unexported: not the unique-exported tier), so
+    // resolution requires the caller's own import binding.
+    auto b = rt.process_file(2, "b.py",
+                             std::vector<Symbol>{make_sym(
+                                 "_helper", SymbolType::Function, 2, 1, 5)},
+                             {}, {});
+    ASSERT_EQ(b.size(), 1u);
+
+    rt.process_file_imports(1, "a.py", "from b import _helper\n");
+    rt.process_file_imports(3, "c.py", "from b import _helper\n");
+
+    rt.process_file(1, "a.py",
+                    std::vector<Symbol>{
+                        make_sym("run_a", SymbolType::Function, 1, 1, 10)},
+                    std::vector<Reference>{make_foreign_call("_helper", 3)},
+                    {});
+    rt.process_file(3, "c.py",
+                    std::vector<Symbol>{
+                        make_sym("run_c", SymbolType::Function, 3, 1, 10)},
+                    std::vector<Reference>{make_foreign_call("_helper", 3)},
+                    {});
+    rt.process_all_references();
+    ASSERT_EQ(target_at(3, 0), b[0].id)
+        << "setup: c.py's import-only call did not resolve";
+
+    // Watch: b.py is saved (remove + re-add), which un-resolves every inbound
+    // edge into b's old generation -- including c.py's call.
+    rt.remove_file(2);
+    auto b2 = rt.process_file(2, "b.py",
+                              std::vector<Symbol>{make_sym(
+                                  "_helper", SymbolType::Function, 2, 1, 5)},
+                              {}, {});
+    ASSERT_EQ(b2.size(), 1u);
+    ASSERT_EQ(target_at(3, 0), SymbolID{0})
+        << "setup: b.py's resave left c.py's inbound call resolved";
+
+    // Then a.py alone is saved. Its reparse runs ONE resolution pass, which
+    // must re-bind c.py's now-unresolved call from c.py's own import binding.
+    rt.process_file_imports(1, "a.py", "from d import _other\n");
+    rt.process_all_references();
+
+    EXPECT_EQ(target_at(3, 0), b2[0].id)
+        << "reparsing a.py wiped c.py's import binding (IDX-1)";
+}
+
+TEST(ReferenceTrackerTest, IncrementalReparseReplacesChangedFileBindings) {
+    ReferenceTracker rt;
+
+    auto target_at = [&](FileID fid, size_t idx) -> SymbolID {
+        auto snap = rt.pin();
+        auto it = snap->refs_by_file.find(fid);
+        if (it == snap->refs_by_file.end() || it->second.size() <= idx) {
+            return 0;
+        }
+        return it->second[idx].target_symbol;
+    };
+
+    auto b = rt.process_file(2, "b.py",
+                             std::vector<Symbol>{make_sym(
+                                 "_helper", SymbolType::Function, 2, 1, 5)},
+                             {}, {});
+    auto d = rt.process_file(4, "d.py",
+                             std::vector<Symbol>{make_sym(
+                                 "_widget", SymbolType::Function, 4, 1, 5)},
+                             {}, {});
+    ASSERT_EQ(b.size(), 1u);
+    ASSERT_EQ(d.size(), 1u);
+    const SymbolID widget_id = d[0].id;
+
+    rt.process_file_imports(1, "a.py", "from b import _helper\n");
+    rt.process_file_imports(3, "c.py", "from b import _helper\n");
+
+    rt.process_file(1, "a.py",
+                    std::vector<Symbol>{
+                        make_sym("run_a", SymbolType::Function, 1, 1, 10)},
+                    std::vector<Reference>{make_foreign_call("_helper", 3)},
+                    {});
+    rt.process_file(3, "c.py",
+                    std::vector<Symbol>{
+                        make_sym("run_c", SymbolType::Function, 3, 1, 10)},
+                    std::vector<Reference>{make_foreign_call("_helper", 3)},
+                    {});
+    rt.process_all_references();
+    ASSERT_EQ(target_at(3, 0), b[0].id);
+
+    // b.py is saved: un-resolves the inbound edges into its old generation.
+    rt.remove_file(2);
+    auto b2 = rt.process_file(2, "b.py",
+                              std::vector<Symbol>{make_sym(
+                                  "_helper", SymbolType::Function, 2, 1, 5)},
+                              {}, {});
+    ASSERT_EQ(b2.size(), 1u);
+    ASSERT_EQ(target_at(1, 0), SymbolID{0});
+    ASSERT_EQ(target_at(3, 0), SymbolID{0});
+
+    // Reparse a.py with changed imports AND re-extracted refs (the update_file
+    // flow: drop the file, queue its new imports, re-add its symbols/refs).
+    // The old _helper call survives as a stale-looking ref, the new _widget
+    // call is added. The incremental flush must drop a.py's old _helper
+    // binding (stale ref resolves to nothing) and add the _widget binding,
+    // while leaving c.py's binding alone.
+    rt.remove_file(1);
+    rt.process_file_imports(1, "a.py", "from d import _widget\n");
+    rt.process_file(1, "a.py",
+                    std::vector<Symbol>{
+                        make_sym("run_a", SymbolType::Function, 1, 1, 10)},
+                    std::vector<Reference>{make_foreign_call("_helper", 3),
+                                           make_foreign_call("_widget", 4)},
+                    {});
+    rt.process_all_references();
+
+    EXPECT_EQ(target_at(1, 0), SymbolID{0})
+        << "changed file's OLD import binding was not dropped";
+    EXPECT_EQ(target_at(1, 1), widget_id)
+        << "changed file's NEW import binding did not resolve";
+    EXPECT_EQ(target_at(3, 0), b2[0].id)
+        << "changed file's reparse dropped an unrelated file's binding";
+}
+
 // Pins the remove_file inbound-dangle fix: removing file B must zero
 // target_symbol on references in OTHER files that resolve to B's symbols.
 // Before the fix the inbound ref kept its (now dangling) target, and
