@@ -12,6 +12,9 @@
 #include <lci/core/reference_tracker.h>
 #include <lci/indexing/master_index.h>
 
+#include <lci/analysis/side_effect_analyzer.h>
+#include <lci/side_effects.h>
+
 namespace lci {
 namespace mcp {
 
@@ -34,6 +37,82 @@ std::pair<std::string, int> parse_expansion_directive(
     }
     return {type, depth};
 }
+
+namespace {
+
+// Directives that walk a caller/callee depth; their depth is clamped by the
+// shared traversal cap (kHydrationMaxExpansionDepth) and the clamp is
+// reported, never silently applied.
+bool is_depth_directive(std::string_view type) {
+    return type == "callers" || type == "callees";
+}
+
+// Directives that resolve exactly one hop of direct relationships: supplying
+// a depth greater than 1 exceeds what they support.
+bool is_direct_only_directive(std::string_view type) {
+    return type == "references" || type == "dependencies" ||
+           type == "implementations" || type == "interface" ||
+           type == "siblings" || type == "tests";
+}
+
+// Directives that transform the selected ref in place; they take no depth.
+bool is_inplace_directive(std::string_view type) {
+    return type == "doc" || type == "signature" || type == "side_effects";
+}
+
+bool is_supported_directive(std::string_view type) {
+    return is_depth_directive(type) || is_direct_only_directive(type) ||
+           is_inplace_directive(type);
+}
+
+bool is_positive_integer(std::string_view s) {
+    if (s.empty()) return false;
+    for (char c : s) {
+        if (c < '0' || c > '9') return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+std::string expansion_directive_error(std::string_view directive) {
+    if (directive.empty()) return "empty expansion directive";
+    auto colon = directive.find(':');
+    std::string type(directive.substr(0, colon));
+    if (type.empty()) return "expansion directive has no type";
+    if (!is_supported_directive(type)) {
+        return "unknown expansion directive '" + type + "'";
+    }
+    if (colon == std::string_view::npos) return {};  // depth defaults to 1
+
+    std::string depth_str(directive.substr(colon + 1));
+    if (depth_str.empty()) {
+        return "directive '" + type + "' has an empty depth";
+    }
+    if (!is_positive_integer(depth_str)) {
+        return "directive '" + type + "' depth '" + depth_str +
+               "' is not a positive integer";
+    }
+    // Parse into a wider type so an absurd literal cannot overflow.
+    unsigned long long v = 0;
+    for (char c : depth_str) {
+        v = v * 10 + static_cast<unsigned long long>(c - '0');
+        if (v > 1000000000ULL) break;
+    }
+    if (v < 1) {
+        return "directive '" + type + "' depth '" + depth_str +
+               "' is not a positive integer";
+    }
+    if (is_inplace_directive(type)) {
+        return "directive '" + type + "' does not support a depth";
+    }
+    if (is_direct_only_directive(type) && v > 1) {
+        return "directive '" + type +
+               "' is direct-only (max depth 1), got " + depth_str;
+    }
+    return {};
+}
+
 
 // -- ExpansionEngine ----------------------------------------------------------
 
@@ -256,7 +335,7 @@ ExpansionEngine::ExtractResult ExpansionEngine::extract_symbol_source(
     }
 
     return {std::move(source), {start, end}, std::move(info), {},
-            RefResolution::Resolved};
+            RefResolution::Resolved, rs.id};
 }
 
 namespace {
@@ -358,7 +437,7 @@ ExpansionEngine::HydrateResult ExpansionEngine::hydrate_reference(
     if (!ref.symbol.empty()) {
         // Case 1: Symbol name provided. Resolved by identity inside the
         // named file; any saved line hint is ignored.
-        auto [source, lines, info, err, reason] =
+        auto [source, lines, info, err, reason, sym_id] =
             extract_symbol_source(file_path, ref.symbol, format);
         if (!err.empty() || reason != RefResolution::Resolved) {
             return {{}, 0, err, reason};
@@ -368,6 +447,11 @@ ExpansionEngine::HydrateResult ExpansionEngine::hydrate_reference(
         hr.symbol_type = info.symbol_type;
         hr.signature = info.signature;
         hr.is_exported = info.is_exported;
+        {
+            auto snap = index_.ref_tracker().pin();
+            auto sym = snap->get_enhanced_symbol(sym_id);
+            populate_purity(hr, sym.get());
+        }
         if (format == FormatType::Signatures) extract_signature_only(hr);
     } else if (ref.has_line_range) {
         // Case 2: Only line range. Literal current-index lines, with no
@@ -431,6 +515,7 @@ ExpansionEngine::HydrateResult ExpansionEngine::hydrate_symbol_id(
         auto first = line.find_first_not_of(" \t");
         hr.signature = (first != std::string::npos) ? line.substr(first) : line;
     }
+    populate_purity(hr, sym.get());
     if (format == FormatType::Signatures) extract_signature_only(hr);
 
     int tokens = static_cast<int>(hr.source.size()) / 4;
@@ -449,6 +534,14 @@ ExpansionEngine::ExpansionResult ExpansionEngine::apply_expansions(
     ExpansionResult out;
 
     for (const auto& directive : ref.expansions) {
+        // Refuse an unknown / malformed / depth-exceeding directive visibly
+        // rather than skipping it: a caller must learn that a requested
+        // relationship was never applied.
+        if (auto verr = expansion_directive_error(directive); !verr.empty()) {
+            out.errors.push_back({directive, std::move(verr)});
+            continue;
+        }
+
         auto [dtype, depth] = parse_expansion_directive(directive);
 
         // The token budget is owned by the caller's single serialized-JSON
@@ -467,6 +560,10 @@ ExpansionEngine::ExpansionResult ExpansionEngine::apply_expansions(
             expanded = expand_callers(ref, depth, project_root, format, tally);
         } else if (dtype == "callees") {
             expanded = expand_callees(ref, depth, project_root, format, tally);
+        } else if (dtype == "references") {
+            expanded = expand_references(ref, project_root, format, tally);
+        } else if (dtype == "dependencies") {
+            expanded = expand_dependencies(ref, project_root, format, tally);
         } else if (dtype == "implementations") {
             expanded = expand_implementations(ref, project_root, format, tally);
         } else if (dtype == "interface") {
@@ -481,8 +578,11 @@ ExpansionEngine::ExpansionResult ExpansionEngine::apply_expansions(
         } else if (dtype == "signature") {
             extract_signature_only(hydrated);
             continue;
+        } else if (dtype == "side_effects") {
+            request_side_effects(hydrated);
+            continue;
         } else {
-            continue;  // Unknown directive
+            continue;  // unreachable: expansion_directive_error rejected it
         }
 
         // Emit the new, already-deduplicated expansion refs; the caller appends
@@ -504,24 +604,33 @@ namespace {
 /// expansion sibling cannot be substituted by, or made ambiguous against, a
 /// same-name symbol in another file. An identity already present in
 /// `tally.emitted_keys` is skipped — its source is never repeated — and recorded
-/// in `tally.deduped` with the current relationship label, so the caller folds
+/// in `tally.deduped` with the target's relationship label, so the caller folds
 /// the relationship into the surviving entry's provenance. A new identity is
-/// inserted into `emitted_keys` and consumes one unit of the shared visited-
-/// target budget; once the budget is spent, traversal is marked truncated and
-/// no further target is hydrated. This is the single place dedup and traversal
-/// bounds are enforced across the whole working set (all primaries and all
-/// expansions), rather than per directive.
+/// labelled with that relationship in its own provenance, inserted into
+/// `emitted_keys` and consumes one unit of the shared visited-target budget;
+/// once the budget is spent, traversal is marked truncated and no further
+/// target is hydrated. This is the single place dedup and traversal bounds are
+/// enforced across the whole working set (all primaries and all expansions),
+/// rather than per directive.
+///
+/// `labels` (when non-empty and aligned with `ids`) names each id's explicit
+/// relationship, so `dependencies` can carry "dependency:call"/"dependency:
+/// import"; an empty entry falls back to the shared `tally.relationship`.
 std::vector<HydratedRef> hydrate_symbol_ids(
     ExpansionEngine& engine, const std::vector<SymbolID>& ids,
-    const std::string& project_root, FormatType format, ExpansionTally& tally) {
+    const std::vector<std::string>& labels, const std::string& project_root,
+    FormatType format, ExpansionTally& tally) {
     std::vector<HydratedRef> results;
-    for (auto id : ids) {
-        auto result = engine.hydrate_symbol_id(id, format);
+    for (size_t i = 0; i < ids.size(); ++i) {
+        std::string label = (i < labels.size() && !labels[i].empty())
+                                ? labels[i]
+                                : tally.relationship;
+        auto result = engine.hydrate_symbol_id(ids[i], format);
         if (!result.error.empty()) continue;
 
         std::string key = engine.identity_key(result.ref, project_root);
         if (tally.emitted_keys && tally.emitted_keys->contains(key)) {
-            tally.deduped.emplace_back(std::move(key), tally.relationship);
+            tally.deduped.emplace_back(std::move(key), label);
             continue;
         }
         if (tally.visited_used >= tally.visited_cap) {
@@ -530,9 +639,18 @@ std::vector<HydratedRef> hydrate_symbol_ids(
         }
         ++tally.visited_used;
         if (tally.emitted_keys) tally.emitted_keys->insert(std::move(key));
+        if (!label.empty()) result.ref.provenance.push_back(std::move(label));
         results.push_back(std::move(result.ref));
     }
     return results;
+}
+
+// Convenience overload for the single-relationship directives (callers,
+// callees, ...) whose label is the shared tally relationship.
+std::vector<HydratedRef> hydrate_symbol_ids(
+    ExpansionEngine& engine, const std::vector<SymbolID>& ids,
+    const std::string& project_root, FormatType format, ExpansionTally& tally) {
+    return hydrate_symbol_ids(engine, ids, {}, project_root, format, tally);
 }
 
 }  // namespace
@@ -601,6 +719,153 @@ std::vector<HydratedRef> ExpansionEngine::expand_callees(
     }
 
     return hydrate_symbol_ids(*this, ordered, project_root, format, tally);
+}
+
+std::vector<HydratedRef> ExpansionEngine::expand_references(
+    const ContextRef& ref, const std::string& project_root, FormatType /*format*/,
+    ExpansionTally& tally) {
+    if (ref.symbol.empty()) return {};
+
+    auto rs = resolve_start(resolve_path(ref.file, project_root), ref.symbol);
+    if (rs.status != RefResolution::Resolved) return {};
+
+    auto& tracker = index_.ref_tracker();
+    auto rt_snap = tracker.pin();
+    auto target = rt_snap->get_enhanced_symbol(rs.id);
+    if (!target) return {};
+
+    // Incoming reference SITES of the exact selected symbol. Each site is a
+    // source location; the enclosing symbol's name and line anchor it.
+    auto refs = rt_snap->get_symbol_references(target->id, "incoming");
+    std::sort(refs.begin(), refs.end(),
+              [](const Reference& a, const Reference& b) {
+                  if (a.file_id != b.file_id) return a.file_id < b.file_id;
+                  if (a.line != b.line) return a.line < b.line;
+                  return a.column < b.column;
+              });
+
+    std::vector<HydratedRef> results;
+    for (const auto& site : refs) {
+        if (site.line <= 0) continue;
+        std::string file_path = get_file_path(site.file_id);
+        if (file_path.empty()) continue;
+
+        HydratedRef hr;
+        hr.file = file_path;
+        hr.lines = {site.line, site.line};
+        if (auto enclosing = rt_snap->get_enhanced_symbol(site.source_symbol)) {
+            hr.symbol = enclosing->symbol.name;
+            hr.symbol_type = std::string(to_string(enclosing->symbol.type));
+            hr.signature = enclosing->signature;
+            hr.is_exported = enclosing->is_exported;
+        }
+        auto [source, err] =
+            extract_source_by_lines(file_path, site.line, site.line);
+        if (!err.empty()) continue;
+        hr.source = std::move(source);
+        // Line numbers are current-index positions, not saved selectors.
+        hr.is_line_range_literal = true;
+        hr.provenance.push_back("references");
+        hr.provenance.push_back(std::string("reference:") +
+                                std::string(to_string(site.type)));
+
+        std::string key = identity_key(hr, project_root);
+        if (tally.emitted_keys && tally.emitted_keys->contains(key)) {
+            tally.deduped.emplace_back(std::move(key), "references");
+            continue;
+        }
+        if (tally.visited_used >= tally.visited_cap) {
+            tally.traversal_truncated = true;
+            break;
+        }
+        ++tally.visited_used;
+        if (tally.emitted_keys) tally.emitted_keys->insert(std::move(key));
+        results.push_back(std::move(hr));
+    }
+    return results;
+}
+
+std::vector<HydratedRef> ExpansionEngine::expand_dependencies(
+    const ContextRef& ref, const std::string& project_root, FormatType format,
+    ExpansionTally& tally) {
+    if (ref.symbol.empty()) return {};
+
+    auto rs = resolve_start(resolve_path(ref.file, project_root), ref.symbol);
+    if (rs.status != RefResolution::Resolved) return {};
+
+    auto& tracker = index_.ref_tracker();
+    auto rt_snap = tracker.pin();
+    auto sym = rt_snap->get_enhanced_symbol(rs.id);
+    if (!sym) return {};
+
+    // Direct dependencies only: the selected symbol's resolved outgoing calls
+    // and imports, each labelled with its explicit reference type. No graph
+    // walk — transitive reach is deliberately out of scope.
+    auto refs = rt_snap->get_symbol_references(sym->id, "outgoing");
+    std::sort(refs.begin(), refs.end(),
+              [](const Reference& a, const Reference& b) {
+                  if (a.file_id != b.file_id) return a.file_id < b.file_id;
+                  if (a.line != b.line) return a.line < b.line;
+                  return a.column < b.column;
+              });
+
+    std::vector<SymbolID> ids;
+    std::vector<std::string> labels;
+    for (const auto& dep : refs) {
+        // Only index-backed relationships are dependencies: an unresolved
+        // target (an external library) carries no source to hydrate.
+        if (dep.target_symbol == 0) continue;
+        if (dep.type != ReferenceType::Call && dep.type != ReferenceType::Import) {
+            continue;
+        }
+        ids.push_back(dep.target_symbol);
+        labels.push_back(std::string("dependency:") +
+                         std::string(to_string(dep.type)));
+    }
+    return hydrate_symbol_ids(*this, ids, labels, project_root, format, tally);
+}
+
+void ExpansionEngine::populate_purity(HydratedRef& hr,
+                                      const EnhancedSymbol* sym) {
+    hr.purity = {};
+    hr.has_purity = false;
+    if (sym == nullptr) {
+        hr.purity.unavailability_reason = "missing_symbol";
+        return;
+    }
+    if (sym->symbol.type != SymbolType::Function &&
+        sym->symbol.type != SymbolType::Method) {
+        hr.purity.unavailability_reason = "not_a_function";
+        return;
+    }
+    if (analyzer_ == nullptr) {
+        hr.purity.unavailability_reason = "analyzer_unavailable";
+        return;
+    }
+    const SideEffectInfo* info = analyzer_->get_result(
+        get_file_path(sym->symbol.file_id), sym->symbol.line,
+        sym->symbol.column);
+    if (info == nullptr) {
+        hr.purity.unavailability_reason = "no_side_effect_record";
+        return;
+    }
+    hr.purity.available = true;
+    hr.purity.is_pure = info->is_pure;
+    hr.purity.purity_level = std::string(to_string(info->purity_level));
+    hr.purity.categories = categories_to_strings(info->categories);
+    hr.purity.transitive_categories =
+        categories_to_strings(info->transitive_categories);
+    hr.purity.purity_score = info->purity_score;
+    hr.purity.reasons = info->impurity_reasons;
+}
+
+void ExpansionEngine::request_side_effects(HydratedRef& hr) {
+    hr.has_purity = true;
+    // Symbol refs already carry a populated state (available, or a reason set
+    // during hydration). A ref with no symbol identity has nothing to look up.
+    if (hr.symbol.empty() && hr.purity.unavailability_reason.empty()) {
+        hr.purity.unavailability_reason = "no_symbol";
+    }
 }
 
 std::vector<HydratedRef> ExpansionEngine::expand_implementations(

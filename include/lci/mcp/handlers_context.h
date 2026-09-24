@@ -10,12 +10,16 @@
 namespace lci {
 
 class MasterIndex;
+class SideEffectAnalyzer;
 
 namespace mcp {
 
 /// Registers the context manifest tool handler on the given server,
-/// replacing the stub handler with a real implementation.
-void register_context_handlers(McpServer& server, MasterIndex* indexer);
+/// replacing the stub handler with a real implementation. When `analyzer` is
+/// non-null, a loaded ref's `side_effects` expansion can serve real purity
+/// evidence; null is reported as unavailable, never as pure.
+void register_context_handlers(McpServer& server, MasterIndex* indexer,
+                               const SideEffectAnalyzer* analyzer = nullptr);
 
 // -- Handler functions (exposed for testing) ----------------------------------
 
@@ -23,7 +27,8 @@ void register_context_handlers(McpServer& server, MasterIndex* indexer);
 /// Dispatches to save or load based on the "operation" parameter.
 ToolResult handle_context(const nlohmann::json& params,
                           MasterIndex& indexer,
-                          const std::string& project_root);
+                          const std::string& project_root,
+                          const SideEffectAnalyzer* analyzer = nullptr);
 
 // -- JSON serialization helpers (exposed for testing) -------------------------
 

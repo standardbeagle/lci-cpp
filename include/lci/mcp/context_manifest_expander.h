@@ -15,6 +15,8 @@ namespace lci {
 
 class MasterIndex;
 class ReferenceTracker;
+class SideEffectAnalyzer;
+struct EnhancedSymbol;
 
 namespace mcp {
 
@@ -30,6 +32,14 @@ struct SymbolInfo {
 /// Parses an expansion directive like "callers:2" into type and depth.
 /// Returns the directive type and depth (default 1).
 std::pair<std::string, int> parse_expansion_directive(std::string_view directive);
+
+/// Validates an expansion directive. Returns an empty string when the
+/// directive names a supported expansion (with a well-formed, in-range
+/// optional depth); otherwise a human-readable reason. Unknown types,
+/// malformed depths (empty/non-integer/less than 1), a depth on a directive
+/// that does not walk depth, and a depth beyond a direct-only directive's
+/// single hop are all refused — never silently defaulted or skipped.
+std::string expansion_directive_error(std::string_view directive);
 
 /// Per-load traversal accounting for one hydration working set. Owned by the
 /// loader (the MCP `context` handler, and later the CLI/composites) and threaded
@@ -100,12 +110,17 @@ class ExpansionEngine {
 
     /// Applies expansion directives (callers, callees, etc.) to a reference.
     /// Returns the newly-emitted hydrated expansion refs (identities not
-    /// already in `tally.emitted_keys`) and an error string. Deduplication and
-    /// traversal bounds are applied through the shared `tally`; the token
-    /// budget is owned by the caller's serialized-JSON accounting.
+    /// already in `tally.emitted_keys`) and the directives that were refused.
+    /// Deduplication and traversal bounds are applied through the shared
+    /// `tally`; the token budget is owned by the caller's serialized-JSON
+    /// accounting.
+    struct DirectiveError {
+        std::string directive;
+        std::string reason;
+    };
     struct ExpansionResult {
         std::vector<HydratedRef> expanded;
-        std::string error;
+        std::vector<DirectiveError> errors;
     };
     ExpansionResult apply_expansions(const ContextRef& ref,
                                      HydratedRef& hydrated,
@@ -113,8 +128,17 @@ class ExpansionEngine {
                                      const std::string& project_root,
                                      ExpansionTally& tally);
 
+    /// Wires the shared SideEffectAnalyzer used by the `side_effects`
+    /// directive. Null means no analyzer is available, and a requested
+    /// `side_effects` expansion reports evidence as unavailable rather than
+    /// pure. Never takes ownership.
+    void set_side_effect_analyzer(const SideEffectAnalyzer* analyzer) {
+        analyzer_ = analyzer;
+    }
+
   private:
     MasterIndex& index_;
+    const SideEffectAnalyzer* analyzer_{};
 
     /// Resolves a saved file+symbol to exactly one symbol in the named file.
     /// Never substitutes a same-name symbol from another file, and reports a
@@ -136,6 +160,7 @@ class ExpansionEngine {
         SymbolInfo info;
         std::string error;
         RefResolution reason{RefResolution::Resolved};
+        SymbolID id{};
     };
     ExtractResult extract_symbol_source(const std::string& file_path,
                                         const std::string& symbol_name,
@@ -165,6 +190,31 @@ class ExpansionEngine {
     std::vector<HydratedRef> expand_callees(
         const ContextRef& ref, int depth, const std::string& project_root,
         FormatType format, ExpansionTally& tally);
+
+    /// Reference SITES of the exact selected symbol: each incoming reference
+    /// resolves to the source location (file + line) of the enclosing symbol
+    /// that references it, hydrated by that location and labelled with the
+    /// reference kind. Reuses ReferenceTracker evidence; never a new analyzer.
+    std::vector<HydratedRef> expand_references(
+        const ContextRef& ref, const std::string& project_root,
+        FormatType format, ExpansionTally& tally);
+
+    /// Direct, explicitly typed dependencies of the exact selected symbol:
+    /// its resolved outgoing calls and imports, hydrated by exact SymbolID
+    /// and labelled with the reference type. Direct only by construction —
+    /// there is no transitive walk here.
+    std::vector<HydratedRef> expand_dependencies(
+        const ContextRef& ref, const std::string& project_root,
+        FormatType format, ExpansionTally& tally);
+
+    /// Populates the (not-yet-serialized) purity state for a hydrated symbol:
+    /// available evidence from the analyzer's record, otherwise an
+    /// unavailability reason. Never claims pure on absence.
+    void populate_purity(HydratedRef& hr, const EnhancedSymbol* sym);
+
+    /// Marks a side_effects expansion requested. Preserves any purity state
+    /// populated during hydration; a symbol-less ref is unavailable by name.
+    void request_side_effects(HydratedRef& hr);
 
     std::vector<HydratedRef> expand_implementations(
         const ContextRef& ref, const std::string& project_root,

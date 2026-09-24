@@ -68,12 +68,20 @@ struct ContextManifest {
 };
 
 /// Purity analysis summary for a hydrated reference.
+///
+/// `available` distinguishes real evidence from its absence: a record that
+/// exists is available and carries `is_pure` (true or false); a ref with no
+/// analysis — no analyzer wired, no function/method, or no record — is
+/// available=false with `unavailability_reason` set, never a silent is_pure.
 struct PurityInfo {
     bool is_pure{};
     std::string purity_level;
     std::vector<std::string> categories;
+    std::vector<std::string> transitive_categories;
     double purity_score{};
     std::vector<std::string> reasons;
+    bool available{};
+    std::string unavailability_reason;
 };
 
 /// A single reference with resolved source code and expanded relationships.
@@ -119,6 +127,8 @@ struct HydrationStats {
     // Traversal (input-ref / depth / visited-target) was bounded, independent
     // of the token budget. Reported so a large graph is never silently clipped.
     bool traversal_truncated{};
+    // Expansion directives refused as unknown / malformed / depth-exceeding.
+    int expansion_errors{};
 };
 
 /// Outcome of resolving a reference's identity against the current index.
@@ -164,11 +174,23 @@ struct UnresolvedRef {
     RefResolution reason{};
 };
 
+/// An expansion directive that was refused (unknown, malformed, or exceeding
+/// the directive's supported depth), reported with the ref it was attached to
+/// so a caller sees exactly what was rejected and why — never a silent skip.
+struct ExpansionError {
+    std::string file;
+    std::string symbol;
+    std::string role;
+    std::string directive;
+    std::string reason;
+};
+
 /// Expanded context with full source code and relationships.
 struct HydratedContext {
     std::string task;
     std::vector<HydratedRef> refs;
     std::vector<UnresolvedRef> unresolved;
+    std::vector<ExpansionError> expansion_errors;
     HydrationStats stats;
     std::vector<std::string> warnings;
 };

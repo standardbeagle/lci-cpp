@@ -352,6 +352,30 @@ nlohmann::json hydrated_ref_to_json(const HydratedRef& r) {
     if (r.is_exported) rj["is_exported"] = true;
     if (r.is_external) rj["is_external"] = true;
     if (r.is_line_range_literal) rj["line_range_literal"] = true;
+    // Purity/side-effect evidence, when a `side_effects` expansion requested
+    // it. `available` is explicit so an absent record is never read as pure:
+    // an unavailable ref carries a reason instead of `is_pure`.
+    if (r.has_purity) {
+        nlohmann::json pj;
+        pj["available"] = r.purity.available;
+        if (r.purity.available) {
+            pj["is_pure"] = r.purity.is_pure;
+            pj["purity_score"] = r.purity.purity_score;
+            if (!r.purity.purity_level.empty()) {
+                pj["purity_level"] = r.purity.purity_level;
+            }
+            if (!r.purity.categories.empty()) {
+                pj["local_effects"] = r.purity.categories;
+            }
+            if (!r.purity.transitive_categories.empty()) {
+                pj["transitive_effects"] = r.purity.transitive_categories;
+            }
+            if (!r.purity.reasons.empty()) pj["reasons"] = r.purity.reasons;
+        } else if (!r.purity.unavailability_reason.empty()) {
+            pj["reason"] = r.purity.unavailability_reason;
+        }
+        rj["purity"] = std::move(pj);
+    }
     // Every requested role / relationship that collapsed onto this canonical
     // identity survives here, so dedup never loses provenance.
     if (!r.provenance.empty()) rj["provenance"] = r.provenance;
@@ -388,11 +412,28 @@ nlohmann::json hydrated_context_to_json(const HydratedContext& ctx) {
         }
     }
 
+    // Refused expansion directives: unknown, malformed, or depth-exceeding.
+    // Reported with the ref they were attached to, never silently skipped.
+    if (!ctx.expansion_errors.empty()) {
+        auto& ee = j["expansion_errors"];
+        ee = nlohmann::json::array();
+        for (const auto& e : ctx.expansion_errors) {
+            nlohmann::json ej;
+            ej["file"] = e.file;
+            if (!e.symbol.empty()) ej["symbol"] = e.symbol;
+            if (!e.role.empty()) ej["role"] = e.role;
+            ej["directive"] = e.directive;
+            ej["reason"] = e.reason;
+            ee.push_back(std::move(ej));
+        }
+    }
+
     j["stats"] = {{"refs_loaded", ctx.stats.refs_loaded},
                   {"symbols_hydrated", ctx.stats.symbols_hydrated},
                   {"tokens_approx", ctx.stats.tokens_approx},
                   {"expansions_applied", ctx.stats.expansions_applied},
                   {"unresolved_count", ctx.stats.unresolved_count},
+                  {"expansion_errors", ctx.stats.expansion_errors},
                   {"refs_omitted", ctx.stats.refs_omitted},
                   {"expansions_omitted", ctx.stats.expansions_omitted},
                   {"traversal_truncated", ctx.stats.traversal_truncated},
@@ -750,7 +791,8 @@ ToolResult handle_context_save(const nlohmann::json& params,
 
 ToolResult handle_context_load(const nlohmann::json& params,
                                MasterIndex& indexer,
-                               const std::string& project_root) {
+                               const std::string& project_root,
+                               const SideEffectAnalyzer* analyzer) {
     auto from_file = params.value("from_file", "");
     auto from_string = params.value("from_string", "");
 
@@ -878,6 +920,7 @@ ToolResult handle_context_load(const nlohmann::json& params,
     std::vector<UnresolvedRef> unresolved = std::move(invalid_refs);
 
     ExpansionEngine engine(indexer);
+    engine.set_side_effect_analyzer(analyzer);
 
     // Ordered working-set candidates. Identities are deduplicated across the
     // WHOLE set (primaries first, then every expansion target) BEFORE any
@@ -965,6 +1008,7 @@ ToolResult handle_context_load(const nlohmann::json& params,
     }
 
     int expansions_applied = 0;
+    std::vector<ExpansionError> expansion_errors;
     for (size_t i = 0; i < filtered_refs.size(); ++i) {
         const auto& ref = filtered_refs[i];
         if (ref.expansions.empty()) continue;
@@ -975,7 +1019,20 @@ ToolResult handle_context_load(const nlohmann::json& params,
         size_t dedup_before = tally.deduped.size();
         auto exp =
             engine.apply_expansions(ref, primary, format, project_root, tally);
-        expansions_applied += static_cast<int>(ref.expansions.size());
+        expansions_applied +=
+            static_cast<int>(ref.expansions.size() - exp.errors.size());
+
+        // A refused directive is surfaced with the ref it was attached to,
+        // never silently dropped.
+        for (auto& de : exp.errors) {
+            ExpansionError ee;
+            ee.file = ref.file;
+            ee.symbol = ref.symbol;
+            ee.role = ref.role;
+            ee.directive = std::move(de.directive);
+            ee.reason = std::move(de.reason);
+            expansion_errors.push_back(std::move(ee));
+        }
 
         // Newly-expanded identities (already deduplicated and registered in
         // emitted_keys by the shared tally) become expansion candidates in
@@ -1008,6 +1065,7 @@ ToolResult handle_context_load(const nlohmann::json& params,
         HydratedContext ctx;
         ctx.task = manifest.task;
         ctx.unresolved = unresolved;
+        ctx.expansion_errors = expansion_errors;
         absl::flat_hash_set<size_t> chosen(admitted.begin(), admitted.end());
         size_t loaded_primaries = 0, loaded_expansions = 0;
         for (const auto& idx : admitted) {
@@ -1025,6 +1083,8 @@ ToolResult handle_context_load(const nlohmann::json& params,
         }
         ctx.stats.expansions_applied = expansions_applied;
         ctx.stats.unresolved_count = static_cast<int>(ctx.unresolved.size());
+        ctx.stats.expansion_errors =
+            static_cast<int>(ctx.expansion_errors.size());
         ctx.stats.refs_omitted =
             static_cast<int>(total_primaries - loaded_primaries);
         ctx.stats.expansions_omitted =
@@ -1042,6 +1102,11 @@ ToolResult handle_context_load(const nlohmann::json& params,
         if (tally.traversal_truncated) {
             ctx.warnings.push_back(
                 "Expansion traversal bounded by the depth/visited-target caps.");
+        }
+        if (!ctx.expansion_errors.empty()) {
+            ctx.warnings.push_back(
+                std::to_string(ctx.expansion_errors.size()) +
+                " expansion directive(s) were refused; see expansion_errors.");
         }
         return ctx;
     };
@@ -1140,14 +1205,15 @@ ToolResult handle_context_load(const nlohmann::json& params,
 
 ToolResult handle_context(const nlohmann::json& params,
                           MasterIndex& indexer,
-                          const std::string& project_root) {
+                          const std::string& project_root,
+                          const SideEffectAnalyzer* analyzer) {
     auto operation = params.value("operation", "");
 
     if (operation == "save") {
         return handle_context_save(params, project_root);
     }
     if (operation == "load") {
-        return handle_context_load(params, indexer, project_root);
+        return handle_context_load(params, indexer, project_root, analyzer);
     }
 
     return make_error_response(
@@ -1157,7 +1223,8 @@ ToolResult handle_context(const nlohmann::json& params,
 
 // -- register_context_handlers ------------------------------------------------
 
-void register_context_handlers(McpServer& server, MasterIndex* indexer) {
+void register_context_handlers(McpServer& server, MasterIndex* indexer,
+                               const SideEffectAnalyzer* analyzer) {
     // Registers the "context" tool (definition + real handler) — the sole
     // registration of this tool now that the stub registrar is gone.
     auto root = server.project_root();
@@ -1281,12 +1348,12 @@ void register_context_handlers(McpServer& server, MasterIndex* indexer) {
 
     server.add_tool(
         std::move(ctx_def),
-        [indexer, root](const nlohmann::json& p) -> ToolResult {
+        [indexer, root, analyzer](const nlohmann::json& p) -> ToolResult {
             if (!indexer) {
                 return make_unavailable_response("context", "index not available",
                                                  "retry shortly; the server is still starting or indexing");
             }
-            return handle_context(p, *indexer, root);
+            return handle_context(p, *indexer, root, analyzer);
         }
         // exclusive (default): save/append write manifest files (read-modify-
         // write on append); not a read-only tool.

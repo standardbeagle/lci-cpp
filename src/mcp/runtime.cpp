@@ -105,7 +105,7 @@ void register_all_handlers(McpServer& server, MasterIndex* index,
     register_analysis_handlers(server, index, &runtime->annotator,
                                &runtime->side_effects, &runtime->propagator,
                                &runtime->ci_engine);
-    register_context_handlers(server, index);
+    register_context_handlers(server, index, &runtime->side_effects);
 }
 
 }  // namespace mcp
