@@ -1,5 +1,6 @@
 {
   "stack": "generic",
+  "delivery": "internal-tool",
   "templates": [
     {
       "name": "context-native-drain-v1",
