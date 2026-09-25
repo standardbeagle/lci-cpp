@@ -8,8 +8,18 @@ defaults {
     // max-time "30m"
 }
 
-// no test command detected; uncomment and fill in:
-// alias "test" {
-//     command "your-test-runner"
-//     args "--flag"
-// }
+// The release preset (build/release) is the tree every drain gate and benchmark reads.
+// `test` configures and builds first: ctest runs whatever binaries the tree holds, so a
+// test alias that skipped the build would pass against stale code. Both steps are
+// incremental, so the second pass in a build-then-test template costs seconds.
+alias "build" {
+    command "sh"
+    args "-c" "cmake --preset release && cmake --build --preset release --parallel 4"
+    max-time "60m"
+}
+
+alias "test" {
+    command "sh"
+    args "-c" "cmake --preset release && cmake --build --preset release --parallel 4 && ctest --preset release -j4"
+    max-time "60m"
+}
