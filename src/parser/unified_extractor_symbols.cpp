@@ -1129,11 +1129,13 @@ void UnifiedExtractor::count_complexity_point(TSNode node,
 
     if (node_type == "if_statement" || node_type == "if_expression" ||
         node_type == "if" || node_type == "unless" || node_type == "elsif" ||
+        node_type == "elif_clause" ||            // Python
         node_type == "if_modifier" || node_type == "unless_modifier") {
         ++top;
     } else if (node_type == "for_statement" ||
                node_type == "for_range_statement" ||
                node_type == "for_in_statement" ||
+               node_type == "foreach_statement" ||  // C# / PHP
                node_type == "while_statement" ||
                node_type == "do_while_statement" ||
                node_type == "while_expression" ||   // Rust
@@ -1146,6 +1148,12 @@ void UnifiedExtractor::count_complexity_point(TSNode node,
     } else if (node_type == "case_clause" || node_type == "case_statement" ||
                node_type == "expression_case" ||
                node_type == "type_case" ||
+               node_type == "match_arm" ||          // Rust
+               node_type == "when_entry" ||         // Kotlin
+               node_type == "switch_case" ||        // JS / TS
+               node_type == "switch_default" ||     // JS / TS
+               node_type == "switch_label" ||       // Java
+               node_type == "switch_section" ||     // C#
                node_type == "when" || node_type == "in_clause") {
         ++top;
     } else if (node_type == "conditional_expression" ||
@@ -1157,6 +1165,7 @@ void UnifiedExtractor::count_complexity_point(TSNode node,
                node_type == "rescue" || node_type == "rescue_modifier") {
         ++top;
     } else if (node_type == "binary_expression" ||
+               node_type == "boolean_operator" ||   // Python
                node_type == "binary") {
         if (ts_node_child_count(node) >= 3) {
             TSNode op = ts_node_child(node, 1);
