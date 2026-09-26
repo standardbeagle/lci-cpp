@@ -222,18 +222,25 @@ LayerAnalysis LayerAnalyzer::analyze(const std::vector<FileSymbolData>& files,
     }
 
     // Each module belongs to exactly one layer: majority vote of its
-    // symbols' classifications, ties broken by layer name for determinism.
+    // CLASSIFIED symbols' layer assignments. An unclassified symbol is absence
+    // of evidence, not a ballot for an "unclassified layer" — counting it as
+    // one made almost every module of a real repo (whose symbols are mostly
+    // ordinary members) outvote its few classifiable symbols, so every
+    // classified layer printed modules=0 (ANA-5). Modules with no classified
+    // symbol at all fall into kUnclassified.
     absl::flat_hash_map<std::string, std::vector<std::string>> layer_modules;
     for (const auto& [module, votes] : module_layer_votes) {
         std::string best_layer;
-        int best_votes = -1;
+        int best_votes = 0;
         for (const auto& [layer, n] : votes) {
+            if (layer == kUnclassified) continue;
             if (n > best_votes ||
                 (n == best_votes && layer < best_layer)) {
                 best_layer = layer;
                 best_votes = n;
             }
         }
+        if (best_layer.empty()) best_layer = std::string(kUnclassified);
         layer_modules[best_layer].push_back(module);
     }
 
