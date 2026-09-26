@@ -652,6 +652,34 @@ TEST(LayerAnalyzer, UnclassifiedSymbolsAreNotUtility) {
     EXPECT_TRUE(saw_app);
 }
 
+// Criterion 3, the module-count half: a module whose symbols are mostly
+// unclassifiable still reports the layer its FEW classified symbols name.
+// Counting unclassified symbols as ballots made them outvote the signal, so a
+// real repo (lci itself: 16270 unclassified vs a few hundred classified) read
+// modules=0 for every classified layer.
+TEST(LayerAnalyzer, UnclassifiedSymbolsDoNotOutvoteAClassifiedModule) {
+    EnhancedSymbol app = make_sym("UserService", SymbolType::Class, 1);
+    EnhancedSymbol u1 = make_sym("zzz", SymbolType::Variable, 2);
+    EnhancedSymbol u2 = make_sym("qwerty", SymbolType::Variable, 3);
+    EnhancedSymbol u3 = make_sym("asdf", SymbolType::Variable, 4);
+    auto f = make_file("/repo/src/app.go", {&app, &u1, &u2, &u3});
+
+    auto result = LayerAnalyzer().analyze({f}, "/repo");
+    ASSERT_EQ(result.layers.size(), 2u);
+    const ArchitecturalLayer* application = nullptr;
+    const ArchitecturalLayer* unclassified = nullptr;
+    for (const auto& l : result.layers) {
+        if (l.name == "Application Layer") application = &l;
+        if (l.name == "unclassified") unclassified = &l;
+    }
+    ASSERT_NE(application, nullptr);
+    ASSERT_NE(unclassified, nullptr);
+    EXPECT_EQ(application->metrics.module_count, 1);
+    EXPECT_EQ(application->metrics.symbol_count, 1);
+    EXPECT_EQ(unclassified->metrics.module_count, 0);
+    EXPECT_EQ(unclassified->metrics.symbol_count, 3);
+}
+
 // ===========================================================================
 // ModuleAnalyzer must not fabricate numbers it does not compute. The Go port
 // carried coupling_score=0.3 and architectural_score=0.8 CONSTANTS, and the
