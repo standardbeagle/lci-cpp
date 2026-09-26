@@ -94,8 +94,9 @@ void ImportResolver::build_import_graph(
 
 void ImportResolver::replace_file_imports(const FileImportData& import_data) {
     // Incremental: touch this file only. Erase-then-insert so a file whose
-    // imports changed (or disappeared) drops its old bindings, and an entry
-    // with no bindings leaves no empty slot behind.
+    // imports changed drops its old bindings; an empty `bindings` leaves no
+    // empty slot behind (process_file_imports never queues one today — a file
+    // with no imports is cleaned up by remove_file before the reparse).
     import_graph_.erase(import_data.file_id);
     if (!import_data.bindings.empty()) {
         import_graph_[import_data.file_id] = import_data.bindings;

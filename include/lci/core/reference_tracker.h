@@ -106,10 +106,12 @@ class ImportResolver {
     void build_import_graph(std::span<const FileImportData> import_data);
 
     /// INCREMENTAL path. Replaces ONE file's recorded bindings: erases the
-    /// file's old entry, records the new one, and drops the entry when the
-    /// file no longer has any bindings. Never touches another file's
-    /// bindings. This owns the clear on the incremental path; the corpus-wide
-    /// clear belongs to build_import_graph (bulk) alone.
+    /// file's old entry and records the new one. Never touches another file's
+    /// bindings. The corpus-wide clear belongs to build_import_graph (bulk)
+    /// alone. A file that loses ALL its imports never reaches this call:
+    /// ReferenceTracker::process_file_imports queues only non-empty data, so
+    /// that file's stale entry is dropped by the remove_file() update_file()
+    /// runs before every reparse, not here.
     void replace_file_imports(const FileImportData& import_data);
 
     /// Read-side view of one file's recorded bindings (empty when it has
@@ -462,7 +464,10 @@ class ReferenceTracker {
     void process_all_references();
 
     /// Bindings recorded for `file_id` (empty when none). Read-side diagnostic
-    /// view of the import graph.
+    /// view of the import graph. NOT safe against concurrent writers: it reads
+    /// the graph without a lock or an RCU pin, so call it only when no index
+    /// write can run (tests, single-threaded tools) — never from a server
+    /// read handler.
     std::vector<ImportBinding> get_import_bindings(FileID file_id) const {
         return import_resolver_.import_bindings(file_id);
     }
