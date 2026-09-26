@@ -467,6 +467,117 @@ fn build() -> Point { Point { x: 1 } }
                  {"use std::fmt;"});
 }
 
+// PAR-12 part 1: kinds the dispatch tables never reached. C typedef names,
+// Rust type/const/static/union/macro_rules and trait method signatures,
+// Kotlin properties/typealias/companion. Each fixture pins the kind AND the
+// declaration's own line so a symbol stamped with an enclosing span fails.
+TEST(LanguageConstructConformance, CTypedefNamesAreSymbols) {
+    constexpr std::string_view source = R"(typedef struct Point { int x; } Point;
+typedef int myint;
+)";
+    auto graph = extract_spec_fixture(Language::C, ".c", "fixture.c", source);
+    auto at = [&](std::string_view name, SymbolType type) {
+        return std::find_if(graph.symbols.begin(), graph.symbols.end(),
+                            [&](const Symbol& s) {
+                                return s.name == name && s.type == type;
+                            });
+    };
+    ASSERT_NE(at("Point", SymbolType::Struct), graph.symbols.end());
+    const auto alias = at("Point", SymbolType::Type);
+    ASSERT_NE(alias, graph.symbols.end());
+    EXPECT_EQ(alias->line, 1);
+    const auto integer = at("myint", SymbolType::Type);
+    ASSERT_NE(integer, graph.symbols.end());
+    EXPECT_EQ(integer->line, 2);
+}
+
+TEST(LanguageConstructConformance, RustTypeKindsAreSymbols) {
+    constexpr std::string_view source = R"(type Alias = i32;
+const MAX: i32 = 1;
+static GLOBAL: i32 = 2;
+union U { a: i32, b: f32 }
+macro_rules! my_macro { () => {} }
+trait Foo { fn method(&self, x: i32) -> i32; }
+use std::fmt;
+)";
+    auto graph = extract_spec_fixture(Language::Rust, ".rs", "fixture.rs", source);
+    auto at = [&](std::string_view name, SymbolType type) {
+        return std::find_if(graph.symbols.begin(), graph.symbols.end(),
+                            [&](const Symbol& s) {
+                                return s.name == name && s.type == type;
+                            });
+    };
+    const auto alias = at("Alias", SymbolType::Type);
+    ASSERT_NE(alias, graph.symbols.end());
+    EXPECT_EQ(alias->line, 1);
+    const auto max = at("MAX", SymbolType::Constant);
+    ASSERT_NE(max, graph.symbols.end());
+    EXPECT_EQ(max->line, 2);
+    const auto global = at("GLOBAL", SymbolType::Variable);
+    ASSERT_NE(global, graph.symbols.end());
+    EXPECT_EQ(global->line, 3);
+    const auto u = at("U", SymbolType::Struct);
+    ASSERT_NE(u, graph.symbols.end());
+    EXPECT_EQ(u->line, 4);
+    const auto macro = at("my_macro", SymbolType::Function);
+    ASSERT_NE(macro, graph.symbols.end());
+    EXPECT_EQ(macro->line, 5);
+    const auto method = at("method", SymbolType::Method);
+    ASSERT_NE(method, graph.symbols.end());
+    EXPECT_EQ(method->line, 6);
+    EXPECT_TRUE(method->declaration_only);
+
+    // Negative: a `use` alias is an import, never a top-level symbol.
+    EXPECT_EQ(at("fmt", SymbolType::Variable), graph.symbols.end());
+    EXPECT_EQ(at("fmt", SymbolType::Type), graph.symbols.end());
+    EXPECT_EQ(at("std", SymbolType::Module), graph.symbols.end());
+}
+
+TEST(LanguageConstructConformance, KotlinPropertyTypealiasCompanionAreSymbols) {
+    constexpr std::string_view source = R"(class Foo {
+    val prop: Int = 1
+    companion object {
+        val c: Int = 2
+    }
+}
+typealias MyInt = Int
+const val TOP: Int = 9
+val top: Int = 3
+fun f() { val local: Int = 4 }
+)";
+    auto graph =
+        extract_spec_fixture(Language::Kotlin, ".kt", "Fixture.kt", source);
+    auto at = [&](std::string_view name, SymbolType type) {
+        return std::find_if(graph.symbols.begin(), graph.symbols.end(),
+                            [&](const Symbol& s) {
+                                return s.name == name && s.type == type;
+                            });
+    };
+    const auto prop = at("prop", SymbolType::Property);
+    ASSERT_NE(prop, graph.symbols.end());
+    EXPECT_EQ(prop->line, 2);
+    const auto companion = at("Companion", SymbolType::Companion);
+    ASSERT_NE(companion, graph.symbols.end());
+    EXPECT_EQ(companion->line, 3);
+    const auto c = at("c", SymbolType::Property);
+    ASSERT_NE(c, graph.symbols.end());
+    EXPECT_EQ(c->line, 4);
+    const auto alias = at("MyInt", SymbolType::Type);
+    ASSERT_NE(alias, graph.symbols.end());
+    EXPECT_EQ(alias->line, 7);
+    const auto top_const = at("TOP", SymbolType::Constant);
+    ASSERT_NE(top_const, graph.symbols.end());
+    EXPECT_EQ(top_const->line, 8);
+    const auto top = at("top", SymbolType::Variable);
+    ASSERT_NE(top, graph.symbols.end());
+    EXPECT_EQ(top->line, 9);
+
+    // Negative: a local `val` inside a function body is not a top-level
+    // declaration and must not be indexed as one.
+    EXPECT_EQ(at("local", SymbolType::Property), graph.symbols.end());
+    EXPECT_EQ(at("local", SymbolType::Variable), graph.symbols.end());
+}
+
 TEST(LanguageConstructConformance, C) {
     constexpr std::string_view source = R"(#include <stddef.h>
 typedef struct Point { int x; } Point;
