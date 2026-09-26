@@ -273,6 +273,22 @@ TEST(FeatureAnalyzer, FeatureTypeIsWordBoundaryNotSubstring) {
               "E-commerce");
 }
 
+// Criterion 4 decay guard, one substring-only negative per feature keyword
+// family the rule touches. A plural or derivation ("profiled", "ordered",
+// "files", "configured", ...) contains the keyword only as a substring; the
+// whole-word rule must refuse it, so a later "helpful" relaxation back to
+// substring matching is inexpressible rather than merely discouraged.
+TEST(FeatureAnalyzer, FeatureFamilyDecayGuard) {
+    for (const char* name :
+         {"profiled",   "ordered",     "byproduct", "emailer",
+          "reported",   "searches",    "files",     "configured",
+          "apis",       "databases"}) {
+        EXPECT_EQ(FeatureAnalyzer::classify_feature_type(name),
+                  "General Feature")
+            << name;
+    }
+}
+
 // ===========================================================================
 // FeatureAnalyzer - analyze
 // ===========================================================================
@@ -445,6 +461,20 @@ TEST(CIVocabularyAnalyzer, TermClassificationIsWordBoundaryNotSubstring) {
     EXPECT_EQ(va.classify_term("user_profile"), "Authentication");
 }
 
+// Criterion 4 decay guard, one substring-only negative per CI vocabulary
+// keyword family the rule touches. Plurals ("users", "tables", "handlers",
+// "parsers", "tests", "configs", "errors") and derivations ("indexed",
+// "locking") contain the keyword only as a substring; whole-word matching
+// must return no domain for each.
+TEST(CIVocabularyAnalyzer, TermFamilyDecayGuard) {
+    CIVocabularyAnalyzer va;
+    for (const char* term :
+         {"users", "tables", "handlers", "parsers", "tests", "indexed",
+          "configs", "errors", "locking"}) {
+        EXPECT_EQ(va.classify_term(term), "") << term;
+    }
+}
+
 // ===========================================================================
 // LayerAnalyzer - classify_symbol_to_layer
 // ===========================================================================
@@ -527,6 +557,24 @@ TEST(LayerAnalyzer, LayerSpecialCaseIsWordBoundaryNotSubstring) {
     auto render = make_sym("renderPage", SymbolType::Function);
     EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(render),
               "Presentation Layer");
+}
+
+// Criterion 4 decay guard, one substring-only negative per layer keyword
+// family the rule touches. "builder" (ui in build), "logging" (log),
+// "services"/"models"/"utils"/"repositories" are plurals, not the keyword
+// word; none may classify. Hand-computed against the keyword table.
+TEST(LayerAnalyzer, LayerFamilyDecayGuard) {
+    for (const char* name :
+         {"builder", "services", "models", "repositories", "logging", "utils"}) {
+        auto cls = make_sym(name, SymbolType::Class);
+        EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(cls),
+                  "unclassified")
+            << name;
+        auto fn = make_sym(name, SymbolType::Function);
+        EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(fn),
+                  "unclassified")
+            << name;
+    }
 }
 
 // ===========================================================================
