@@ -23,12 +23,3 @@ alias "test" {
     args "-c" "cmake --preset release && cmake --build --preset release --parallel 4 && ctest --preset release -j4"
     max-time "60m"
 }
-
-// The dev-fleet install that follows a tagged release (worktrack delivery
-// profile internal-tool: deploy via tag, then this). dev-setup's deploy-lci.sh
-// builds ~/work/core/lci-cpp at the tag's version and distributes it;
-// --restart stops the old index servers so the next command runs the new binary.
-alias "fleet-deploy" {
-    command "bash"
-    args "-c" "exec \"$HOME/work/core/dev-setup/deploy-lci.sh\" --restart"
-}
