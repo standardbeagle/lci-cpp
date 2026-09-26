@@ -356,6 +356,26 @@ TEST(CalleeImpurityReasonTest, EveryImpureResultCarriesAtLeastOneReason) {
     EXPECT_EQ(impure, 4);
 }
 
+// Conservative verdict: a function with no classified effect but unresolved
+// calls is not claimed pure (score 0.8). MCP-15 requires that impure verdict
+// to name why too — the unresolved call(s) that made it unprovable.
+TEST(CalleeImpurityReasonTest, UnresolvedOnlyImpurityNamesUnresolvedCalls) {
+    SideEffectAnalyzer sa("go");
+    sa.begin_function("f", "f.go", 1, 5);
+    sa.record_function_call("doWork", "utils", false, 3, 5);
+    auto info = sa.end_function();
+
+    EXPECT_FALSE(info.is_pure);
+    ASSERT_EQ(info.categories, side_effect::kNone);
+    ASSERT_FALSE(info.impurity_reasons.empty())
+        << "unresolved-only impure result carries no reason";
+    bool names_callee = false;
+    for (const auto& reason : info.impurity_reasons) {
+        if (reason.find("doWork") != std::string::npos) names_callee = true;
+    }
+    EXPECT_TRUE(names_callee) << "reason must name the unresolved callee";
+}
+
 TEST(SideEffectAnalyzerTest, DynamicCallDetected) {
     SideEffectAnalyzer sa("go");
     sa.begin_function("dispatch", "handler.go", 1, 5);

@@ -268,6 +268,24 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
             callee_impurity_reason(uc.function_name, cat, uc.line));
     }
 
+    // Conservative "impure because unresolved": a function with no classified
+    // effect but calls the AST could not resolve is NOT claimed pure
+    // (compute_purity_score marks it impure at score 0.8). That verdict used
+    // to carry no reason at all, so include_reasons showed an impure result
+    // with no `reasons`. Name what makes it unprovable.
+    if (info.categories == side_effect::kNone &&
+        !info.unresolved_calls.empty()) {
+        std::string reason = "unresolved call(s): ";
+        for (size_t i = 0; i < info.unresolved_calls.size(); ++i) {
+            if (i != 0) reason += ",";
+            reason += info.unresolved_calls[i].function_name.empty()
+                          ? "<anon>"
+                          : info.unresolved_calls[i].function_name;
+        }
+        reason += " - effects unknown";
+        info.impurity_reasons.push_back(std::move(reason));
+    }
+
     populate_purity_classification(ctx, info, param_index_set);
     info.confidence = determine_confidence(ctx, info);
     compute_purity_score(info);
