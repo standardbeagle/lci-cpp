@@ -1094,6 +1094,102 @@ TEST(CodeInsightDynamic, ReportsDynamicDispatch) {
     std::filesystem::remove_all(dir);
 }
 
+// ANA-8, direction 1: an unresolved member CALL (`.size()`, `.empty()` on a
+// receiver whose static type the index cannot see) is NOT dynamic dispatch.
+// The receiver's type being unknown says nothing about runtime dispatch — the
+// target is simply outside the index. Reporting it as DYNAMIC inflates the
+// "control flow hidden from static analysis" map with ordinary stdlib calls
+// (on this repo's self-probe `size` alone was the top "reached only
+// dynamically" symbol with 1636 callers). With no genuine dynamic call site in
+// the corpus the section must not appear at all (it is gated on dynamic>0).
+TEST(CodeInsightDynamic, UnresolvedMemberCallsAreNotDynamic) {
+    auto dir = lci::test::unique_temp_dir("lci_dynamic_unres_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "lib.cpp");
+        f << "#include <vector>\n"
+             "struct Widget { int compute() { return 0; } };\n"
+             "int use(std::vector<int>& v) { return v.size() + v.empty(); }\n"
+             "int f(Widget& w) { return w.compute(); }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    auto result = handle_code_insight({{"mode", "unified"}}, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    // No interface/virtual/reflection evidence -> no DYNAMIC section, and the
+    // member calls are not named as dispatch hubs.
+    EXPECT_EQ(result.text.find("== DYNAMIC =="), std::string::npos)
+        << "unresolved member calls were reported as dynamic dispatch:\n"
+        << result.text;
+    EXPECT_EQ(result.text.find("dynamic_calls=2"), std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
+// ANA-8, direction 2 + the "both directions" pin: a call through a real
+// interface method stays DYNAMIC while an ordinary unresolved member call in
+// the same corpus does not. The fixture holds three interface dispatches
+// (h.Serve() through a typed param, c.h.Serve() through a field, x.Serve()
+// through a slice of interface values) and four unresolved member calls
+// (vector::size/empty, Widget::compute, set::size through a field); the count
+// must be 3, not 7.
+TEST(CodeInsightDynamic, InterfaceMethodStaysDynamicWhileMemberCallsDoNot) {
+    auto dir = lci::test::unique_temp_dir("lci_dynamic_iface_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "mix.go");
+        f << "package mix\n\n"
+             "type Handler interface { Serve() }\n"
+             "func run(h Handler) { h.Serve() }\n"
+             "type C struct{ h Handler }\n"
+             "func (c C) m() { c.h.Serve() }\n"
+             "var xs []Handler\n"
+             "func loop() { for _, x := range xs { x.Serve() } }\n"
+             "type Impl struct{}\n"
+             "func (i *Impl) Serve() {}\n"
+             "type Tracker struct{ files ExternalSet }\n"
+             "func (t Tracker) size() int { return t.files.size() }\n";
+    }
+    {
+        std::ofstream f(dir / "lib.cpp");
+        f << "#include <vector>\n"
+             "struct Widget { int compute() { return 0; } };\n"
+             "int use(std::vector<int>& v) { return v.size() + v.empty(); }\n"
+             "int f(Widget& w) { return w.compute(); }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    auto result = handle_code_insight({{"mode", "unified"}}, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    ASSERT_NE(result.text.find("== DYNAMIC =="), std::string::npos)
+        << result.text;
+    // The three interface calls are named as such (Serve is declaration-only).
+    EXPECT_NE(result.text.find("dynamic_call_sites=3 of 7 calls"),
+              std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("Serve"), result.text.find("== DYNAMIC =="))
+        << result.text;
+    // The unresolved member calls are not dynamic: no hub makes 2 of them and
+    // no member name is listed as "reached only dynamically".
+    EXPECT_EQ(result.text.find("dynamic_calls=2"), std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_F(CodeInsightTest, DetailedModeWorks) {
     // detailed with default analysis (modules) now actually dispatches to
     // ModuleAnalyzer (was a silent overview fallback before).
