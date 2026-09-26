@@ -355,10 +355,11 @@ TEST(FeatureAnalyzer, Deterministic) {
 // ===========================================================================
 // Determinism (Karpathy rule 4): analyzers that walk a hash map must sort
 // before they emit, or both the order AND any depth/rank derived from that
-// order come out of a per-process hash seed.
+// order come out of a per-process hash seed. ANA-5: the sort key is the
+// declared dependency rank, and depth is that rank (not the loop counter).
 // ===========================================================================
 
-TEST(LayerAnalyzer, LayersEmitInSortedOrderWithMatchingDepth) {
+TEST(LayerAnalyzer, LayersEmitInDeclaredOrderWithRankDepth) {
     auto s1 = make_sym("UserRepository", SymbolType::Class, 1);
     auto s2 = make_sym("renderPage", SymbolType::Function, 2);
     auto s3 = make_sym("OrderService", SymbolType::Class, 3);
@@ -369,12 +370,21 @@ TEST(LayerAnalyzer, LayersEmitInSortedOrderWithMatchingDepth) {
     auto result = LayerAnalyzer().analyze({f}, "");
     ASSERT_GE(result.layers.size(), 2u);
 
-    for (size_t i = 1; i < result.layers.size(); ++i) {
-        EXPECT_LT(result.layers[i - 1].name, result.layers[i].name);
+    // Declared dependency order, shallowest first; Utility last (unranked).
+    const std::vector<std::string> expected = {
+        "Presentation Layer", "Application Layer", "Domain Layer",
+        "Data Layer", "Utility Layer"};
+    ASSERT_EQ(result.layers.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(result.layers[i].name, expected[i]);
+        EXPECT_EQ(result.layers[i].depth,
+                  LayerAnalyzer::depth_of(result.layers[i].name));
     }
-    for (size_t i = 0; i < result.layers.size(); ++i) {
-        EXPECT_EQ(static_cast<int>(i) + 1, result.layers[i].depth);
-    }
+    EXPECT_EQ(result.layers[0].depth, 0);   // Presentation
+    EXPECT_EQ(result.layers[1].depth, 1);   // Application
+    EXPECT_EQ(result.layers[2].depth, 2);   // Domain
+    EXPECT_EQ(result.layers[3].depth, 3);   // Data
+    EXPECT_EQ(result.layers[4].depth, -1);  // Utility: cross-cutting
 }
 
 TEST(CIVocabularyAnalyzer, DomainsAndTermsEmitSorted) {
@@ -437,21 +447,22 @@ TEST(LayerAnalyzer, ClassifyUtilToUtility) {
     EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym), "Utility Layer");
 }
 
-TEST(LayerAnalyzer, ClassifyUnknownToUtility) {
+TEST(LayerAnalyzer, ClassifyUnknownToUnclassified) {
     auto sym = make_sym("xyz", SymbolType::Function);
-    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym), "Utility Layer");
+    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym), "unclassified");
 }
 
 // Keyword matching is on whole identifier words, never substrings:
 // "build" carries "ui", "catalog" carries "log". Hand-computed against the
-// keyword table: none of these names contain a keyword as a whole word.
+// keyword table: none of these names contain a keyword as a whole word, so
+// they are unclassified — NOT defaulted into Utility Layer.
 TEST(LayerAnalyzer, SubstringKeywordDoesNotMatch) {
     auto sym = make_sym("buildIndex", SymbolType::Variable);
-    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym), "Utility Layer");
+    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym), "unclassified");
     auto sym2 = make_sym("guideUser", SymbolType::Variable);
-    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym2), "Utility Layer");
+    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym2), "unclassified");
     auto sym3 = make_sym("catalog", SymbolType::Variable);
-    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym3), "Utility Layer");
+    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym3), "unclassified");
 }
 
 // Positive control: a keyword as a whole camel word still classifies
@@ -558,6 +569,87 @@ TEST(LayerAnalyzer, PatternConfidenceIsMeasuredNotConstant) {
     ASSERT_EQ(strong.size(), 1u);
     EXPECT_EQ(strong[0].name, "Layered Architecture");
     EXPECT_NEAR(strong[0].confidence, 0.9, 1e-9);
+}
+
+// ===========================================================================
+// ANA-5 (2026-09-23 review): one layer table. Depth is the layer's RANK in the
+// declared dependency order (Presentation shallowest, Infrastructure deepest),
+// NOT its alphabetical position in the emitted list; and a symbol the keyword
+// table cannot classify is reported under `unclassified`, not defaulted into
+// Utility (which made every other layer read modules=0 on a repo whose symbols
+// are mostly unclassifiable — lci itself).
+// ===========================================================================
+
+// Criterion 1: depth follows the DECLARED order, not alphabetical rank.
+// Alphabetical order at HEAD is Application < Data < Domain < Presentation;
+// the declared dependency order is Presentation < Application < Domain < Data
+// < Infrastructure. RED at HEAD: Application gets depth 1, Presentation 4.
+TEST(LayerAnalyzer, DepthIsDeclaredOrderNotAlphabeticalRank) {
+    EnhancedSymbol s1 = make_sym("renderPage", SymbolType::Function, 1);
+    EnhancedSymbol s2 = make_sym("UserService", SymbolType::Class, 2);
+    EnhancedSymbol s3 = make_sym("UserModel", SymbolType::Class, 3);
+    EnhancedSymbol s4 = make_sym("UserRepository", SymbolType::Class, 4);
+    EnhancedSymbol s5 = make_sym("httpClient", SymbolType::Function, 5);
+    auto f = make_file("app.go", {&s1, &s2, &s3, &s4, &s5});
+
+    auto result = LayerAnalyzer().analyze({f}, "");
+
+    auto depth_of = [&](std::string_view name) {
+        for (const auto& l : result.layers)
+            if (l.name == name) return l.depth;
+        return -1;
+    };
+    int pres = depth_of("Presentation Layer");
+    int app = depth_of("Application Layer");
+    int dom = depth_of("Domain Layer");
+    int data = depth_of("Data Layer");
+    int infra = depth_of("Infrastructure Layer");
+    ASSERT_GE(pres, 0);
+    ASSERT_GE(app, 0);
+    ASSERT_GE(dom, 0);
+    ASSERT_GE(data, 0);
+    ASSERT_GE(infra, 0);
+    EXPECT_LT(pres, app);
+    EXPECT_LT(app, dom);
+    EXPECT_LT(dom, data);
+    EXPECT_LT(data, infra);
+}
+
+// Criterion 3: an unclassifiable symbol is counted under `unclassified`, not
+// Utility, and classified layers still carry their module counts. At HEAD
+// `zzz` lands in "Utility Layer" and there is no `unclassified` bucket.
+TEST(LayerAnalyzer, UnclassifiedSymbolsAreNotUtility) {
+    EnhancedSymbol s1 = make_sym("zzz", SymbolType::Function, 1);
+    EnhancedSymbol s2 = make_sym("qwerty", SymbolType::Variable, 2);
+    auto f = make_file("/repo/src/a.go", {&s1, &s2});
+
+    auto result = LayerAnalyzer().analyze({f}, "/repo");
+
+    bool has_unclassified = false;
+    for (const auto& l : result.layers)
+        if (l.name == "unclassified") has_unclassified = true;
+    EXPECT_TRUE(has_unclassified)
+        << "unclassifiable symbols must be reported under `unclassified`";
+    for (const auto& l : result.layers)
+        EXPECT_NE(l.name, "Utility Layer")
+            << "unknown symbol defaulted into Utility Layer";
+
+    // A corpus mixing a classifiable and an unclassifiable symbol keeps the
+    // classified layer's module count non-zero: the two live in different
+    // packages, so the Application package is not outvoted by unclassified
+    // symbols sharing its module.
+    EnhancedSymbol s3 = make_sym("UserService", SymbolType::Class, 3);
+    auto f2 = make_file("/repo/app/service.go", {&s3});
+    auto mixed = LayerAnalyzer().analyze({f, f2}, "/repo");
+    bool saw_app = false;
+    for (const auto& l : mixed.layers) {
+        if (l.name == "Application Layer") {
+            saw_app = true;
+            EXPECT_GT(l.metrics.module_count, 0);
+            EXPECT_GT(l.metrics.symbol_count, 0);
+        }
+    }
+    EXPECT_TRUE(saw_app);
 }
 
 // ===========================================================================

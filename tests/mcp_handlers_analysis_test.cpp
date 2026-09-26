@@ -1710,6 +1710,92 @@ TEST(CodeInsightLayers, FlagsUpwardCall) {
     std::filesystem::remove_all(dir);
 }
 
+// ANA-5: depth is the layer's rank in the DECLARED dependency order, not its
+// alphabetical rank. A Domain -> Presentation call is an upward violation; at
+// HEAD the alphabetical depth (Data 1, Domain 2, Presentation 4) reads the
+// edge as downward and it is missed. Infrastructure is checked too (HEAD
+// returns depth -1 for it and skips every Infrastructure edge).
+TEST(CodeInsightLayers, DomainToPresentationIsAViolation) {
+    auto dir = lci::test::unique_temp_dir("lci_layers_ana5_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "g.go");
+        // Presentation -> Domain downward flow (5 edges) establishes the pair,
+        // with one inverted Domain -> Presentation edge.
+        f << "package main\n\n"
+             "func validateA() int { return 1 }\n"
+             "func validateB() int { return 1 }\n"
+             "func validateC() int { return 1 }\n"
+             "func validateD() int { return 1 }\n"
+             "func renderView() int { return validateA() + validateB() + validateC() + validateD() }\n"
+             "func validateReport() int { return renderView() }\n"
+             "func main() { _ = validateReport() + renderView() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    ASSERT_NE(result.text.find("== LAYER VIOLATIONS =="), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("validateReport [Domain Layer]"), std::string::npos)
+        << "Domain -> Presentation must be reported as an upward violation: "
+        << result.text;
+    EXPECT_NE(result.text.find("renderView [Presentation Layer]"),
+              std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
+// Infrastructure is a ranked layer, not an unknown. At HEAD
+// layer_depth("Infrastructure Layer") == -1 exempts every Infrastructure edge
+// from the violation check, so an Infrastructure -> Domain upward call (the
+// deepest layer reaching back to a shallower one) is silently missed. Under
+// the one declared order Infrastructure is deepest and this IS a violation.
+TEST(CodeInsightLayers, InfrastructureLayerIsRankedAndChecked) {
+    auto dir = lci::test::unique_temp_dir("lci_layers_infra_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream f(dir / "g.go");
+        // Downward Domain -> Infrastructure flow (5 edges: httpClient* live in
+        // Infrastructure, validate* in Domain) establishes the pair, then one
+        // inverted Infrastructure -> Domain edge.
+        f << "package main\n\n"
+             "func httpClientA() int { return 1 }\n"
+             "func httpClientB() int { return 1 }\n"
+             "func httpClientC() int { return 1 }\n"
+             "func httpClientD() int { return 1 }\n"
+             "func validateInput() int { return httpClientA() + httpClientB() + httpClientC() + httpClientD() }\n"
+             "func httpFetch() int { return validateInput() }\n"
+             "func main() { _ = httpFetch() + validateInput() }\n";
+    }
+
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    ASSERT_NE(result.text.find("== LAYER VIOLATIONS =="), std::string::npos)
+        << "Infrastructure edges must be checked, not skipped: " << result.text;
+    EXPECT_NE(result.text.find("httpFetch [Infrastructure Layer]"),
+              std::string::npos)
+        << result.text;
+
+    std::filesystem::remove_all(dir);
+}
+
 // The complement: with NO established downward flow between two labels, a
 // single upward edge is more likely a mislabeled helper than architecture —
 // the audits measured 3/6 reported violations as fabricated. Withhold it.
