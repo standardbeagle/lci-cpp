@@ -121,7 +121,10 @@ def run_sweep(plan, answer_key_for, executor, run_dir, literal_corpus_root=None)
                     result = executor(job)
                     status = result.get("status")
                     if status == STATUS_DNF:
-                        score = grading.null_score(STATUS_DNF)
+                        # The executor's own reason (timeout, truncated_response)
+                        # rides the score, so the report can name WHY a cell is
+                        # ungradable instead of flattening every DNF together.
+                        score = grading.null_score(result.get("reason") or STATUS_DNF)
                         dnf += 1
                     elif status == STATUS_OK:
                         score = grading.score_answer(result.get("answer", ""), truth)
@@ -190,8 +193,11 @@ def _summarize(rows):
         # into "never answered".
         "dnf_rate_pct": round(100.0 * len(dnf_rows) / total, 2) if total else None,
         "ungradable_count": len(ungradable),
+        # DNF rows carry their reason on the score too (timeout, a truncated
+        # tool payload): an ungradable reason the harness knew about is named
+        # here whichever of the two buckets the row landed in.
         "ungradable_reasons": sorted({r["score"]["ungradable_reason"]
-                                      for r in ungradable
+                                      for r in ungradable + dnf_rows
                                       if r["score"]["ungradable_reason"]}),
         "correct_count": sum(1 for r in graded if r["score"]["correct"]),
         # An arm that cited NOTHING scores 0.0 the same way an arm that cited

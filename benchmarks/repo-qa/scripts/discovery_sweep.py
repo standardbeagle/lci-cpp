@@ -145,11 +145,14 @@ def tool_executor(corpus_root, lci_bin):
             answer = rendering.render_tool_answer(
                 tool, job["task_shape"], payload["text"])
         except rendering.UncitableToolResponse as exc:
-            # A broken cell, never a zero: the reason travels to the report so
-            # D5 attributes an output-format gap as one.
-            return {"status": "error",
-                    "detail": "%s payload is uncitable [%s]: %s"
-                              % (tool, exc.reason, exc.detail[:200])}
+            # A named harness-known outcome (truncated_response, uncitable_
+            # location), never a zero: the reason rides the DNF into the row's
+            # score and the report's ungradable_reasons, and the sweep runs on.
+            return {"status": "dnf", "reason": exc.reason,
+                    "detail": "%s payload is uncitable: %s"
+                              % (tool, exc.detail[:200]),
+                    "tool_calls": 1,
+                    "wall_seconds": round(latency_ms / 1000.0, 3)}
         return {"status": "ok", "answer": answer, "tool_calls": 1,
                 "wall_seconds": round(latency_ms / 1000.0, 3)}
 

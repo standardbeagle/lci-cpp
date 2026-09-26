@@ -509,6 +509,35 @@ class SweepTest(unittest.TestCase):
         again = sweep.build_report(self.run_dir)
         self.assertEqual(again["levels"]["tool"]["f"]["treatment"]["cell_count"], 2)
 
+    def test_truncated_cell_is_a_named_dnf_row_and_the_sweep_completes(self):
+        # The renderer raised UncitableToolResponse(truncated_response) and the
+        # executor turned it into a DNF carrying the reason. The sweep must
+        # record it on the row's score (not the bare "dnf" constant), the
+        # report's ungradable_reasons must name it, and the remaining cells
+        # must still run -- a capped payload breaks one cell, not the sweep.
+        def executor(job):
+            if (job["level"], job["arm"], job["slug"]) == ("tool", "treatment", "s1"):
+                return {"status": "dnf",
+                        "reason": rendering.REASON_TRUNCATED,
+                        "detail": "search reported a truncated response: "
+                                  "total=146 but only 100 rendered"}
+            return {"status": "ok", "answer": _full_answer()}
+
+        counters = self._run(executor)
+        self.assertEqual(counters["dnf"], 1)
+        with open(os.path.join(self.run_dir, "f__treatment__tool__s1.json")) as fh:
+            row = json.load(fh)
+        self.assertEqual(row["status"], "dnf")
+        self.assertEqual(row["dnf_reason"], "truncated_response")
+        self.assertEqual(row["score"]["ungradable_reason"], "truncated_response")
+        report = sweep.build_report(self.run_dir)
+        tool_treatment = report["levels"]["tool"]["f"]["treatment"]
+        self.assertIn("truncated_response", tool_treatment["ungradable_reasons"])
+        # The other cell ran and graded normally.
+        with open(os.path.join(self.run_dir, "f__treatment__tool__s2.json")) as fh:
+            self.assertEqual(json.load(fh)["status"], "ok")
+        self.assertEqual(tool_treatment["graded_count"], 1)
+
     def test_oracle_failure_is_a_broken_cell(self):
         def boom(cell):
             raise RuntimeError("gopls-oracle FAILED: [GOPLS_MISSING]")
