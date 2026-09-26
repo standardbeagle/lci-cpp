@@ -1459,6 +1459,73 @@ TEST(NamingAnalyzer, NoConventionMismatchInConsistentFile) {
     }
 }
 
+// --- Qualified-name convention (ANA-4) --------------------------------------
+// Naming style is judged on the UNQUALIFIED member name. A C++ out-of-class
+// definition carries its class in the symbol name (`Widget::compute_all`); the
+// class prefix's PascalCase transition used to make a snake_case member read as
+// camelCase (false convention-mismatch). Until the extractor stores a real
+// parent field, the qualifier is stripped at the last `::`.
+
+TEST(NamingAnalyzer, QualifiedSnakeCaseMethodIsNotConventionMismatch) {
+    auto table = SynonymTable::build_default();
+    std::vector<EnhancedSymbol> syms;
+    const char* snake_names[] = {"add_proxy",    "add_timeout",  "add_headers",
+                                 "check_stream", "build_request", "start_timer",
+                                 "stop_timer",   "run_pipeline"};
+    SymbolID id = 1;
+    for (const char* n : snake_names)
+        syms.push_back(make_ref_sym_exported(n, 0, id++, true));
+    // `Widget::compute_all`: snake_case member, snake_case file. The class
+    // prefix carries no lower->upper transition, but its tokens must not lead
+    // the vocabulary analysis either.
+    auto snake = make_ref_sym_exported("Widget::compute_all", 3, id++, true);
+    // `UnifiedExtractor::extract`: the real corpus false positive. The member
+    // `extract` is a single lowercase word (neither style); the class prefix
+    // `UnifiedExtractor` supplies a `dE` transition, so HEAD judges the whole
+    // qualified name camelCase and flags it against the snake_case file.
+    auto camel = make_ref_sym_exported("UnifiedExtractor::extract", 5, id++, true);
+    std::vector<const EnhancedSymbol*> ptrs;
+    for (const auto& s : syms) ptrs.push_back(&s);
+    ptrs.push_back(&snake);
+    ptrs.push_back(&camel);
+    auto f = make_file("src/widget.cpp", std::move(ptrs));
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    for (const char* n : {"Widget::compute_all", "UnifiedExtractor::extract"}) {
+        const auto* o = find_outlier(rep, n);
+        EXPECT_EQ(o, nullptr)
+            << n << ": reason=" << (o ? o->reason : "") << " odd="
+            << (o ? o->odd_term : "");
+    }
+}
+
+TEST(NamingAnalyzer, QualifiedCamelCaseMethodIsStillConventionMismatch) {
+    auto table = SynonymTable::build_default();
+    std::vector<EnhancedSymbol> syms;
+    const char* snake_names[] = {"add_proxy",    "add_timeout",  "add_headers",
+                                 "check_stream", "build_request", "start_timer",
+                                 "stop_timer",   "run_pipeline"};
+    SymbolID id = 1;
+    for (const char* n : snake_names)
+        syms.push_back(make_ref_sym_exported(n, 0, id++, true));
+    auto qualified =
+        make_ref_sym_exported("WidgetFactory::MakeOne", 3, id++, true);
+    std::vector<const EnhancedSymbol*> ptrs;
+    for (const auto& s : syms) ptrs.push_back(&s);
+    ptrs.push_back(&qualified);
+    auto f = make_file("src/widget_factory.cpp", std::move(ptrs));
+
+    NamingAnalyzer na;
+    auto rep = na.analyze({f}, table, "");
+    // True positive preserved: the unqualified PascalCase member is the
+    // minority style in a snake_case file.
+    const auto* o = find_outlier(rep, "WidgetFactory::MakeOne");
+    ASSERT_NE(o, nullptr);
+    EXPECT_EQ(o->reason, "convention-mismatch");
+    EXPECT_EQ(o->odd_term, "camelCase");
+}
+
 // --- Anti-signal regressions (chi Use/Mount/Group/Tee, domain words) --------
 
 TEST(NamingAnalyzer, CoreApiVerbsHighFanInNotFlagged) {
