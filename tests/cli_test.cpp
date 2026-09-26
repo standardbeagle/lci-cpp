@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -10,6 +11,10 @@
 #include <string>
 
 #include <nlohmann/json.hpp>
+
+#ifndef _WIN32
+#include <sys/wait.h>  // WEXITSTATUS for the merged-output CLI runner
+#endif
 
 #include <lci/cli/commands.h>
 #include <lci/config.h>
@@ -3691,6 +3696,369 @@ TEST(CliStatusTest, ThreadsAndRssMatchServerStatusJson) {
     shutdown_lci_server(lci_bin, root);
     std::error_code ec;
     fs::remove_all(root, ec);
+}
+
+// -- Context CLI (save/load through the real Unix-socket bridge) -------------
+//
+// These drive the built `lci` binary against a fresh randomized root. The
+// first command in a test is a cold start: no server is running, so the CLI
+// must spawn one and reach the MCP `context` tool over POST /mcp. The CLI is
+// a thin client — it never parses, hydrates, persists or budget-accounts a
+// manifest itself; those live in the MCP handlers.
+
+namespace {
+
+std::string read_file_to_string(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)),
+                       std::istreambuf_iterator<char>());
+}
+
+}  // namespace
+
+#ifndef _WIN32
+namespace {
+
+std::string shell_quote(const std::string& value) {
+    std::string quoted = "'";
+    for (char c : value) {
+        if (c == '\'') {
+            quoted += "'\\''";
+        } else {
+            quoted += c;
+        }
+    }
+    quoted += "'";
+    return quoted;
+}
+
+// Runs the CLI with stderr merged into stdout so a test can assert on the
+// stderr diagnostic a nonzero exit carries. Returns the process exit code,
+// or -1 when it could not be run. POSIX-only (popen reads the shell's status).
+int run_cli_merged(const std::filesystem::path& lci_bin,
+                   const std::vector<std::string>& args, std::string& out) {
+    std::string command = shell_quote(lci_bin.string());
+    for (const auto& arg : args) command += " " + shell_quote(arg);
+    command += " 2>&1";
+
+    FILE* pipe = ::popen(command.c_str(), "r");
+    if (!pipe) return -1;
+    std::array<char, 4096> buffer{};
+    size_t read = 0;
+    out.clear();
+    while ((read = std::fread(buffer.data(), 1, buffer.size(), pipe)) > 0) {
+        out.append(buffer.data(), read);
+    }
+    const int status = ::pclose(pipe);
+    if (status == -1) return -1;
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    return -1;
+}
+
+}  // namespace
+#endif
+
+class CliContextTest : public ::testing::Test {
+  protected:
+    std::filesystem::path lci_bin;
+    std::filesystem::path root;
+
+    void SetUp() override {
+        lci_bin = portable::executable_path().parent_path().parent_path() /
+                  "src" / "lci";
+        ASSERT_TRUE(std::filesystem::exists(lci_bin)) << lci_bin;
+        root = lci::test::unique_temp_dir("lci_context_cli_");
+        std::filesystem::create_directories(root);
+        // A tiny real corpus so the hydrate path has an indexed namespace-
+        // qualified symbol to resolve.
+        write_corpus_file(root, "src/alpha.cpp",
+                          "namespace demo {\n"
+                          "int alpha() { return 1; }\n"
+                          "int beta() { return alpha(); }\n"
+                          "}  // namespace demo\n");
+    }
+
+    void TearDown() override {
+        shutdown_lci_server(lci_bin, root);
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+    }
+
+    std::vector<std::string> context_args(
+        const std::string& sub, std::vector<std::string> extra = {}) {
+        std::vector<std::string> args = {lci_bin.string(), "context", sub};
+        args.insert(args.end(), extra.begin(), extra.end());
+        return args;
+    }
+};
+
+// Cold start: the first save spawns the daemon; a repeated --ref-json with a
+// namespace-qualified symbol and a colon-containing path is authoritative
+// (passed through verbatim, never re-split). The saved file is the compact
+// Go-shape manifest, and the load over the same bridge returns JSON on stdout.
+TEST_F(CliContextTest, SaveLoadRoundTripThroughSocketBridge) {
+    const auto manifest = root / "round-trip.json";
+    std::string out;
+    ASSERT_TRUE(subprocess::run_capture(
+        context_args(
+            "save",
+            {"--task", "resume demo work",
+             "--ref-json",
+             R"({"f":"src/alpha.cpp","s":"demo::alpha","role":"modify"})",
+             "--ref-json",
+             R"({"f":"dir:with:colons/x.cpp","role":"contract"})", "-o",
+             manifest.string(), "-r", root.string()}),
+        "", out))
+        << out;
+
+    // stdout is valid JSON suitable for piping.
+    auto save_result = nlohmann::json::parse(out);
+    EXPECT_EQ(save_result.value("saved", ""), manifest.string());
+    EXPECT_EQ(save_result.value("ref_count", -1), 2);
+    ASSERT_TRUE(std::filesystem::exists(manifest));
+
+    auto body = nlohmann::json::parse(read_file_to_string(manifest));
+    ASSERT_TRUE(body.contains("r")) << body.dump();
+    ASSERT_EQ(body["r"].size(), 2u);
+    EXPECT_EQ(body["r"][0].value("f", ""), "src/alpha.cpp");
+    EXPECT_EQ(body["r"][0].value("s", ""), "demo::alpha");
+    EXPECT_EQ(body["r"][0].value("role", ""), "modify");
+    // The colon-containing path survives whole: --ref-json is authoritative.
+    EXPECT_EQ(body["r"][1].value("f", ""), "dir:with:colons/x.cpp");
+
+    // Root selection: the manifest records the root the command selected.
+    ASSERT_TRUE(body.contains("p")) << body.dump();
+    EXPECT_EQ(std::filesystem::weakly_canonical(body.value("p", "")).string(),
+              std::filesystem::weakly_canonical(root).string());
+
+    out.clear();
+    ASSERT_TRUE(subprocess::run_capture(
+        context_args("load",
+                     {manifest.string(), "-r", root.string()}),
+        "", out))
+        << out;
+    auto loaded = nlohmann::json::parse(out);
+    EXPECT_NE(loaded.value("available", true), false);
+    ASSERT_TRUE(loaded.contains("stats")) << loaded.dump();
+    EXPECT_GE(loaded["stats"].value("refs_loaded", -1), 0);
+}
+
+// The --ref path:symbol:role shorthand is accepted only in its unambiguous
+// three-non-empty-field form.
+TEST_F(CliContextTest, RefShorthandAcceptsExactlyThreeFields) {
+    const auto manifest = root / "shorthand.json";
+    std::string out;
+    ASSERT_TRUE(subprocess::run_capture(
+        context_args("save",
+                     {"--task", "t", "--ref", "src/alpha.cpp:alpha:verify",
+                      "-o", manifest.string(), "-r", root.string()}),
+        "", out))
+        << out;
+    auto body = nlohmann::json::parse(read_file_to_string(manifest));
+    ASSERT_TRUE(body.contains("r"));
+    ASSERT_EQ(body["r"].size(), 1u);
+    EXPECT_EQ(body["r"][0].value("f", ""), "src/alpha.cpp");
+    EXPECT_EQ(body["r"][0].value("s", ""), "alpha");
+    EXPECT_EQ(body["r"][0].value("role", ""), "verify");
+}
+
+// Malformed --ref-json is refused before any server is contacted, and never
+// silently dropped from the saved manifest.
+TEST_F(CliContextTest, SaveRejectsMalformedRefJson) {
+#ifndef _WIN32
+    const auto manifest = root / "malformed.json";
+    std::string merged;
+    const int rc = run_cli_merged(
+        lci_bin,
+        {"context", "save", "--task", "t", "--ref-json", "{not json", "-o",
+         manifest.string(), "-r", root.string()},
+        merged);
+    EXPECT_NE(rc, 0) << merged;
+    EXPECT_NE(merged.find("--ref-json"), std::string::npos) << merged;
+    EXPECT_FALSE(std::filesystem::exists(manifest));
+#else
+    std::string out;
+    EXPECT_FALSE(subprocess::run_capture(
+        context_args("save", {"--task", "t", "--ref-json", "{not json", "-o",
+                              (root / "malformed.json").string(), "-r",
+                              root.string()}),
+        "", out));
+#endif
+}
+
+// Ambiguous shorthand (a qualified `ns::name`, or any colon count other than
+// the exact three-field form) is refused with guidance to --ref-json, and no
+// manifest is written.
+TEST_F(CliContextTest, RefShorthandRejectsAmbiguousValuesWithGuidance) {
+#ifndef _WIN32
+    const auto manifest = root / "ambiguous.json";
+    for (const std::string& bad :
+         {std::string("src/alpha.cpp:demo::alpha:modify"),
+          std::string("src/alpha.cpp:alpha")}) {
+        std::string merged;
+        const int rc = run_cli_merged(
+            lci_bin,
+            {"context", "save", "--task", "t", "--ref", bad, "-o",
+             manifest.string(), "-r", root.string()},
+            merged);
+        EXPECT_NE(rc, 0) << bad << "\n" << merged;
+        EXPECT_NE(merged.find("--ref-json"), std::string::npos)
+            << bad << "\n" << merged;
+        EXPECT_FALSE(std::filesystem::exists(manifest)) << bad;
+    }
+#else
+    GTEST_SKIP() << "merged stderr capture is POSIX-only";
+#endif
+}
+
+// An invalid budget is rejected before any server is contacted.
+TEST_F(CliContextTest, LoadRejectsNonPositiveBudget) {
+#ifndef _WIN32
+    std::string merged;
+    const int rc = run_cli_merged(
+        lci_bin,
+        {"context", "load", "whatever.json", "--max-tokens", "0", "-r",
+         root.string()},
+        merged);
+    EXPECT_NE(rc, 0) << merged;
+    EXPECT_NE(merged.find("--max-tokens"), std::string::npos) << merged;
+    // The budget is rejected before any server is contacted.
+    EXPECT_EQ(merged.find("Index server not running"), std::string::npos)
+        << merged;
+#else
+    std::string out;
+    EXPECT_FALSE(subprocess::run_capture(
+        context_args("load", {"whatever.json", "--max-tokens", "0", "-r",
+                              root.string()}),
+        "", out));
+#endif
+}
+
+// Root confinement: an output path outside the project root is refused and no
+// file is created there; a failed save leaves an existing file untouched.
+TEST_F(CliContextTest, SaveRefusesEscapingOutputAndPreservesExistingFile) {
+#ifndef _WIN32
+    const auto outside = std::filesystem::temp_directory_path() /
+                         (root.filename().string() + "-outside.json");
+    std::error_code ec;
+    std::filesystem::remove(outside, ec);
+
+    std::string merged;
+    int rc = run_cli_merged(
+        lci_bin,
+        {"context", "save", "--task", "t", "--ref-json",
+         R"({"f":"src/alpha.cpp"})", "-o", outside.string(), "-r",
+         root.string()},
+        merged);
+    EXPECT_NE(rc, 0) << merged;
+    EXPECT_NE(merged.find("Error:"), std::string::npos) << merged;
+    EXPECT_FALSE(std::filesystem::exists(outside));
+
+    // A failed save (selector-less ref) must not clobber an existing manifest.
+    const auto manifest = root / "keep.json";
+    {
+        std::ofstream f(manifest);
+        f << "SENTINEL";
+    }
+    merged.clear();
+    rc = run_cli_merged(
+        lci_bin,
+        {"context", "save", "--task", "t", "--ref-json", R"({"role":"modify"})",
+         "-o", manifest.string(), "-r", root.string()},
+        merged);
+    EXPECT_NE(rc, 0) << merged;
+    EXPECT_EQ(read_file_to_string(manifest), "SENTINEL");
+#else
+    GTEST_SKIP() << "merged stderr capture is POSIX-only";
+#endif
+}
+
+// A missing manifest is a nonzero failure with a diagnostic on stderr.
+TEST_F(CliContextTest, LoadMissingManifestExitsNonZero) {
+#ifndef _WIN32
+    std::string merged;
+    const int rc = run_cli_merged(
+        lci_bin,
+        {"context", "load", "does-not-exist.json", "-r", root.string()},
+        merged);
+    EXPECT_NE(rc, 0) << merged;
+    EXPECT_NE(merged.find("Error:"), std::string::npos) << merged;
+#else
+    std::string out;
+    EXPECT_FALSE(subprocess::run_capture(
+        context_args("load",
+                     {"does-not-exist.json", "-r", root.string()}),
+        "", out));
+#endif
+}
+
+// A load whose refs do not resolve is still a successful structured response:
+// exit 0 with an `unresolved` array and matching stats.
+TEST_F(CliContextTest, LoadUnresolvedRefsIsSuccessfulStructuredResponse) {
+    const auto manifest = root / "unresolved.json";
+    std::string out;
+    ASSERT_TRUE(subprocess::run_capture(
+        context_args("save",
+                     {"--task", "t", "--ref-json",
+                      R"({"f":"src/nope.cpp","s":"missing_symbol"})", "-o",
+                      manifest.string(), "-r", root.string()}),
+        "", out))
+        << out;
+
+    out.clear();
+    ASSERT_TRUE(subprocess::run_capture(
+        context_args("load",
+                     {manifest.string(), "-r", root.string()}),
+        "", out))
+        << out;
+    auto loaded = nlohmann::json::parse(out);
+    ASSERT_TRUE(loaded.contains("unresolved")) << loaded.dump();
+    ASSERT_GT(loaded["unresolved"].size(), 0u);
+    EXPECT_EQ(loaded["stats"].value("unresolved_count", -1),
+              static_cast<int>(loaded["unresolved"].size()));
+}
+
+// A daemon that answers for a DIFFERENT root is unavailable for the requested
+// one: the command must fail loudly rather than silently use the wrong index.
+// The wrong-root guard is exercised deterministically by pointing this root's
+// socket at another live server's socket (a symlink), which is exactly what a
+// hash collision presents as.
+TEST(CliContextDaemonTest, WrongRootDaemonExitsNonZeroWithDiagnostic) {
+#ifndef _WIN32
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" / "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root_a = lci::test::unique_temp_dir("lci_ctx_daemon_a_");
+    const auto root_b = lci::test::unique_temp_dir("lci_ctx_daemon_b_");
+    fs::create_directories(root_a);
+    fs::create_directories(root_b);
+    ensure_lci_server_indexed(lci_bin, root_a);
+
+    const std::string sock_a =
+        lci::get_socket_path_for_root(fs::absolute(root_a).string());
+    const std::string sock_b =
+        lci::get_socket_path_for_root(fs::absolute(root_b).string());
+    std::error_code ec;
+    ASSERT_NE(sock_a, sock_b) << "root hashes collided; test setup invalid";
+    fs::remove(sock_b, ec);
+    fs::create_symlink(sock_a, sock_b, ec);
+    ASSERT_FALSE(ec) << ec.message();
+
+    std::string merged;
+    const int rc = run_cli_merged(
+        lci_bin,
+        {"context", "load", "missing.json", "-r", root_b.string()}, merged);
+    EXPECT_NE(rc, 0) << merged;
+    EXPECT_NE(merged.find("Error:"), std::string::npos) << merged;
+
+    fs::remove(sock_b, ec);
+    shutdown_lci_server(lci_bin, root_a);
+    fs::remove_all(root_a, ec);
+    fs::remove_all(root_b, ec);
+#else
+    GTEST_SKIP() << "merged stderr capture is POSIX-only";
+#endif
 }
 
 }  // namespace
