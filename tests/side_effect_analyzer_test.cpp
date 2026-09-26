@@ -282,6 +282,80 @@ TEST(SideEffectAnalyzerTest, ThrowRecordedCorrectly) {
     EXPECT_TRUE(info.purity_classification.can_throw);
 }
 
+// MCP-15: impurity an impure result carries must name WHY. A function whose
+// only impurity comes from the callee-name heuristic (calls an io callee via
+// record_function_call — the AST pass resolves nothing) used to mark kIO with
+// an empty impurity_reasons; include_reasons on the MCP surface then rendered
+// no `reasons` at all for it.
+TEST(CalleeImpurityReasonTest, CalleeClassificationNamesCalleeAndCategory) {
+    SideEffectAnalyzer sa("go");
+    sa.begin_function("f", "f.go", 1, 5);
+    sa.record_function_call("println", "", false, 3, 5);
+    auto info = sa.end_function();
+
+    ASSERT_NE(info.categories & side_effect::kIO, 0u);
+    ASSERT_FALSE(info.impurity_reasons.empty())
+        << "impure-by-callee result carries no reason";
+    bool names_callee = false;
+    bool names_category = false;
+    for (const auto& reason : info.impurity_reasons) {
+        if (reason.find("println") != std::string::npos) names_callee = true;
+        if (reason.find("io") != std::string::npos) names_category = true;
+    }
+    EXPECT_TRUE(names_callee) << "reason must name the callee 'println'";
+    EXPECT_TRUE(names_category) << "reason must name the category 'io'";
+}
+
+// MCP-15: a throw marks kThrow in record_throw but emitted no reason. The
+// reason must carry the literal token `throw` and the throwing site's line.
+TEST(CalleeImpurityReasonTest, ThrowEmitsReasonWithSiteLine) {
+    SideEffectAnalyzer sa("javascript");
+    sa.begin_function("validate", "check.js", 1, 5);
+    sa.record_throw("Error", 3, 5);
+    auto info = sa.end_function();
+
+    ASSERT_NE(info.categories & side_effect::kThrow, 0u);
+    ASSERT_FALSE(info.impurity_reasons.empty())
+        << "throw impurity carries no reason";
+    bool names_throw = false;
+    bool names_line = false;
+    for (const auto& reason : info.impurity_reasons) {
+        if (reason.find("throw") != std::string::npos) names_throw = true;
+        if (reason.find("3") != std::string::npos) names_line = true;
+    }
+    EXPECT_TRUE(names_throw) << "reason must name the `throw` effect";
+    EXPECT_TRUE(names_line) << "reason must carry the site line (3)";
+}
+
+// Invariant: every impure result the analyzer emits must carry at least one
+// reason. Covers all four local impurity producers (callee heuristic, throw,
+// writes, dynamic call) plus a throw-only and a write-only function.
+TEST(CalleeImpurityReasonTest, EveryImpureResultCarriesAtLeastOneReason) {
+    SideEffectAnalyzer sa("go");
+    sa.begin_function("io_fn", "f.go", 1, 5);
+    sa.record_function_call("println", "", false, 2, 5);
+    sa.end_function();
+    sa.begin_function("throw_fn", "f.go", 10, 12);
+    sa.record_throw("Error", 11, 5);
+    sa.end_function();
+    sa.begin_function("write_fn", "f.go", 20, 22);
+    sa.add_parameter("p", 0);
+    sa.record_access("p", {}, AccessType::Write, 21, 5);
+    sa.end_function();
+    sa.begin_function("dynamic_fn", "f.go", 30, 32);
+    sa.record_dynamic_call("iface", 31, 5);
+    sa.end_function();
+
+    int impure = 0;
+    for (const auto& [key, info] : sa.results()) {
+        if (info.is_pure) continue;
+        ++impure;
+        EXPECT_FALSE(info.impurity_reasons.empty())
+            << "impure result " << key << " carries no reason";
+    }
+    EXPECT_EQ(impure, 4);
+}
+
 TEST(SideEffectAnalyzerTest, DynamicCallDetected) {
     SideEffectAnalyzer sa("go");
     sa.begin_function("dispatch", "handler.go", 1, 5);
