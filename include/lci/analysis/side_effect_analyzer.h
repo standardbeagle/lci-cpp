@@ -191,12 +191,20 @@ class SideEffectAnalyzer {
     /// Bulk-index publication protocol (RCU, one swap on commit).
     ///
     /// `begin_staging` freezes the current results as the reader-visible
-    /// snapshot and marks the analyzer so subsequent writes (per-worker
-    /// merges, warmup population) land in a private staging map. Readers
-    /// keep seeing the frozen generation. `commit_staging` publishes the
-    /// staged results with a single atomic swap; `abort_staging` discards
-    /// them and restores the pre-run generation byte-for-byte. A cancelled
-    /// reindex therefore never leaks partial records to handlers.
+    /// snapshot and marks the analyzer so the run's per-worker merges land in
+    /// a private staging map. Readers keep seeing the frozen generation.
+    /// `commit_staging` publishes the staged results with a single atomic
+    /// swap; `abort_staging` discards them and restores the pre-run
+    /// generation byte-for-byte. A cancelled reindex therefore never leaks
+    /// partial records to handlers.
+    ///
+    /// Writer contract: every writer runs inside MasterIndex's bulk_mu_.
+    /// index_directory holds it for its whole run, which covers this
+    /// protocol and the pipeline workers' merge_results (serialised among
+    /// themselves by the processor's own mutex); the warmup passes
+    /// (populate_from_index, propagate_transitive, publish) take it through
+    /// run_exclusive_of_index_writes. So no two writers overlap, and only
+    /// readers are lock-free.
     void begin_staging();
     void commit_staging();
     void abort_staging();

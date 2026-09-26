@@ -223,6 +223,16 @@ class MasterIndex {
         side_effect_sink_ = analyzer;
     }
 
+    /// Runs `fn` holding bulk_mu_, so it can overlap neither an
+    /// index_directory run (its whole clear->commit window) nor an
+    /// incremental index_file/update_file/remove_file. For writers that live
+    /// OUTSIDE MasterIndex but mutate state a bulk run also writes — the MCP
+    /// warmup's side-effect passes and publish() write the same
+    /// SideEffectAnalyzer the run stages into. `fn` must not call back into
+    /// any of those four entry points (bulk_mu_ is not recursive). Blocks
+    /// while a bulk run is in flight; reads stay lock-free.
+    void run_exclusive_of_index_writes(const std::function<void()>& fn);
+
     // -- Sub-index access (non-owning) ----------------------------------------
 
     TrigramIndex& trigram_index();

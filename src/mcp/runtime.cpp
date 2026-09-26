@@ -44,19 +44,27 @@ void McpRuntime::warmup(MasterIndex& index) {
     // fills in functions the AST walk didn't record, so summary mode can
     // report the pure / impure split and every query mode has records to
     // serve.
-    side_effects.populate_from_index(index);
+    //
+    // Phases 1b, 2 and the publish run excluded from index writes: the server
+    // runs warmup on its own thread once the index is ready, and a /reindex
+    // stages its merges into this same analyzer. Unexcluded, the two write
+    // one map concurrently and publish() can swap the run's half-merged
+    // staging map in as the reader generation (IDX-2 review B2).
+    index.run_exclusive_of_index_writes([&] {
+        side_effects.populate_from_index(index);
 
-    // Phase 2: propagate impurity transitively upstream through the call
-    // graph so a function that (indirectly) reaches an impure callee is
-    // itself marked impure (populates transitive_categories; recomputes
-    // is_pure).
-    side_effects.propagate_transitive(index);
+        // Phase 2: propagate impurity transitively upstream through the call
+        // graph so a function that (indirectly) reaches an impure callee is
+        // itself marked impure (populates transitive_categories; recomputes
+        // is_pure).
+        side_effects.propagate_transitive(index);
 
-    // Publish the augmented generation (AST facts + heuristic + transitive)
-    // with one atomic swap. This is the reader-visible commit for the MCP
-    // surface; handlers pin this snapshot and never touch the staging map
-    // the bulk pipeline wrote into.
-    side_effects.publish();
+        // Publish the augmented generation (AST facts + heuristic + transitive)
+        // with one atomic swap. This is the reader-visible commit for the MCP
+        // surface; handlers pin this snapshot and never touch the staging map
+        // the bulk pipeline wrote into.
+        side_effects.publish();
+    });
 
     // Seed GraphPropagator with the impure functions so transitive
     // purity propagates: any caller of an impure function is itself

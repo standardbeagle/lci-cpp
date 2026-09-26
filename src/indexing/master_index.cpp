@@ -153,6 +153,12 @@ void MasterIndex::set_bulk_indexing(bool enabled) {
     postings_index_.set_bulk_indexing(enabled);
 }
 
+void MasterIndex::run_exclusive_of_index_writes(
+    const std::function<void()>& fn) {
+    std::lock_guard<std::mutex> bulk_lock(bulk_mu_);
+    fn();
+}
+
 // -- Directory indexing -------------------------------------------------------
 
 bool MasterIndex::index_directory(const std::string& root) {
