@@ -30,6 +30,8 @@ CUSTOM_TOOL_NAMES = (
     "open_files_context",
     "resume_working_context",
     "refresh_working_context",
+    "discover_context",
+    "trace_context",
 )
 
 
@@ -265,6 +267,9 @@ class SlopSession:
 
     def context_calls(self):
         return [c for c in self.calls() if c.get("tool") == "context"]
+
+    def search_calls(self):
+        return [c for c in self.calls() if c.get("tool") == "search"]
 
     # -- lifecycle -----------------------------------------------------------
 

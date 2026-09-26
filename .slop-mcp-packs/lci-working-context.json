@@ -163,6 +163,65 @@
         ]
       },
       "body": "\nmanifest = args[\"manifest\"]\nmt = get(args, \"max_tokens\", 8000)\n\nif type(manifest) != \"string\" or len(manifest) == 0:\n  error(\"working context: manifest must be a non-empty string\")\nif type(mt) != \"int\" or mt < 1:\n  error(\"working context: max_tokens must be a positive integer\")\ntry:\n  parsed = json_parse(manifest)\ncatch:\n  error(\"working context: manifest is not valid JSON\")\nif type(parsed) != \"map\" or not has_key(parsed, \"r\") or type(parsed[\"r\"]) != \"list\":\n  error(\"working context: manifest must contain an r reference list\")\n\nrefs = []\nfor ref in parsed[\"r\"]:\n  if type(ref) != \"map\":\n    error(\"working context: manifest reference must be an object\")\n  if not has_key(ref, \"f\") or type(ref[\"f\"]) != \"string\" or len(ref[\"f\"]) == 0:\n    error(\"working context: manifest reference requires a non-empty string f\")\n  clean = {f: ref[\"f\"]}\n  if has_key(ref, \"s\") and type(ref[\"s\"]) == \"string\" and len(ref[\"s\"]) > 0:\n    clean = merge(clean, {s: ref[\"s\"]})\n  if has_key(ref, \"role\") and type(ref[\"role\"]) == \"string\" and len(ref[\"role\"]) > 0:\n    clean = merge(clean, {role: ref[\"role\"]})\n  if has_key(ref, \"x\") and type(ref[\"x\"]) == \"list\" and len(ref[\"x\"]) > 0:\n    clean = merge(clean, {x: ref[\"x\"]})\n  refs = refs + [clean]\nif len(refs) == 0:\n  error(\"working context: empty working set\")\nif len(refs) > 128:\n  error(\"working context: too many references (\" + str(len(refs)) + \"); maximum is 128\")\n\nbuilt = {t: get(parsed, \"t\", \"\"), v: \"1.0\", r: refs}\nres = lci.context(operation:\"load\", from_string: json_stringify(built), max_tokens: mt)\nif type(res) == \"map\":\n  if has_key(res, \"available\") and res[\"available\"] == false:\n    error(\"working context: index unavailable: \" + get(res, \"reason\", \"\") + \" (\" + get(res, \"hint\", \"\") + \")\")\n  if has_key(res, \"success\") and res[\"success\"] == false:\n    error(\"working context: context load failed: \" + get(res, \"error\", \"\"))\nres"
+    },
+    {
+      "name": "discover_context",
+      "description": "Discover code context from 1 to 8 search terms in one bounded call. Runs one existing lci search per term internally, deduplicates candidates by file plus symbol, keeps each candidate's maximum search score, breaks ties by file, symbol then line, and hydrates at most 16 selected candidates through one shared lci context load. Returns the single hydrated context result plus compact discover metadata (selected references, omitted count, per-term search failures). Optional files narrow candidates to explicit paths, suffixes or substrings. Empty results and individual search or load failures are surfaced, never masked.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "terms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "1 to 8 distinct non-empty search terms; one internal search call per term."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional explicit file filters; a candidate is kept when its file equals a filter, ends with the filter, or ends with '/<filter>'."
+          },
+          "max_tokens": {
+            "type": "integer",
+            "default": 8000,
+            "description": "Shared budget for the hydrated context plus the appended discover metadata (default 8000)."
+          }
+        },
+        "required": [
+          "terms"
+        ]
+      },
+      "body": "terms = args[\"terms\"]\nfilters = get(args, \"files\", [])\nmt = get(args, \"max_tokens\", 8000)\n\nif type(terms) != \"list\" or len(terms) < 1 or len(terms) > 8:\n  error(\"working context: terms must be a list of 1 to 8 search terms\")\nif type(mt) != \"int\" or mt < 1:\n  error(\"working context: max_tokens must be a positive integer\")\nif type(filters) != \"list\":\n  error(\"working context: files filter must be a list of strings\")\nfor flt in filters:\n  if type(flt) != \"string\" or len(flt) == 0:\n    error(\"working context: files filter entries must be non-empty strings\")\nseen_terms = []\nfor t in terms:\n  if type(t) != \"string\" or len(t) == 0:\n    error(\"working context: terms must each be a non-empty string\")\n  if t in seen_terms:\n    error(\"working context: duplicate terms entry \" + t)\n  seen_terms = seen_terms + [t]\n\ncand = {}\nsearch_errors = []\nfor term in terms:\n  try:\n    res = lci.search(pattern: term, max: 50, output: \"line\")\n    if type(res) == \"map\" and has_key(res, \"available\") and res[\"available\"] == false:\n      search_errors = search_errors + [{term: term, error: \"index unavailable: \" + get(res, \"reason\", \"\") + \" (\" + get(res, \"hint\", \"\") + \")\"}]\n    elif type(res) == \"map\" and has_key(res, \"success\") and res[\"success\"] == false:\n      search_errors = search_errors + [{term: term, error: get(res, \"error\", \"search failed\")}]\n    else:\n      for g in get(res, \"results\", []):\n        file = get(g, \"file\", \"\")\n        if len(filters) > 0:\n          kept = false\n          for flt in filters:\n            if file == flt or endswith(file, \"/\" + flt) or endswith(file, flt):\n              kept = true\n          if not kept:\n            continue\n        for h in get(g, \"hits\", []):\n          sym = get(h, \"sym\", \"\")\n          if sym == \"\":\n            continue\n          key = file + \"\\u001f\" + sym\n          sc = get(h, \"score\", 0)\n          ln = get(h, \"line\", 0)\n          if has_key(cand, key):\n            prev = cand[key]\n            if sc > prev[\"score\"] or (sc == prev[\"score\"] and ln < prev[\"line\"]):\n              cand = merge(cand, dict([[key, {f: file, s: sym, line: ln, score: sc}]]))\n          else:\n            cand = merge(cand, dict([[key, {f: file, s: sym, line: ln, score: sc}]]))\n  catch:\n    search_errors = search_errors + [{term: term, error: \"search call failed\"}]\n\nby_sort = {}\nsort_keys = []\nfor key in keys(cand):\n  c = cand[key]\n  inv = 1000000000000 - int(c[\"score\"] * 1000000)\n  sk = pad_left(str(inv), 16, \"0\") + \"\\u001f\" + c[\"f\"] + \"\\u001f\" + c[\"s\"] + \"\\u001f\" + pad_left(str(c[\"line\"]), 9, \"0\")\n  by_sort = merge(by_sort, dict([[sk, c]]))\n  sort_keys = sort_keys + [sk]\n\ntotal = len(by_sort)\nselected = []\nfor sk in sorted(sort_keys):\n  if len(selected) < 16:\n    selected = selected + [by_sort[sk]]\nomitted = total - len(selected)\nrank_selected = []\nfor c in selected:\n  rank_selected = rank_selected + [{f: c[\"f\"], s: c[\"s\"], score: c[\"score\"]}]\nmeta = {terms: terms, candidates: total, selected: rank_selected, omitted: omitted, search_errors: search_errors, empty: (total == 0)}\n\nif total == 0:\n  result = {discover: meta, empty: true, hint: \"no candidates matched the terms; widen terms or drop file filters\"}\nelse:\n  meta_tokens = ceil(len(json_stringify(meta)) / 4)\n  load_budget = mt - meta_tokens\n  if load_budget < 1:\n    error(\"working context: max_tokens too small for ranking metadata; need more than \" + str(meta_tokens))\n  refs = []\n  for c in selected:\n    refs = refs + [{f: c[\"f\"], s: c[\"s\"]}]\n  manifest = {t: \"discover \" + join(\" \", terms), v: \"1.0\", r: refs}\n  res = lci.context(operation: \"load\", from_string: json_stringify(manifest), max_tokens: load_budget)\n  if type(res) == \"map\" and has_key(res, \"available\") and res[\"available\"] == false:\n    error(\"working context: index unavailable: \" + get(res, \"reason\", \"\") + \" (\" + get(res, \"hint\", \"\") + \")\")\n  if type(res) == \"map\" and has_key(res, \"success\") and res[\"success\"] == false:\n    error(\"working context: context load failed: \" + get(res, \"error\", \"\"))\n  budget = {requested: mt, ranking: meta_tokens, loader: load_budget}\n  result = merge(res, {discover: merge(meta, {budget: budget})})\n\nresult\n"
+    },
+    {
+      "name": "trace_context",
+      "description": "Trace one explicit file plus symbol through the existing lci context loader. Requests the symbol's implementation, confirmed callers, reference locations, side effects and related-test evidence as expansion directives inside one shared-budget load, and returns that single hydrated result plus compact trace metadata. An ambiguous or missing selector is reported unresolved from the loader; the tool never selects the first match.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Exact indexed file path that scopes the symbol identity."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Exact symbol name declared in that file."
+          },
+          "max_tokens": {
+            "type": "integer",
+            "default": 8000,
+            "description": "Shared budget for the hydrated context plus the appended trace metadata (default 8000)."
+          }
+        },
+        "required": [
+          "file",
+          "symbol"
+        ]
+      },
+      "body": "file = args[\"file\"]\nsymbol = args[\"symbol\"]\nmt = get(args, \"max_tokens\", 8000)\n\nif type(file) != \"string\" or len(file) == 0:\n  error(\"working context: trace requires a non-empty file path\")\nif type(symbol) != \"string\" or len(symbol) == 0:\n  error(\"working context: trace requires a non-empty symbol name\")\nif type(mt) != \"int\" or mt < 1:\n  error(\"working context: max_tokens must be a positive integer\")\n\nexpansions = [\"callers\", \"references\", \"tests\", \"side_effects\"]\nmeta = {selector: {file: file, symbol: symbol}, expansions: expansions}\nmeta_tokens = ceil(len(json_stringify(meta)) / 4)\nload_budget = mt - meta_tokens\nif load_budget < 1:\n  error(\"working context: max_tokens too small for trace metadata; need more than \" + str(meta_tokens))\n\nmanifest = {t: \"trace \" + file + \" \" + symbol, v: \"1.0\", r: [{f: file, s: symbol, x: expansions}]}\nres = lci.context(operation: \"load\", from_string: json_stringify(manifest), max_tokens: load_budget)\nif type(res) == \"map\" and has_key(res, \"available\") and res[\"available\"] == false:\n  error(\"working context: index unavailable: \" + get(res, \"reason\", \"\") + \" (\" + get(res, \"hint\", \"\") + \")\")\nif type(res) == \"map\" and has_key(res, \"success\") and res[\"success\"] == false:\n  error(\"working context: context load failed: \" + get(res, \"error\", \"\"))\n\nresolved = true\nif type(res) == \"map\" and has_key(res, \"unresolved\"):\n  for u in res[\"unresolved\"]:\n    if get(u, \"file\", \"\") == file and get(u, \"symbol\", \"\") == symbol:\n      resolved = false\ntrace = merge(meta, {resolved: resolved, budget: {requested: mt, ranking: meta_tokens, loader: load_budget}})\nmerge(res, {trace: trace})\n"
     }
   ]
 }

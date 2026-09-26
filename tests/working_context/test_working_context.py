@@ -30,7 +30,7 @@ class PackShapeTest(unittest.TestCase):
         self.assertEqual(pack.get("schema_version"), 1)
         self.assertIn("custom_tools", pack)
 
-    def test_pack_ships_exactly_the_four_operations(self):
+    def test_pack_ships_exactly_the_six_operations(self):
         pack = load_pack()
         names = [t.get("name") for t in pack["custom_tools"]]
         self.assertEqual(sorted(names), sorted(CUSTOM_TOOL_NAMES))
@@ -388,6 +388,391 @@ class WorkingContextToolsTest(unittest.TestCase):
         )
         self.assertTrue(outcome["is_error"])
         self.assertIn("manifest", outcome["text"])
+
+
+def group(file, hits):
+    return {"file": file, "hits": hits}
+
+
+def hit(line, sym, score, type="function", id=None):
+    row = {"line": line, "sym": sym, "type": type, "score": score}
+    if id is not None:
+        row["id"] = id
+    return row
+
+
+class DiscoverContextTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.session = SlopSession()
+        result = cls.session.import_pack(scope="project", overwrite=False)
+        assert not result["is_error"], result["text"]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.session.close()
+
+    def setUp(self):
+        self.session.set_control({})
+        self.session.clear_calls()
+
+    def _discover(self, terms, **extra):
+        params = {"terms": terms}
+        params.update(extra)
+        outcome = self.session.execute_custom("discover_context", params)
+        assert_no_parse_error(self, outcome, "discover_context")
+        return outcome
+
+    def test_overlapping_terms_dedupe_by_file_symbol_and_keep_max_score(self):
+        self.session.set_control(
+            {
+                "index": {"src/a.cpp": ["Alpha"], "src/b.cpp": ["Beta"]},
+                "searches": {
+                    "alpha": {
+                        "total_matches": 2,
+                        "results": [
+                            group("src/a.cpp", [hit(10, "Alpha", 9, id="A1")]),
+                            group("src/b.cpp", [hit(20, "Beta", 5, id="B1")]),
+                        ],
+                    },
+                    "beta": {
+                        "total_matches": 1,
+                        "results": [
+                            group("src/b.cpp", [hit(20, "Beta", 8, id="B1")]),
+                        ],
+                    },
+                },
+            }
+        )
+        outcome = self._discover(["alpha", "beta"])
+        self.assertFalse(outcome["is_error"], outcome["text"])
+        parsed = outcome["parsed"]
+        self.assertEqual(
+            parsed["discover"]["selected"],
+            [
+                {"f": "src/a.cpp", "s": "Alpha", "score": 9},
+                {"f": "src/b.cpp", "s": "Beta", "score": 8},
+            ],
+        )
+        self.assertEqual(parsed["discover"]["candidates"], 2)
+        # exactly one search per term, exactly one shared load
+        self.assertEqual(len(self.session.search_calls()), 2)
+        loads = self.session.context_calls()
+        self.assertEqual(len(loads), 1, loads)
+        sent = json.loads(loads[0]["args"]["from_string"])
+        self.assertEqual(
+            sent["r"],
+            [{"f": "src/a.cpp", "s": "Alpha"}, {"f": "src/b.cpp", "s": "Beta"}],
+        )
+        self.assertNotIn("source", loads[0]["args"]["from_string"].lower())
+
+    def test_deterministic_ties_break_by_file_symbol_line(self):
+        self.session.set_control(
+            {
+                "index": {
+                    "src/a.cpp": ["Zed"],
+                    "src/b.cpp": ["Beta"],
+                    "src/c.cpp": ["Mid"],
+                },
+                "searches": {
+                    "t": {
+                        "total_matches": 3,
+                        "results": [
+                            group("src/b.cpp", [hit(20, "Beta", 5, id="B1")]),
+                            group("src/a.cpp", [hit(30, "Zed", 5, id="A1")]),
+                            group("src/c.cpp", [hit(10, "Mid", 5, id="C1")]),
+                        ],
+                    }
+                },
+            }
+        )
+        first = self._discover(["t"])
+        order = [(s["f"], s["s"], s["score"]) for s in first["parsed"]["discover"]["selected"]]
+        self.assertEqual(
+            order,
+            [("src/a.cpp", "Zed", 5), ("src/b.cpp", "Beta", 5), ("src/c.cpp", "Mid", 5)],
+        )
+        self.session.clear_calls()
+        second = self._discover(["t"])
+        order2 = [(s["f"], s["s"], s["score"]) for s in second["parsed"]["discover"]["selected"]]
+        self.assertEqual(order, order2)
+
+    def test_duplicate_symbol_names_across_files_stay_distinct(self):
+        self.session.set_control(
+            {
+                "index": {"src/a.cpp": ["Dup"], "src/b.cpp": ["Dup"]},
+                "searches": {
+                    "dup": {
+                        "total_matches": 2,
+                        "results": [
+                            group("src/a.cpp", [hit(1, "Dup", 7, id="A1")]),
+                            group("src/b.cpp", [hit(2, "Dup", 7, id="B1")]),
+                        ],
+                    }
+                },
+            }
+        )
+        outcome = self._discover(["dup"])
+        self.assertEqual(
+            outcome["parsed"]["discover"]["selected"],
+            [
+                {"f": "src/a.cpp", "s": "Dup", "score": 7},
+                {"f": "src/b.cpp", "s": "Dup", "score": 7},
+            ],
+        )
+
+    def test_file_filters_restrict_candidates(self):
+        self.session.set_control(
+            {
+                "index": {"src/a.cpp": ["Alpha"], "src/b.cpp": ["Beta"]},
+                "searches": {
+                    "t": {
+                        "total_matches": 2,
+                        "results": [
+                            group("src/a.cpp", [hit(1, "Alpha", 3, id="A1")]),
+                            group("src/b.cpp", [hit(2, "Beta", 9, id="B1")]),
+                        ],
+                    }
+                },
+            }
+        )
+        outcome = self._discover(["t"], files=["src/b.cpp"])
+        self.assertEqual(
+            outcome["parsed"]["discover"]["selected"],
+            [{"f": "src/b.cpp", "s": "Beta", "score": 9}],
+        )
+
+    def test_no_matches_is_explicit_and_skips_load(self):
+        self.session.set_control({"searches": {"nothing": {"results": [], "total_matches": 0}}})
+        outcome = self._discover(["nothing"])
+        self.assertFalse(outcome["is_error"], outcome["text"])
+        parsed = outcome["parsed"]
+        self.assertTrue(parsed["discover"]["empty"])
+        self.assertEqual(parsed["discover"]["selected"], [])
+        self.assertEqual(self.session.context_calls(), [])
+
+    def test_one_failed_search_is_reported_and_others_hydrate(self):
+        self.session.set_control(
+            {
+                "index": {"src/a.cpp": ["Alpha"]},
+                "searches": {
+                    "good": {
+                        "total_matches": 1,
+                        "results": [group("src/a.cpp", [hit(1, "Alpha", 4, id="A1")])],
+                    },
+                    "bad": {"error": "search backend exploded"},
+                },
+            }
+        )
+        outcome = self._discover(["good", "bad"])
+        self.assertFalse(outcome["is_error"], outcome["text"])
+        parsed = outcome["parsed"]
+        errors = parsed["discover"]["search_errors"]
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]["term"], "bad")
+        self.assertIn("search backend exploded", errors[0]["error"])
+        self.assertEqual(
+            parsed["discover"]["selected"], [{"f": "src/a.cpp", "s": "Alpha", "score": 4}]
+        )
+        self.assertEqual(len(self.session.context_calls()), 1)
+
+    def test_search_failure_for_every_term_is_explicit(self):
+        self.session.set_control({"search_is_error": True, "search_error": "index down"})
+        outcome = self._discover(["a", "b"])
+        self.assertFalse(outcome["is_error"], outcome["text"])
+        errors = outcome["parsed"]["discover"]["search_errors"]
+        self.assertEqual(len(errors), 2)
+        self.assertEqual(self.session.context_calls(), [])
+
+    def test_candidate_cap_hydrates_at_most_sixteen(self):
+        hits = [hit(i + 1, "S%02d" % i, 100 - i, id="S%02d" % i) for i in range(20)]
+        self.session.set_control(
+            {
+                "index": {"src/big.cpp": ["S%02d" % i for i in range(20)]},
+                "searches": {
+                    "big": {"total_matches": 20, "results": [group("src/big.cpp", hits)]}
+                },
+            }
+        )
+        outcome = self._discover(["big"])
+        parsed = outcome["parsed"]
+        self.assertEqual(len(parsed["discover"]["selected"]), 16)
+        self.assertEqual(parsed["discover"]["omitted"], 4)
+        loads = self.session.context_calls()
+        self.assertEqual(len(loads), 1)
+        sent = json.loads(loads[0]["args"]["from_string"])
+        self.assertEqual(len(sent["r"]), 16)
+
+    def test_shared_budget_covers_source_and_ranking_metadata(self):
+        self.session.set_control(
+            {
+                "index": {"src/a.cpp": ["Alpha"]},
+                "searches": {
+                    "alpha": {
+                        "total_matches": 1,
+                        "results": [group("src/a.cpp", [hit(1, "Alpha", 4, id="A1")])],
+                    }
+                },
+            }
+        )
+        outcome = self._discover(["alpha"], max_tokens=200)
+        self.assertFalse(outcome["is_error"], outcome["text"])
+        budget = outcome["parsed"]["discover"]["budget"]
+        self.assertEqual(budget["requested"], 200)
+        self.assertLess(budget["loader"], 200)
+        self.assertGreater(budget["loader"], 0)
+        self.assertEqual(budget["loader"] + budget["ranking"], 200)
+        loads = self.session.context_calls()
+        self.assertEqual(loads[0]["args"]["max_tokens"], budget["loader"])
+
+    def test_eight_terms_run_eight_searches_and_one_load(self):
+        terms = ["t%d" % i for i in range(8)]
+        searches = {
+            t: {
+                "total_matches": 1,
+                "results": [group("src/a.cpp", [hit(1, "Alpha", 4, id="A1")])],
+            }
+            for t in terms
+        }
+        self.session.set_control(
+            {"index": {"src/a.cpp": ["Alpha"]}, "searches": searches}
+        )
+        outcome = self._discover(terms)
+        self.assertFalse(outcome["is_error"], outcome["text"])
+        self.assertEqual(len(self.session.search_calls()), 8)
+        self.assertEqual(len(self.session.context_calls()), 1)
+        self.assertEqual(
+            outcome["parsed"]["discover"]["selected"],
+            [{"f": "src/a.cpp", "s": "Alpha", "score": 4}],
+        )
+
+    def test_impossible_budget_is_rejected(self):
+        self.session.set_control(
+            {
+                "searches": {
+                    "alpha": {
+                        "total_matches": 1,
+                        "results": [group("src/a.cpp", [hit(1, "Alpha", 4, id="A1")])],
+                    }
+                }
+            }
+        )
+        outcome = self._discover(["alpha"], max_tokens=1)
+        self.assertTrue(outcome["is_error"], outcome["text"])
+        self.assertIn("max_tokens", outcome["text"])
+        self.assertEqual(self.session.context_calls(), [])
+
+    def test_terms_validated_between_one_and_eight(self):
+        self.assertIn("terms", self._discover([])["text"])
+        self.assertIn("terms", self._discover(["t%d" % i for i in range(9)])["text"])
+        self.assertIn("terms", self._discover([""])["text"])
+        self.assertIn("terms", self._discover(["a", "a"])["text"])
+
+    def test_load_error_envelope_propagates(self):
+        self.session.set_control(
+            {
+                "load_is_error": True,
+                "load_error": "index not available",
+                "searches": {
+                    "alpha": {
+                        "total_matches": 1,
+                        "results": [group("src/a.cpp", [hit(1, "Alpha", 4, id="A1")])],
+                    }
+                },
+            }
+        )
+        outcome = self._discover(["alpha"])
+        self.assertTrue(outcome["is_error"], outcome["text"])
+        self.assertIn("index not available", outcome["text"])
+
+
+class TraceContextTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.session = SlopSession()
+        result = cls.session.import_pack(scope="project", overwrite=False)
+        assert not result["is_error"], result["text"]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.session.close()
+
+    def setUp(self):
+        self.session.set_control({})
+        self.session.clear_calls()
+
+    def _trace(self, file, symbol, **extra):
+        params = {"file": file, "symbol": symbol}
+        params.update(extra)
+        outcome = self.session.execute_custom("trace_context", params)
+        assert_no_parse_error(self, outcome, "trace_context")
+        return outcome
+
+    def test_trace_requests_all_evidence_through_the_shared_loader(self):
+        self.session.set_control({"index": {"src/a.cpp": ["Alpha"]}})
+        outcome = self._trace("src/a.cpp", "Alpha")
+        self.assertFalse(outcome["is_error"], outcome["text"])
+        loads = self.session.context_calls()
+        self.assertEqual(len(loads), 1, loads)
+        sent = json.loads(loads[0]["args"]["from_string"])
+        self.assertEqual(
+            sent["r"],
+            [
+                {
+                    "f": "src/a.cpp",
+                    "s": "Alpha",
+                    "x": ["callers", "references", "tests", "side_effects"],
+                }
+            ],
+        )
+        parsed = outcome["parsed"]
+        self.assertTrue(parsed["trace"]["resolved"])
+        self.assertEqual(parsed["refs"][0]["symbol"], "Alpha")
+
+    def test_trace_ambiguity_is_unresolved_not_first_match(self):
+        self.session.set_control(
+            {"ambiguous": [{"file": "src/a.cpp", "symbol": "Same"}]}
+        )
+        outcome = self._trace("src/a.cpp", "Same")
+        self.assertFalse(outcome["is_error"], outcome["text"])
+        parsed = outcome["parsed"]
+        self.assertFalse(parsed["trace"]["resolved"])
+        self.assertEqual(parsed["unresolved"][0]["reason"], "ambiguous_symbol")
+        loads = self.session.context_calls()
+        sent = json.loads(loads[0]["args"]["from_string"])
+        self.assertEqual(len(sent["r"]), 1)
+
+    def test_trace_missing_symbol_is_unresolved(self):
+        self.session.set_control({"index": {}})
+        outcome = self._trace("src/a.cpp", "Gone")
+        self.assertFalse(outcome["is_error"], outcome["text"])
+        parsed = outcome["parsed"]
+        self.assertFalse(parsed["trace"]["resolved"])
+        self.assertEqual(parsed["unresolved"][0]["reason"], "not_found")
+
+    def test_trace_shared_budget_covers_source_and_metadata(self):
+        self.session.set_control({"index": {"src/a.cpp": ["Alpha"]}})
+        outcome = self._trace("src/a.cpp", "Alpha", max_tokens=150)
+        budget = outcome["parsed"]["trace"]["budget"]
+        self.assertEqual(budget["requested"], 150)
+        self.assertLess(budget["loader"], 150)
+        self.assertGreater(budget["loader"], 0)
+        self.assertEqual(budget["loader"] + budget["ranking"], 150)
+        loads = self.session.context_calls()
+        self.assertEqual(loads[0]["args"]["max_tokens"], budget["loader"])
+
+    def test_trace_requires_file_and_symbol(self):
+        self.assertTrue(self._trace("", "Alpha")["is_error"])
+        self.assertTrue(self._trace("src/a.cpp", "")["is_error"])
+        self.assertEqual(self.session.context_calls(), [])
+
+    def test_trace_load_error_envelope_propagates(self):
+        self.session.set_control(
+            {"load_is_error": True, "load_error": "index not available"}
+        )
+        outcome = self._trace("src/a.cpp", "Alpha")
+        self.assertTrue(outcome["is_error"], outcome["text"])
+        self.assertIn("index not available", outcome["text"])
 
 
 if __name__ == "__main__":
