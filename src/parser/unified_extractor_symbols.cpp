@@ -1021,6 +1021,129 @@ void UnifiedExtractor::extract_variable(TSNode node) {
     symbols_.push_back(std::move(sym));
 }
 
+// Python `name = value`. A module-level (`X = 1`) or class-body (`Y = 2`)
+// assignment declares data; inside a function body the same syntax is a local
+// and must not be indexed as a module symbol. Only a bare identifier target is
+// a declaration here — `self.x = ...`, `a[i] = ...` and tuple unpacking are
+// not (their left side is an attribute / subscript / pattern node).
+void UnifiedExtractor::extract_python_assignment(TSNode node) {
+    TSNode left = ts_node_child_by_field_name(
+        node, "left", static_cast<uint32_t>(std::strlen("left")));
+    if (ts_node_is_null(left)) {
+        // tree-sitter-python leaves the target unnamed; the first named child
+        // is the left-hand side.
+        if (ts_node_named_child_count(node) == 0) return;
+        left = ts_node_named_child(node, 0);
+    }
+    if (get_node_type(left) != "identifier") return;
+
+    // Function/method body: a local, not a top-level symbol.
+    if (!scope_stack_.empty()) {
+        const ScopeType enclosing = scope_stack_.back().scope_type;
+        if (enclosing == ScopeType::Function || enclosing == ScopeType::Method)
+            return;
+    }
+
+    std::string_view name = node_text(left);
+    if (name.empty()) return;
+
+    TSPoint start = ts_node_start_point(left);
+    TSPoint end = ts_node_end_point(left);
+
+    Symbol sym;
+    sym.name = std::string(name);
+    sym.type = SymbolType::Variable;
+    sym.file_id = file_id_;
+    sym.line = static_cast<int>(start.row) + 1;
+    sym.column = static_cast<int>(start.column) + 1;
+    sym.end_line = static_cast<int>(end.row) + 1;
+    sym.end_column = static_cast<int>(end.column) + 1;
+    symbols_.push_back(std::move(sym));
+}
+
+// Ruby `CONST = value` -> Constant. Constants are the only file/class-level
+// assignment Ruby exposes as a named, resolvable entity; local assignments
+// (`x = 1`) stay locals and are not indexed.
+void UnifiedExtractor::extract_ruby_constant(TSNode node) {
+    TSNode left = ts_node_child_by_field_name(
+        node, "left", static_cast<uint32_t>(std::strlen("left")));
+    if (ts_node_is_null(left)) {
+        if (ts_node_named_child_count(node) == 0) return;
+        left = ts_node_named_child(node, 0);
+    }
+    if (get_node_type(left) != "constant") return;
+
+    std::string_view name = node_text(left);
+    if (name.empty()) return;
+
+    TSPoint start = ts_node_start_point(left);
+    TSPoint end = ts_node_end_point(left);
+
+    Symbol sym;
+    sym.name = std::string(name);
+    sym.type = SymbolType::Constant;
+    sym.file_id = file_id_;
+    sym.line = static_cast<int>(start.row) + 1;
+    sym.column = static_cast<int>(start.column) + 1;
+    sym.end_line = static_cast<int>(end.row) + 1;
+    sym.end_column = static_cast<int>(end.column) + 1;
+    symbols_.push_back(std::move(sym));
+}
+
+// Ruby `attr_accessor :a, :b` (also `attr_reader`/`attr_writer`): one Method
+// symbol per symbol argument. The call has no `def` body, so without this they
+// are invisible to list_symbols/def even though Ruby defines them.
+void UnifiedExtractor::extract_ruby_attr_accessor(TSNode node) {
+    TSNode method = ts_node_child_by_field_name(
+        node, "method", static_cast<uint32_t>(std::strlen("method")));
+    if (ts_node_is_null(method)) {
+        if (ts_node_named_child_count(node) == 0) return;
+        method = ts_node_named_child(node, 0);
+    }
+    const std::string_view method_name = node_text(method);
+    if (method_name != "attr_accessor" && method_name != "attr_reader" &&
+        method_name != "attr_writer") {
+        return;
+    }
+
+    TSNode args = ts_node_child_by_field_name(
+        node, "arguments", static_cast<uint32_t>(std::strlen("arguments")));
+    if (ts_node_is_null(args)) {
+        for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i) {
+            TSNode c = ts_node_named_child(node, i);
+            if (get_node_type(c) == "argument_list") {
+                args = c;
+                break;
+            }
+        }
+    }
+    if (ts_node_is_null(args)) return;
+
+    uint32_t count = ts_node_named_child_count(args);
+    for (uint32_t i = 0; i < count; ++i) {
+        TSNode arg = ts_node_named_child(args, i);
+        std::string_view type = get_node_type(arg);
+        if (type != "simple_symbol" && type != "symbol") continue;
+        // simple_symbol text includes the leading ':'; drop it.
+        std::string_view name = node_text(arg);
+        if (!name.empty() && name.front() == ':') name = name.substr(1);
+        if (name.empty()) continue;
+
+        TSPoint start = ts_node_start_point(arg);
+        TSPoint end = ts_node_end_point(arg);
+
+        Symbol sym;
+        sym.name = std::string(name);
+        sym.type = SymbolType::Method;
+        sym.file_id = file_id_;
+        sym.line = static_cast<int>(start.row) + 1;
+        sym.column = static_cast<int>(start.column) + 1;
+        sym.end_line = static_cast<int>(end.row) + 1;
+        sym.end_column = static_cast<int>(end.column) + 1;
+        symbols_.push_back(std::move(sym));
+    }
+}
+
 void UnifiedExtractor::extract_go_variable(TSNode node,
                                            std::string_view node_type) {
     const bool is_const = node_type == "const_declaration";

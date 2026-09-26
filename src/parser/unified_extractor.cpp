@@ -819,6 +819,38 @@ bool UnifiedExtractor::process_scope_node(TSNode node,
             node, "name", static_cast<uint32_t>(std::strlen("name")));
         if (!ts_node_is_null(n)) name = std::string(node_text(n));
 
+    } else if (node_type == "file_scoped_namespace_declaration") {
+        // C# `namespace A.B;` has no closing brace: every later declaration
+        // in the file belongs to it. The node's own span stops at the `;`,
+        // so extend the scope to the last line of the file — otherwise the
+        // members after it are attributed to the global scope.
+        scope_type = ScopeType::Namespace;
+        TSNode n = ts_node_child_by_field_name(
+            node, "name", static_cast<uint32_t>(std::strlen("name")));
+        if (!ts_node_is_null(n)) name = std::string(node_text(n));
+        if (!name.empty()) {
+            int start_line =
+                static_cast<int>(ts_node_start_point(node).row) + 1;
+            int end_line = static_cast<int>(get_lines().size());
+            if (end_line < start_line) end_line = start_line;
+
+            ScopeInfo scope;
+            scope.type = scope_type;
+            scope.name = name;
+            scope.full_path = build_full_qualified_name(name);
+            scope.start_line = start_line;
+            scope.end_line = end_line;
+            scope.level = current_level_;
+            scopes_.push_back(std::move(scope));
+
+            out.scope_type = scope_type;
+            out.name = name;
+            out.start_line = start_line;
+            out.end_line = end_line;
+            return true;
+        }
+        return false;
+
     } else if (node_type == "block_statement" ||
                node_type == "compound_statement") {
         scope_type = ScopeType::Block;
@@ -999,7 +1031,8 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
     } else if (node_type == "module" || node_type == "mod_item") {
         extract_module(node);
 
-    } else if (node_type == "namespace_declaration") {
+    } else if (node_type == "namespace_declaration" ||
+               node_type == "file_scoped_namespace_declaration") {
         extract_namespace(node);
 
     } else if (node_type == "namespace_definition") {
@@ -1046,6 +1079,20 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
         if (!owned_by_field && !is_arrow_function_declarator(node)) {
             extract_variable(node);
         }
+
+    } else if (node_type == "assignment") {
+        // Python module/class-body assignments are data declarations; Ruby
+        // `CONST = value` is a Constant. Function-local assignments are not
+        // top-level symbols in either language.
+        if (lang_ == LangId::Python) {
+            extract_python_assignment(node);
+        } else if (lang_ == LangId::Ruby) {
+            extract_ruby_constant(node);
+        }
+
+    } else if (node_type == "call" && lang_ == LangId::Ruby) {
+        // `attr_accessor :a, :b` declares reader/writer methods with no body.
+        extract_ruby_attr_accessor(node);
 
     } else if (node_type == "short_var_declaration" ||
                node_type == "var_declaration") {

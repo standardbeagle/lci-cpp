@@ -226,6 +226,13 @@ class UnifiedExtractor {
     void extract_module(TSNode node);
     void extract_namespace(TSNode node);
     void extract_variable(TSNode node);
+    /// Python `name = value` at module or class-body level -> Variable.
+    /// Function-local assignments are deliberately not indexed.
+    void extract_python_assignment(TSNode node);
+    /// Ruby `CONST = value` -> Constant.
+    void extract_ruby_constant(TSNode node);
+    /// Ruby `attr_accessor :a, :b` -> one Method symbol per symbol argument.
+    void extract_ruby_attr_accessor(TSNode node);
     /// C/C++ locals + parameters (the extractor gap that left
     /// get_context's variable_context empty for C++ symbols).
     void extract_cpp_parameter(TSNode node);
