@@ -323,6 +323,9 @@ void UnifiedExtractor::extract_rust_method(TSNode node) {
     sym.visibility = effective_visibility(node);
     sym.test_scaffold =
         lang_ == LangId::Rust && is_rust_test_scaffold(node);
+    // Rust trait method declarations (`fn method(&self);`) carry no body.
+    if (get_node_type(node) == "function_signature_item")
+        sym.declaration_only = true;
     symbols_.push_back(std::move(sym));
 }
 
@@ -586,6 +589,9 @@ void UnifiedExtractor::extract_type_alias(TSNode node) {
 
     TSNode name_node = ts_node_child_by_field_name(
         node, "name", static_cast<uint32_t>(std::strlen("name")));
+    // Kotlin's `type_alias` is fieldless: the name is a type_identifier child.
+    if (ts_node_is_null(name_node) && lang_ == LangId::Kotlin)
+        name_node = first_named_child_typed(node, "type_identifier");
     if (ts_node_is_null(name_node)) return;
     std::string_view name = node_text(name_node);
     if (name.empty()) return;
@@ -600,6 +606,218 @@ void UnifiedExtractor::extract_type_alias(TSNode node) {
     Symbol sym;
     sym.name = std::string(name);
     sym.type = SymbolType::Type;
+    sym.file_id = file_id_;
+    sym.line = static_cast<int>(start.row) + 1;
+    sym.column = static_cast<int>(start.column) + 1;
+    sym.end_line = static_cast<int>(end.row) + 1;
+    sym.end_column = static_cast<int>(end.column) + 1;
+    symbols_.push_back(std::move(sym));
+}
+
+// C-family `typedef ... Name;`. The declared alias is the trailing
+// type_identifier (the definition body's own name, if any, precedes it).
+// `typedef struct X {...} X;` therefore yields BOTH X:struct (the specifier)
+// and X:type (this alias); `typedef int myint;` yields only myint:type; and
+// an anonymous `typedef struct {...} Anon;` yields only Anon:type.
+void UnifiedExtractor::extract_c_typedef(TSNode node) {
+    TSNode name_node{};
+    const uint32_t count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < count; ++i) {
+        TSNode child = ts_node_child(node, i);
+        if (get_node_type(child) == "type_identifier") {
+            name_node = child;  // last one wins: the alias name
+        }
+    }
+    if (ts_node_is_null(name_node)) return;
+    std::string_view name = node_text(name_node);
+    if (name.empty()) return;
+
+    TSPoint start = ts_node_start_point(node);
+    TSPoint end = ts_node_end_point(node);
+
+    Symbol sym;
+    sym.name = std::string(name);
+    sym.type = SymbolType::Type;
+    sym.file_id = file_id_;
+    sym.line = static_cast<int>(start.row) + 1;
+    sym.column = static_cast<int>(start.column) + 1;
+    sym.end_line = static_cast<int>(end.row) + 1;
+    sym.end_column = static_cast<int>(end.column) + 1;
+    symbols_.push_back(std::move(sym));
+}
+
+void UnifiedExtractor::extract_rust_type_item(TSNode node) {
+    TSNode name_node = ts_node_child_by_field_name(
+        node, "name", static_cast<uint32_t>(std::strlen("name")));
+    if (ts_node_is_null(name_node)) return;
+    std::string_view name = node_text(name_node);
+    if (name.empty()) return;
+
+    TSPoint start = ts_node_start_point(node);
+    TSPoint end = ts_node_end_point(node);
+
+    Symbol sym;
+    sym.name = std::string(name);
+    sym.type = SymbolType::Type;
+    sym.file_id = file_id_;
+    sym.line = static_cast<int>(start.row) + 1;
+    sym.column = static_cast<int>(start.column) + 1;
+    sym.end_line = static_cast<int>(end.row) + 1;
+    sym.end_column = static_cast<int>(end.column) + 1;
+    symbols_.push_back(std::move(sym));
+}
+
+void UnifiedExtractor::extract_rust_const(TSNode node, SymbolType kind) {
+    TSNode name_node = ts_node_child_by_field_name(
+        node, "name", static_cast<uint32_t>(std::strlen("name")));
+    if (ts_node_is_null(name_node)) return;
+    std::string_view name = node_text(name_node);
+    if (name.empty()) return;
+
+    TSPoint start = ts_node_start_point(node);
+    TSPoint end = ts_node_end_point(node);
+
+    Symbol sym;
+    sym.name = std::string(name);
+    sym.type = kind;
+    sym.file_id = file_id_;
+    sym.line = static_cast<int>(start.row) + 1;
+    sym.column = static_cast<int>(start.column) + 1;
+    sym.end_line = static_cast<int>(end.row) + 1;
+    sym.end_column = static_cast<int>(end.column) + 1;
+    symbols_.push_back(std::move(sym));
+}
+
+void UnifiedExtractor::extract_rust_union(TSNode node) {
+    TSNode name_node = ts_node_child_by_field_name(
+        node, "name", static_cast<uint32_t>(std::strlen("name")));
+    if (ts_node_is_null(name_node)) return;
+    std::string_view name = node_text(name_node);
+    if (name.empty()) return;
+
+    TSPoint start = ts_node_start_point(node);
+    TSPoint end = ts_node_end_point(node);
+
+    BlockBoundary block;
+    block.start = static_cast<int>(start.row);
+    block.end = static_cast<int>(end.row);
+    block.type = BlockType::Struct;
+    block.name = std::string(name);
+    blocks_.push_back(std::move(block));
+
+    Symbol sym;
+    sym.name = std::string(name);
+    sym.type = SymbolType::Struct;
+    sym.file_id = file_id_;
+    sym.line = static_cast<int>(start.row) + 1;
+    sym.column = static_cast<int>(start.column) + 1;
+    sym.end_line = static_cast<int>(end.row) + 1;
+    sym.end_column = static_cast<int>(end.column) + 1;
+    symbols_.push_back(std::move(sym));
+}
+
+void UnifiedExtractor::extract_rust_macro(TSNode node) {
+    TSNode name_node = ts_node_child_by_field_name(
+        node, "name", static_cast<uint32_t>(std::strlen("name")));
+    if (ts_node_is_null(name_node)) return;
+    std::string_view name = node_text(name_node);
+    if (name.empty()) return;
+
+    TSPoint start = ts_node_start_point(node);
+    TSPoint end = ts_node_end_point(node);
+
+    Symbol sym;
+    sym.name = std::string(name);
+    sym.type = SymbolType::Function;
+    sym.file_id = file_id_;
+    sym.line = static_cast<int>(start.row) + 1;
+    sym.column = static_cast<int>(start.column) + 1;
+    sym.end_line = static_cast<int>(end.row) + 1;
+    sym.end_column = static_cast<int>(end.column) + 1;
+    symbols_.push_back(std::move(sym));
+}
+
+void UnifiedExtractor::extract_kotlin_companion(TSNode node) {
+    TSPoint start = ts_node_start_point(node);
+    TSPoint end = ts_node_end_point(node);
+
+    // tree-sitter-kotlin is fieldless; a named companion carries a
+    // type_identifier, an anonymous one does not.
+    TSNode name_node = first_named_child_typed(node, "type_identifier");
+    std::string name = ts_node_is_null(name_node)
+                           ? std::string("Companion")
+                           : std::string(node_text(name_node));
+    if (name.empty()) return;
+
+    Symbol sym;
+    sym.name = std::move(name);
+    sym.type = SymbolType::Companion;
+    sym.file_id = file_id_;
+    sym.line = static_cast<int>(start.row) + 1;
+    sym.column = static_cast<int>(start.column) + 1;
+    sym.end_line = static_cast<int>(end.row) + 1;
+    sym.end_column = static_cast<int>(end.column) + 1;
+    symbols_.push_back(std::move(sym));
+}
+
+// Kotlin property_declaration: `[modifiers] val|var name[: Type] = init`.
+// Scope decides the kind and whether it is a declaration at all:
+//   - function/statements body -> local, NOT a top-level symbol
+//   - class_body / companion body -> Property
+//   - file level -> Constant (`const val`) or Variable
+void UnifiedExtractor::extract_kotlin_property(TSNode node) {
+    TSNode name_node = ts_node_child_by_field_name(
+        node, "name", static_cast<uint32_t>(std::strlen("name")));
+    if (ts_node_is_null(name_node)) {
+        // Fieldless: the name lives in a variable_declaration child.
+        TSNode var_decl = first_named_child_typed(node, "variable_declaration");
+        if (!ts_node_is_null(var_decl)) {
+            name_node = ts_node_child_by_field_name(
+                var_decl, "name", static_cast<uint32_t>(std::strlen("name")));
+            if (ts_node_is_null(name_node))
+                name_node = first_named_child_typed(var_decl, "simple_identifier");
+        }
+    }
+    if (ts_node_is_null(name_node)) return;
+    std::string_view name = node_text(name_node);
+    if (name.empty()) return;
+
+    // Scope decides the kind and whether the declaration is indexed at all.
+    // Direct parent: class_body -> Property, source_file -> file level,
+    // statements/function_body/control_structure_body -> function-local.
+    TSNode parent = ts_node_parent(node);
+    const std::string_view parent_type =
+        ts_node_is_null(parent) ? std::string_view{} : get_node_type(parent);
+
+    SymbolType kind = SymbolType::Variable;
+    if (parent_type == "statements" || parent_type == "function_body" ||
+        parent_type == "control_structure_body") {
+        return;  // local declaration, not a top-level symbol
+    } else if (parent_type == "class_body") {
+        kind = SymbolType::Property;
+    } else {
+        // File level: `const val` is a Constant, `val`/`var` a Variable.
+        const uint32_t count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < count; ++i) {
+            TSNode child = ts_node_child(node, i);
+            if (get_node_type(child) != "modifiers") continue;
+            const uint32_t mc = ts_node_named_child_count(child);
+            for (uint32_t j = 0; j < mc; ++j) {
+                TSNode mod = ts_node_named_child(child, j);
+                if (get_node_type(mod) == "property_modifier" &&
+                    node_text(mod) == "const") {
+                    kind = SymbolType::Constant;
+                }
+            }
+        }
+    }
+
+    TSPoint start = ts_node_start_point(node);
+    TSPoint end = ts_node_end_point(node);
+
+    Symbol sym;
+    sym.name = std::string(name);
+    sym.type = kind;
     sym.file_id = file_id_;
     sym.line = static_cast<int>(start.row) + 1;
     sym.column = static_cast<int>(start.column) + 1;

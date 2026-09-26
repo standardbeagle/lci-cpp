@@ -894,6 +894,15 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
             extract_function(node, node_type);
         }
 
+    } else if (node_type == "function_signature_item") {
+        // Rust trait method SIGNATURE (no body): a declaration-only Method.
+        if (lang_ == LangId::Rust) extract_rust_method(node);
+
+    } else if (node_type == "macro_definition" && lang_ == LangId::Rust) {
+        // macro_rules! name { ... } — the closest existing kind is Function;
+        // no Macro variant exists in SymbolType.
+        extract_rust_macro(node);
+
     } else if (node_type == "method_definition" ||
                node_type == "method_declaration" ||
                node_type == "method" || node_type == "singleton_method") {
@@ -930,15 +939,33 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
     } else if (node_type == "type_declaration") {
         extract_type_declaration(node);
 
+    } else if (node_type == "type_item" && lang_ == LangId::Rust) {
+        extract_rust_type_item(node);
+
+    } else if (node_type == "type_definition") {
+        // C-family `typedef ... Name;`. The alias name was never a symbol:
+        // `typedef struct X {...} X;` surfaced only X:struct.
+        if (is_c_family()) extract_c_typedef(node);
+
     } else if (node_type == "type_alias_declaration" ||
                node_type == "type_alias" ||
                node_type == "alias_declaration") {
         extract_type_alias(node);
 
+    // === RUST CONST/STATIC ===
+    } else if (node_type == "const_item" && lang_ == LangId::Rust) {
+        extract_rust_const(node, SymbolType::Constant);
+
+    } else if (node_type == "static_item" && lang_ == LangId::Rust) {
+        extract_rust_const(node, SymbolType::Variable);
+
     // === STRUCTS ===
     } else if (node_type == "struct_item" ||
                node_type == "struct_declaration") {
         extract_struct(node);
+
+    } else if (node_type == "union_item" && lang_ == LangId::Rust) {
+        extract_rust_union(node);
 
     } else if (node_type == "struct_specifier") {
         if (!cpp_specifier_has_body(node)) return;  // fwd decl / usage
@@ -985,6 +1012,9 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
     // === OBJECTS (Kotlin) ===
     } else if (node_type == "object_declaration") {
         extract_kotlin_object(node);
+
+    } else if (node_type == "companion_object" && lang_ == LangId::Kotlin) {
+        extract_kotlin_companion(node);
 
     // === ANNOTATION TYPES (Java) ===
     } else if (node_type == "annotation_type_declaration") {
@@ -1111,6 +1141,8 @@ void UnifiedExtractor::process_symbol_node(TSNode node,
             extract_csharp_property(node);
         } else if (lang_ == LangId::PHP) {
             extract_php_property(node);
+        } else if (lang_ == LangId::Kotlin) {
+            extract_kotlin_property(node);
         }
 
     } else if (node_type == "field_declaration") {

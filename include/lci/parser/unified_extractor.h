@@ -206,6 +206,19 @@ class UnifiedExtractor {
     void extract_interface(TSNode node);
     void extract_type_declaration(TSNode node);
     void extract_type_alias(TSNode node);
+    /// C-family `typedef ... Name;` (type_definition node) — the alias itself
+    /// was never a symbol; a `typedef struct X {...} X;` only surfaced X:struct.
+    void extract_c_typedef(TSNode node);
+    /// Rust `type Alias = T;` (type_item) -> Type.
+    void extract_rust_type_item(TSNode node);
+    /// Rust `const`/`static` item -> Constant / Variable.
+    void extract_rust_const(TSNode node, SymbolType kind);
+    /// Rust `union U { ... }` -> Struct.
+    void extract_rust_union(TSNode node);
+    /// Rust `macro_rules! name { ... }` -> Function (no Macro kind exists).
+    void extract_rust_macro(TSNode node);
+    /// Kotlin `companion object [Name] { ... }` -> Companion.
+    void extract_kotlin_companion(TSNode node);
     void extract_struct(TSNode node);
     void extract_enum(TSNode node);
     void extract_trait(TSNode node);
@@ -257,6 +270,10 @@ class UnifiedExtractor {
     // Kotlin
     void extract_kotlin_object(TSNode node);
     void extract_kotlin_import(TSNode node);
+    /// Kotlin `val`/`var` property: Class body -> Property, file level ->
+    /// Variable, `const val` -> Constant. Function-local declarations are
+    /// skipped (they are not top-level symbols).
+    void extract_kotlin_property(TSNode node);
     // Zig
     void extract_zig_import(TSNode node);
     void extract_zig_struct(TSNode node);

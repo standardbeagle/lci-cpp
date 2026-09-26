@@ -36,7 +36,7 @@ Entry -> parse -> extract -> index:
 - `include/lci/parser/svelte_script.h`, `src/parser/svelte_script.cpp` — `SvelteScriptInfo`, `mask_svelte_script`; `lang="ts"` selects the TS grammar.
 - `include/lci/parser/unified_extractor.h` — `UnifiedExtractor`, `ExtractionResults` (symbols, blocks, imports, scopes, references, declarations, complexity, field_types, `depth_limit_hit`), `set_side_effect_sink`, `local_var_types_`, `kotlin_property_types_`, `zig_module_aliases_`, `kMaxVisitDepth = 512`.
 - `src/parser/unified_extractor.cpp` — `init` (:172), `extract` (:235, file/folder scopes, Cython `scan_cython_callables` post-pass :296), `get_results`/`take_results` (:304/:310), `visit_node` (:329, depth guard :337, env save/restore :361), `swaps_local_type_env` (:547), `is_function_node` (:556), `process_scope_node` (Kotlin fieldless name fallback :699), `process_symbol_node` (:844, node-type dispatch).
-- `src/parser/unified_extractor_symbols.cpp` — `extract_function` (:76), visibility (`scan_declared_visibility` :179, Rust `is_rust_test_scaffold` :137), `extract_method`/`extract_class`/`extract_type_declaration`/... , C/C++ locals+params (:1156-1218), JS/Python/Go import extraction (:913-940), `extract_signature` (:983), `extract_doc_comment` (:1019), `count_complexity_point` (:1040).
+- `src/parser/unified_extractor_symbols.cpp` — `extract_function` (:76), visibility (`scan_declared_visibility` :179, Rust `is_rust_test_scaffold` :137), `extract_method`/`extract_class`/`extract_type_declaration`/`extract_c_typedef`/`extract_rust_type_item`/`extract_rust_const`/`extract_rust_union`/`extract_rust_macro`/`extract_kotlin_companion`/`extract_kotlin_property`/... , C/C++ locals+params (:1156-1218), JS/Python/Go import extraction (:913-940), `extract_signature` (:983), `extract_doc_comment` (:1019), `count_complexity_point` (:1040).
 - `src/parser/parse_methods.cpp` — Java (:28-92), C# (:104-226), PHP (:265-329), Zig struct (:380), C/C++ specifiers/namespace/include/using (:426-532), Rust use (:544), Kotlin object/import (:556/:586).
 - `src/parser/unified_extractor_references.cpp` — `process_reference_node` dispatch (:110), one `process_<lang>_reference` per language (Go :397, JS :575, Python :708, Java :840, C# :900, Rust :988, PHP :1080, Kotlin :1172, Ruby :1303, Zig :1352; C-family inline in the dispatcher), `create_call_reference` (:1541, carries arg count).
 - `src/parser/unified_extractor_types.cpp` — `process_type_relationships` (:13): Go, JS/TS, Python, PHP only.
@@ -61,13 +61,13 @@ Grounded in the dispatch sites above and `tests/language_extraction_test.cpp`.
 | Python `.py .pyw .pyi .pyx .pxd` | yes (Cython cpdef/cdef recovered by line scan) | yes | yes | yes (`self`/`cls`) | yes | yes | `except_clause` |
 | JavaScript `.js .jsx .mjs .cjs` | yes | yes | yes | yes (`this`, `new T()`) | yes | yes | `catch_clause` |
 | TypeScript `.ts .tsx .mts .cts` | yes (TSX grammar for `.tsx`) | yes | yes | yes (typed params) | yes | yes | `catch_clause` |
-| Rust `.rs` | yes (pub/`mod tests` visibility) | yes | yes | yes (`self`, `let x: T`) | no | yes | no catch construct |
-| C `.c` | yes (locals, params) | yes | yes (`#include`) | yes (`this` n/a; `T x;`) | no | yes | none |
+| Rust `.rs` | yes (pub/`mod tests` visibility; `type`/`const`/`static`/`union`/`macro_rules!`, trait method signatures) | yes | yes | yes (`self`, `let x: T`) | no | yes | no catch construct |
+| C `.c` | yes (locals, params, `typedef` alias names) | yes | yes (`#include`) | yes (`this` n/a; `T x;`) | no | yes | none |
 | C++ `.cpp .cc .cxx .h .hpp .hh .hxx .h++` | yes | yes | yes | yes | no | yes | `catch_clause` |
 | Java `.java` | yes | yes | no | yes | no | yes | `catch_clause` |
 | C# `.cs` | yes (record, property, delegate, event) | yes | yes | yes | no | yes | `catch_clause` |
 | PHP `.php .phtml` | yes (trait, namespace, const) | yes | yes | yes (`$this`) | yes (trait use -> extends) | yes | `catch_clause` |
-| Kotlin `.kt .kts` | yes (fieldless-grammar fallback; object) | yes | no | yes (class property map) | no | yes | `catch_block` |
+| Kotlin `.kt .kts` | yes (fieldless-grammar fallback; object; class/file `val`/`var` properties, `typealias`, companion) | yes | no | yes (class property map) | no | yes | `catch_block` |
 | Zig `.zig` | yes (`const X = struct`) | yes (`@import` alias qualifies calls) | yes | yes | no | yes (`try`, `errdefer`) | none |
 | Ruby `.rb` | yes (module, class, method) | yes (bare no-paren calls not emitted) | no | yes (`T.new`) | no | yes | `rescue` |
 | Svelte `.svelte` | via JS/TS on masked script | via JS/TS | JsTs family | as JS/TS | as JS/TS | as JS/TS | as JS/TS |

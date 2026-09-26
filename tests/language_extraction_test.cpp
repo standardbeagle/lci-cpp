@@ -1810,6 +1810,97 @@ object Database {
     EXPECT_EQ(db->type, SymbolType::Object);
 }
 
+// PAR-12 part 1: per-language symbol kinds the dispatch tables never
+// reached. These pin the extractor contract in the per-language suite; the
+// conformance suite owns the kind+line matrix.
+TEST(LanguageExtractionTest, CTypedefAliasIsSymbol) {
+    constexpr std::string_view src = R"(typedef struct Point { int x; } Point;
+typedef int myint;
+)";
+    auto r = extract(Language::C, ".c", src, "types.c");
+    const Symbol* point_alias = nullptr;
+    for (const auto& s : r.symbols) {
+        if (s.name == "Point" && s.type == SymbolType::Type) point_alias = &s;
+    }
+    ASSERT_NE(point_alias, nullptr);
+    EXPECT_EQ(point_alias->line, 1);
+    const Symbol* myint = find_symbol(r, "myint");
+    ASSERT_NE(myint, nullptr);
+    EXPECT_EQ(myint->type, SymbolType::Type);
+    EXPECT_EQ(myint->line, 2);
+}
+
+TEST(LanguageExtractionTest, RustItemKindsAreSymbols) {
+    constexpr std::string_view src = R"(type Alias = i32;
+const MAX: i32 = 1;
+static GLOBAL: i32 = 2;
+union U { a: i32, b: f32 }
+macro_rules! my_macro { () => {} }
+trait Foo { fn method(&self, x: i32) -> i32; }
+use std::fmt;
+)";
+    auto r = extract(Language::Rust, ".rs", src, "items.rs");
+    ASSERT_NE(find_symbol(r, "Alias"), nullptr);
+    EXPECT_EQ(find_symbol(r, "Alias")->type, SymbolType::Type);
+    ASSERT_NE(find_symbol(r, "MAX"), nullptr);
+    EXPECT_EQ(find_symbol(r, "MAX")->type, SymbolType::Constant);
+    ASSERT_NE(find_symbol(r, "GLOBAL"), nullptr);
+    EXPECT_EQ(find_symbol(r, "GLOBAL")->type, SymbolType::Variable);
+    ASSERT_NE(find_symbol(r, "U"), nullptr);
+    EXPECT_EQ(find_symbol(r, "U")->type, SymbolType::Struct);
+    ASSERT_NE(find_symbol(r, "my_macro"), nullptr);
+    EXPECT_EQ(find_symbol(r, "my_macro")->type, SymbolType::Function);
+
+    const Symbol* method = find_symbol(r, "method");
+    ASSERT_NE(method, nullptr);
+    EXPECT_EQ(method->type, SymbolType::Method);
+    EXPECT_TRUE(method->declaration_only);
+
+    // A `use` alias is an import, not a symbol.
+    EXPECT_EQ(find_symbol(r, "fmt"), nullptr);
+}
+
+TEST(LanguageExtractionTest, KotlinFileAndClassPropertiesAreSymbols) {
+    constexpr std::string_view src = R"(class Foo {
+    val prop: Int = 1
+    companion object {
+        val c: Int = 2
+    }
+}
+typealias MyInt = Int
+const val TOP: Int = 9
+val top: Int = 3
+fun f() { val local: Int = 4 }
+)";
+    auto r = extract(Language::Kotlin, ".kt", src, "props.kt");
+
+    const Symbol* prop = find_symbol(r, "prop");
+    ASSERT_NE(prop, nullptr);
+    EXPECT_EQ(prop->type, SymbolType::Property);
+    EXPECT_EQ(prop->line, 2);
+
+    const Symbol* companion = find_symbol(r, "Companion");
+    ASSERT_NE(companion, nullptr);
+    EXPECT_EQ(companion->type, SymbolType::Companion);
+
+    const Symbol* c = find_symbol(r, "c");
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(c->type, SymbolType::Property);
+    EXPECT_EQ(c->line, 4);
+
+    const Symbol* alias = find_symbol(r, "MyInt");
+    ASSERT_NE(alias, nullptr);
+    EXPECT_EQ(alias->type, SymbolType::Type);
+
+    ASSERT_NE(find_symbol(r, "TOP"), nullptr);
+    EXPECT_EQ(find_symbol(r, "TOP")->type, SymbolType::Constant);
+    ASSERT_NE(find_symbol(r, "top"), nullptr);
+    EXPECT_EQ(find_symbol(r, "top")->type, SymbolType::Variable);
+
+    // A function-local `val` is not a top-level symbol.
+    EXPECT_EQ(find_symbol(r, "local"), nullptr);
+}
+
 // Two one-line functions on distinct columns of the same line must not
 // collide in the side-effect analyzer's file:line:column-keyed result map.
 // unified_extractor.cpp's begin_function() call omitted the start column

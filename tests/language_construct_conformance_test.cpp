@@ -455,12 +455,14 @@ fn build() -> Point { Point { x: 1 } }
     auto graph = extract_spec_fixture(Language::Rust, ".rs", "fixture.rs", source);
     expect_graph(graph,
                  {{"nested", SymbolType::Module},
+                  {"VALUE", SymbolType::Constant},
                   {"Point", SymbolType::Struct},
                   {"x", SymbolType::Field},
                   {"State", SymbolType::Enum},
                   {"Runnable", SymbolType::Trait},
                   {"Runnable", SymbolType::Impl},
                   {"helper", SymbolType::Function},
+                  {"run", SymbolType::Method},
                   {"run", SymbolType::Method},
                  {"build", SymbolType::Function}},
                  {{"helper", ReferenceType::Call}},
@@ -588,6 +590,7 @@ int run(void) { Point point = {1}; return add(point.x, 4); }
     auto graph = extract_spec_fixture(Language::C, ".c", "fixture.c", source);
     expect_graph(graph,
                  {{"Point", SymbolType::Struct},
+                  {"Point", SymbolType::Type},
                   {"x", SymbolType::Field},
                   {"State", SymbolType::Enum},
                   {"add", SymbolType::Function},
