@@ -507,6 +507,161 @@ TEST(GitFrequency, CommitHistoryParsesPipeInAuthorAndQuotedPath) {
     fs::remove_all(repo);
 }
 
+// ANA-15: `symbols_deleted` had no writer at all, and `symbols_added` counted
+// only symbols in files whose status is Added. A commit that removes one
+// function from an already-existing file must report symbols_deleted == 1 and
+// symbols_added == 0. Reference: raw git proves the function exists before and
+// is gone after; the report must agree with the diff.
+TEST(GitAnalysis, SymbolsDeletedCountsFunctionRemovedFromExistingFile) {
+    namespace fs = std::filesystem;
+    auto stamp = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    fs::path repo = fs::temp_directory_path() / ("lci_git_symdel_" + stamp);
+    fs::create_directories(repo);
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
+    std::ofstream(repo / "lib.go") << "package main\n"
+                                   << "func Keep() int { return 1 }\n"
+                                   << "func Gone() int { return 2 }\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m one"));
+    std::ofstream(repo / "lib.go") << "package main\n"
+                                   << "func Keep() int { return 1 }\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m two"));
+
+    // Independent reference: git says Gone is in one/libtwo and absent at HEAD.
+    std::string before, after;
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "show", "HEAD~1:lib.go"}, "", before));
+    ASSERT_NE(before.find("func Gone"), std::string::npos);
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "show", "HEAD:lib.go"}, "", after));
+    ASSERT_EQ(after.find("func Gone"), std::string::npos);
+
+    Provider p;
+    ASSERT_TRUE(Provider::create(repo.string(), p));
+    Config cfg = make_default_config();
+    cfg.project.root = repo.string();
+    MasterIndex index(cfg);
+    Analyzer analyzer(p, index);
+
+    AnalysisParams params = AnalysisParams::defaults();
+    params.scope = AnalysisScope::Commit;  // base_ref empty -> HEAD
+    AnalysisReport report;
+    ASSERT_TRUE(analyzer.analyze(params, report));
+    EXPECT_EQ(report.summary.symbols_deleted, 1);
+    EXPECT_EQ(report.summary.symbols_added, 0);
+    EXPECT_EQ(report.summary.files_changed, 1);
+
+    fs::remove_all(repo);
+}
+
+// ANA-15 (added half): symbols_added must count a function added to an
+// already-existing (Modified) file, not just files whose status is Added.
+TEST(GitAnalysis, SymbolsAddedCountsFunctionAddedToExistingFile) {
+    namespace fs = std::filesystem;
+    auto stamp = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    fs::path repo = fs::temp_directory_path() / ("lci_git_symadd_" + stamp);
+    fs::create_directories(repo);
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
+    std::ofstream(repo / "lib.go") << "package main\n"
+                                   << "func Keep() int { return 1 }\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m one"));
+    std::ofstream(repo / "lib.go") << "package main\n"
+                                   << "func Keep() int { return 1 }\n"
+                                   << "func Added() int { return 2 }\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m two"));
+
+    std::string before, after;
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "show", "HEAD~1:lib.go"}, "", before));
+    ASSERT_EQ(before.find("func Added"), std::string::npos);
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "show", "HEAD:lib.go"}, "", after));
+    ASSERT_NE(after.find("func Added"), std::string::npos);
+
+    Provider p;
+    ASSERT_TRUE(Provider::create(repo.string(), p));
+    Config cfg = make_default_config();
+    cfg.project.root = repo.string();
+    MasterIndex index(cfg);
+    Analyzer analyzer(p, index);
+
+    AnalysisParams params = AnalysisParams::defaults();
+    params.scope = AnalysisScope::Commit;
+    AnalysisReport report;
+    ASSERT_TRUE(analyzer.analyze(params, report));
+    EXPECT_EQ(report.summary.symbols_added, 1);
+    EXPECT_EQ(report.summary.symbols_deleted, 0);
+    EXPECT_EQ(report.summary.files_changed, 1);
+
+    fs::remove_all(repo);
+}
+
+// ANA-15 negative: S10's rename handling must not turn a pure rename into a
+// delete+add. No function appears or disappears, so the symbol diff is 0/0.
+TEST(GitAnalysis, RenameOnlyCommitReportsNoSymbolDelta) {
+    namespace fs = std::filesystem;
+    auto stamp = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    fs::path repo = fs::temp_directory_path() / ("lci_git_rename_" + stamp);
+    fs::create_directories(repo);
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
+    std::ofstream(repo / "old.go") << "package main\n"
+                                   << "func Alpha() int { return 1 }\n"
+                                   << "func Beta() int { return 2 }\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m one"));
+    ASSERT_TRUE(lci::test::run_git(repo, "mv old.go new.go"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m two"));
+
+    std::string status;
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "show", "--name-status", "--format=",
+         "HEAD"},
+        "", status));
+    ASSERT_NE(status.find("R100"), std::string::npos)
+        << "fixture must be seen by git as a pure rename for this test to bite";
+
+    Provider p;
+    ASSERT_TRUE(Provider::create(repo.string(), p));
+    Config cfg = make_default_config();
+    cfg.project.root = repo.string();
+    MasterIndex index(cfg);
+    Analyzer analyzer(p, index);
+
+    AnalysisParams params = AnalysisParams::defaults();
+    params.scope = AnalysisScope::Commit;
+    AnalysisReport report;
+    ASSERT_TRUE(analyzer.analyze(params, report));
+    EXPECT_EQ(report.summary.symbols_added, 0);
+    EXPECT_EQ(report.summary.symbols_deleted, 0);
+    EXPECT_EQ(report.summary.files_changed, 1);
+
+    fs::remove_all(repo);
+}
+
 // diff.mnemonicPrefix repaints the ---/+++ headers as i//w//c/ (never b/),
 // and core.quotePath C-quotes the non-ASCII name — so the +++ path matched
 // neither the -z name-status path nor any parsed symbol's file_path, the
