@@ -253,6 +253,26 @@ TEST(FeatureAnalyzer, FeatureTypeConfig) {
     EXPECT_EQ(FeatureAnalyzer::classify_feature_type("config"), "Configuration");
 }
 
+// ANA-6 (2026-09-23 review): classify_feature_type still substring-matched its
+// keyword tables, so `profiled` (contains "profile"), `ordered` (contains
+// "order") and `cached` (contains "cache") were classified as if the keywords
+// were words. Whole-word matching keeps `profile`/`order`/`cache` only when
+// they are words (snake/camel boundaries); the compound keeps its category,
+// the mere substring does not. RED at HEAD: `profiled` and `ordered` classify
+// from the substring.
+TEST(FeatureAnalyzer, FeatureTypeIsWordBoundaryNotSubstring) {
+    EXPECT_EQ(FeatureAnalyzer::classify_feature_type("profiled"), "General Feature");
+    EXPECT_EQ(FeatureAnalyzer::classify_feature_type("ordered"), "General Feature");
+    EXPECT_EQ(FeatureAnalyzer::classify_feature_type("cached"), "General Feature");
+    // Kept positives, both directions: whole word at a snake / camel boundary.
+    EXPECT_EQ(FeatureAnalyzer::classify_feature_type("user_profile"),
+              "User Management");
+    EXPECT_EQ(FeatureAnalyzer::classify_feature_type("profileSearch"),
+              "User Management");
+    EXPECT_EQ(FeatureAnalyzer::classify_feature_type("order_history"),
+              "E-commerce");
+}
+
 // ===========================================================================
 // FeatureAnalyzer - analyze
 // ===========================================================================
@@ -408,6 +428,23 @@ TEST(CIVocabularyAnalyzer, DomainsAndTermsEmitSorted) {
     }
 }
 
+// ANA-6: classify_term_with_strength matched keywords with a bare substring
+// test, so `latest` (contains "test") read as Testing and `unhandler`
+// (contains "handler") read as HTTP/API. Whole-word matching keeps the keyword
+// only when it is a word; `latest_test`/`handler_test` still classify. RED at
+// HEAD: `latest` -> Testing, `unhandler` -> HTTP/API.
+TEST(CIVocabularyAnalyzer, TermClassificationIsWordBoundaryNotSubstring) {
+    CIVocabularyAnalyzer va;
+    EXPECT_EQ(va.classify_term("latest"), "");
+    EXPECT_EQ(va.classify_term("unhandler"), "");
+    EXPECT_EQ(va.classify_term("cached"), "");
+    // Kept positives, both directions (snake / camel whole word).
+    EXPECT_EQ(va.classify_term("latest_test"), "Testing");
+    EXPECT_EQ(va.classify_term("getHandler"), "HTTP/API");
+    EXPECT_EQ(va.classify_term("routeHandler"), "HTTP/API");
+    EXPECT_EQ(va.classify_term("user_profile"), "Authentication");
+}
+
 // ===========================================================================
 // LayerAnalyzer - classify_symbol_to_layer
 // ===========================================================================
@@ -470,6 +507,25 @@ TEST(LayerAnalyzer, SubstringKeywordDoesNotMatch) {
 TEST(LayerAnalyzer, WholeWordKeywordStillMatches) {
     auto sym = make_sym("widgetPanel", SymbolType::Variable);
     EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(sym),
+              "Presentation Layer");
+}
+
+// ANA-6: the class/function special-case ladder above the fallback scan still
+// substring-matched (`model` inside `ModelessDialog`, `render` inside
+// `surrender`). Whole-word matching must reach it too: `ModelessDialog` is a
+// class whose only keyword word is `dialog` (Presentation), and `surrender` is
+// an ordinary function word — not `render`. RED at HEAD: both classify from the
+// substring (Domain / Presentation).
+TEST(LayerAnalyzer, LayerSpecialCaseIsWordBoundaryNotSubstring) {
+    auto cls = make_sym("ModelessDialog", SymbolType::Class);
+    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(cls), "Presentation Layer");
+    auto fn = make_sym("surrender", SymbolType::Function);
+    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(fn), "unclassified");
+    // Kept positives, both directions.
+    auto model = make_sym("UserModel", SymbolType::Class);
+    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(model), "Domain Layer");
+    auto render = make_sym("renderPage", SymbolType::Function);
+    EXPECT_EQ(LayerAnalyzer::classify_symbol_to_layer(render),
               "Presentation Layer");
 }
 
