@@ -101,6 +101,7 @@ add_library(lci_lib STATIC
     cli/status.cpp
     cli/server.cpp
     cli/mcp.cpp
+    cli/context.cpp
     cli/commands.cpp
     cli/commands_config.cpp
     cli/commands_query.cpp

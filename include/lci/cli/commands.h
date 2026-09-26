@@ -297,6 +297,37 @@ int run_browse(const GlobalFlags& flags, const std::string& file_path,
                const std::string& sort, bool show_imports, bool show_stats,
                bool json_output);
 
+// -- context save/load --------------------------------------------------------
+
+/// Save a context manifest through the index server's MCP `context` tool.
+/// `ref_json` holds raw compact reference objects (authoritative, passed
+/// through verbatim) and `ref_shorthand` holds `path:symbol:role` values
+/// accepted only in their unambiguous three-field form. `output` is the
+/// manifest path, resolved and confined under the project root by the server.
+struct ContextSaveOptions {
+    std::string task;
+    std::vector<std::string> ref_json;
+    std::vector<std::string> ref_shorthand;
+    std::string output;
+};
+
+/// Load (hydrate) a context manifest through the index server's MCP
+/// `context` tool. `max_tokens` is the approximate budget; unresolved refs
+/// are a successful structured response while malformed input or a transport
+/// failure is non-zero.
+struct ContextLoadOptions {
+    std::string path;
+    int max_tokens = 8000;
+};
+
+/// context save subcommand. Returns 0 on success, non-zero on error.
+int run_context_save(const GlobalFlags& flags,
+                     const ContextSaveOptions& options);
+
+/// context load subcommand. Returns 0 on success, non-zero on error.
+int run_context_load(const GlobalFlags& flags,
+                     const ContextLoadOptions& options);
+
 /// debug info subcommand. Returns 0 on success, non-zero on error.
 /// `incremental` switches to incremental-index introspection (matches Go's
 /// `--incremental`/`--inc` flag). When true, the output's "Incremental Mode"

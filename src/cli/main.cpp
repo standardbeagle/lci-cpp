@@ -954,6 +954,72 @@ int main(int argc, char* argv[]) {
                              browse_stats, browse_json));
     });
 
+    // -- Context subcommand ---------------------------------------------------
+    // Save and load manifests through the persistent index server's MCP
+    // `context` tool (POST /mcp bridge). The CLI only expands arguments and
+    // forwards them; manifest parsing, hydration, persistence and token
+    // accounting stay in the MCP handlers.
+    auto* context_cmd = app.add_subcommand(
+        "context", "Save and load context manifests via the index server");
+
+    auto* context_save_cmd =
+        context_cmd->add_subcommand("save", "Save a context manifest");
+
+    std::string context_task;
+    context_save_cmd->add_option("--task", context_task,
+                                 "Task description/directive for the manifest")
+        ->required();
+
+    std::vector<std::string> context_ref_json;
+    context_save_cmd->add_option(
+        "--ref-json", context_ref_json,
+        "Compact reference object as JSON (repeatable; authoritative for "
+        "qualified symbols and colon-containing paths)");
+
+    std::vector<std::string> context_refs;
+    context_save_cmd->add_option(
+        "--ref", context_refs,
+        "path:symbol:role shorthand (three non-empty fields only; use "
+        "--ref-json for namespace::name or colon-containing paths)");
+
+    std::string context_output;
+    context_save_cmd->add_option("-o,--output", context_output,
+                                 "Manifest output path (must resolve inside "
+                                 "the project root)")
+        ->required();
+
+    context_save_cmd->callback([&]() {
+        ContextSaveOptions options;
+        options.task = context_task;
+        options.ref_json = context_ref_json;
+        options.ref_shorthand = context_refs;
+        options.output = context_output;
+        std::exit(run_context_save(gflags, options));
+    });
+
+    auto* context_load_cmd =
+        context_cmd->add_subcommand("load", "Hydrate a context manifest");
+
+    std::string context_path;
+    context_load_cmd
+        ->add_option("path", context_path,
+                     "Manifest path (resolved inside the project root)")
+        ->required();
+
+    int context_max_tokens = 8000;
+    context_load_cmd
+        ->add_option("--max-tokens", context_max_tokens,
+                     "Approximate token budget for hydrated context "
+                     "(default 8000)")
+        ->check(CLI::PositiveNumber);
+
+    context_load_cmd->callback([&]() {
+        ContextLoadOptions options;
+        options.path = context_path;
+        options.max_tokens = context_max_tokens;
+        std::exit(run_context_load(gflags, options));
+    });
+
     // -- Default action: search or MCP auto-detect ----------------------------
     app.callback([&]() {
         if (app.get_subcommands().empty() ||
