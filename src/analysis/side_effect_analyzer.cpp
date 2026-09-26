@@ -96,6 +96,26 @@ std::string make_result_key(std::string_view file, int line, int column) {
     key += std::to_string(column);
     return key;
 }
+
+// MCP-15: one reason string naming the callee and the categories it
+// contributed. Shared by end_function and populate_from_index so the
+// AST-local and index-merge paths describe the same effect identically.
+// `line < 0` omits the site (the index path has only callee names).
+std::string callee_impurity_reason(std::string_view callee, uint32_t cat,
+                                   int line) {
+    std::string reason = "calls ";
+    reason += callee;
+    reason += " (";
+    bool first = true;
+    for (const auto& category : categories_to_strings(cat)) {
+        if (!first) reason += ",";
+        reason += category;
+        first = false;
+    }
+    reason += ")";
+    if (line >= 0) reason += " at line " + std::to_string(line);
+    return reason;
+}
 }  // namespace
 
 
@@ -236,9 +256,16 @@ SideEffectInfo SideEffectAnalyzer::end_function() {
     // Classify unresolved callees by name here, not only in the index merge:
     // the heuristic (print/open/mkdir/...) is the only visibility the AST
     // pass has into external calls, and skipping it left filesystem-heavy
-    // functions scoring pure on the unit path.
+    // functions scoring pure on the unit path. Emit a reason per impure
+    // callee (MCP-15): a kIO/kNetwork/kDatabase/... bit set here otherwise
+    // reached the surface with an empty impurity_reasons, so include_reasons
+    // rendered no `reasons` for an impure result.
     for (const auto& uc : ctx.unresolved_calls) {
-        info.categories |= classify_callee_category(uc.function_name);
+        uint32_t cat = classify_callee_category(uc.function_name);
+        if (cat == side_effect::kNone) continue;
+        info.categories |= cat;
+        info.impurity_reasons.push_back(
+            callee_impurity_reason(uc.function_name, cat, uc.line));
     }
 
     populate_purity_classification(ctx, info, param_index_set);
@@ -364,6 +391,11 @@ void SideEffectAnalyzer::record_throw(std::string_view throw_type,
     current_func_->side_effects |= side_effect::kThrow;
     current_func_->throw_sites.push_back(
         ThrowSiteInfo{std::string(throw_type), line, column});
+    // MCP-15: the kThrow bit alone left the result impure with no reason, so
+    // include_reasons omitted `throw` provenance entirely. Name the effect and
+    // the site line.
+    current_func_->impurity_reasons.push_back(
+        "throw at line " + std::to_string(line));
 }
 
 void SideEffectAnalyzer::record_defer() {
@@ -559,8 +591,12 @@ void SideEffectAnalyzer::populate_from_index(const MasterIndex& indexer) {
             if (es->symbol.declaration_only) continue;
 
             uint32_t cats = side_effect::kNone;
+            std::vector<std::string> reasons;
             for (const auto& callee : ref.get_callee_names(es->id)) {
-                cats |= classify_callee_category(callee);
+                uint32_t cat = classify_callee_category(callee);
+                if (cat == side_effect::kNone) continue;
+                cats |= cat;
+                reasons.push_back(callee_impurity_reason(callee, cat, -1));
             }
 
             std::string key = make_result_key(file_path, es->symbol.line,
@@ -573,6 +609,11 @@ void SideEffectAnalyzer::populate_from_index(const MasterIndex& indexer) {
             // call node). Never discard AST precision by overwriting.
             if (auto it = results_.find(key); it != results_.end()) {
                 it->second.categories |= cats;
+                // MCP-15: the OR-ed category is impurity too; without its
+                // reason the record read impure with an empty reasons list.
+                it->second.impurity_reasons.insert(
+                    it->second.impurity_reasons.end(), reasons.begin(),
+                    reasons.end());
                 uint32_t combined =
                     it->second.categories | it->second.transitive_categories;
                 it->second.is_pure = (combined == side_effect::kNone);
@@ -586,6 +627,7 @@ void SideEffectAnalyzer::populate_from_index(const MasterIndex& indexer) {
             info.end_line = es->symbol.end_line;
 
             info.categories = cats;
+            info.impurity_reasons = std::move(reasons);
             info.is_pure = (cats == side_effect::kNone);
             info.purity_level = info.is_pure ? PurityLevel::Pure
                                               : PurityLevel::ExternalDependency;
