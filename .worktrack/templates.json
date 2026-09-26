@@ -1,6 +1,10 @@
 {
   "stack": "generic",
   "delivery": "internal-tool",
+  "deploy": {
+    "via": "tag",
+    "bump": "patch"
+  },
   "templates": [
     {
       "name": "context-native-drain-v1",
