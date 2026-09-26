@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "source": "slop-mcp",
+  "selector": {
+    "scope": "project"
+  },
+  "overrides": [],
+  "custom_tools": [
+    {
+      "name": "save_working_context",
+      "description": "Save a working set (explicit task plus host-provided files and symbol selections) as a compact inline lci context manifest. Returns references and intent only; no source is read. Rejects malformed, contradictory or empty sets and sets above 128 references.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Explicit task the working set is for."
+          },
+          "files": {
+            "type": "array",
+            "description": "Host-provided working set: open or recently-read files, each with optional symbol selections, semantic role and expansion intent.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path as the host knows it."
+                },
+                "symbols": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Selected symbols in the file; omitted or empty means a file-only reference."
+                },
+                "role": {
+                  "type": "string",
+                  "description": "Semantic role carried onto every reference for this file (e.g. modify, contract, verify)."
+                },
+                "expand": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Expansion directives carried onto every reference for this file (e.g. callers, callees)."
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          "max_tokens": {
+            "type": "integer",
+            "default": 8000,
+            "description": "Accepted for symmetry with open/resume/refresh; save returns a reference-only manifest and performs no load."
+          }
+        },
+        "required": [
+          "task",
+          "files"
+        ]
+      },
+      "body": "task = args[\"task\"]\nfiles = args[\"files\"]\nmt = get(args, \"max_tokens\", 8000)\n\nif type(task) != \"string\" or len(task) == 0:\n  error(\"working context: task must be a non-empty string\")\nif type(mt) != \"int\" or mt < 1:\n  error(\"working context: max_tokens must be a positive integer\")\nif type(files) != \"list\" or len(files) == 0:\n  error(\"working context: empty working set\")\n\nrefs = []\nseen_paths = []\nfor fe in files:\n  if type(fe) != \"map\":\n    error(\"working context: each file entry must be an object\")\n  if not has_key(fe, \"path\") or type(fe[\"path\"]) != \"string\" or len(fe[\"path\"]) == 0:\n    error(\"working context: each file entry requires a non-empty string path\")\n  path = fe[\"path\"]\n  if path in seen_paths:\n    error(\"working context: contradictory working set: duplicate path \" + path)\n  seen_paths = seen_paths + [path]\n  role = \"\"\n  if has_key(fe, \"role\"):\n    if type(fe[\"role\"]) != \"string\":\n      error(\"working context: role must be a string for \" + path)\n    role = fe[\"role\"]\n  expand = []\n  if has_key(fe, \"expand\"):\n    if type(fe[\"expand\"]) != \"list\":\n      error(\"working context: expand must be a list for \" + path)\n    for e in fe[\"expand\"]:\n      if type(e) != \"string\":\n        error(\"working context: expand entries must be strings for \" + path)\n      expand = expand + [e]\n  syms = []\n  if has_key(fe, \"symbols\"):\n    if type(fe[\"symbols\"]) != \"list\":\n      error(\"working context: symbols must be a list for \" + path)\n    syms = fe[\"symbols\"]\n  if len(syms) == 0:\n    ref = {f: path}\n    if role != \"\":\n      ref = merge(ref, {role: role})\n    if len(expand) > 0:\n      ref = merge(ref, {x: expand})\n    refs = refs + [ref]\n  else:\n    seen_syms = []\n    for sym in syms:\n      if type(sym) != \"string\" or len(sym) == 0:\n        error(\"working context: symbol must be a non-empty string for \" + path)\n      if sym in seen_syms:\n        error(\"working context: contradictory working set: duplicate symbol \" + sym + \" in \" + path)\n      seen_syms = seen_syms + [sym]\n      ref = {f: path, s: sym}\n      if role != \"\":\n        ref = merge(ref, {role: role})\n      if len(expand) > 0:\n        ref = merge(ref, {x: expand})\n      refs = refs + [ref]\n\nif len(refs) == 0:\n  error(\"working context: empty working set\")\nif len(refs) > 128:\n  error(\"working context: too many references (\" + str(len(refs)) + \"); maximum is 128\")\n\nres = lci.context(operation:\"save\", to_string:true, task:task, refs:refs)\njson_parse(res[\"manifest\"])\n"
+    },
+    {
+      "name": "open_files_context",
+      "description": "Build a working set from the host's open/recently-read files and active symbol selections, then resolve it through lci in one shared-budget load. Returns the single hydrated context result. The caller must ensure indexing has finished; indexing or unavailable errors are surfaced, not masked, and the result is not a claim of on-disk freshness.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Explicit task the working set is for."
+          },
+          "files": {
+            "type": "array",
+            "description": "Host-provided working set: open or recently-read files, each with optional symbol selections, semantic role and expansion intent.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path as the host knows it."
+                },
+                "symbols": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Selected symbols in the file; omitted or empty means a file-only reference."
+                },
+                "role": {
+                  "type": "string",
+                  "description": "Semantic role carried onto every reference for this file (e.g. modify, contract, verify)."
+                },
+                "expand": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Expansion directives carried onto every reference for this file (e.g. callers, callees)."
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          "max_tokens": {
+            "type": "integer",
+            "default": 8000,
+            "description": "Shared token budget for the single load (default 8000)."
+          }
+        },
+        "required": [
+          "task",
+          "files"
+        ]
+      },
+      "body": "task = args[\"task\"]\nfiles = args[\"files\"]\nmt = get(args, \"max_tokens\", 8000)\n\nif type(task) != \"string\" or len(task) == 0:\n  error(\"working context: task must be a non-empty string\")\nif type(mt) != \"int\" or mt < 1:\n  error(\"working context: max_tokens must be a positive integer\")\nif type(files) != \"list\" or len(files) == 0:\n  error(\"working context: empty working set\")\n\nrefs = []\nseen_paths = []\nfor fe in files:\n  if type(fe) != \"map\":\n    error(\"working context: each file entry must be an object\")\n  if not has_key(fe, \"path\") or type(fe[\"path\"]) != \"string\" or len(fe[\"path\"]) == 0:\n    error(\"working context: each file entry requires a non-empty string path\")\n  path = fe[\"path\"]\n  if path in seen_paths:\n    error(\"working context: contradictory working set: duplicate path \" + path)\n  seen_paths = seen_paths + [path]\n  role = \"\"\n  if has_key(fe, \"role\"):\n    if type(fe[\"role\"]) != \"string\":\n      error(\"working context: role must be a string for \" + path)\n    role = fe[\"role\"]\n  expand = []\n  if has_key(fe, \"expand\"):\n    if type(fe[\"expand\"]) != \"list\":\n      error(\"working context: expand must be a list for \" + path)\n    for e in fe[\"expand\"]:\n      if type(e) != \"string\":\n        error(\"working context: expand entries must be strings for \" + path)\n      expand = expand + [e]\n  syms = []\n  if has_key(fe, \"symbols\"):\n    if type(fe[\"symbols\"]) != \"list\":\n      error(\"working context: symbols must be a list for \" + path)\n    syms = fe[\"symbols\"]\n  if len(syms) == 0:\n    ref = {f: path}\n    if role != \"\":\n      ref = merge(ref, {role: role})\n    if len(expand) > 0:\n      ref = merge(ref, {x: expand})\n    refs = refs + [ref]\n  else:\n    seen_syms = []\n    for sym in syms:\n      if type(sym) != \"string\" or len(sym) == 0:\n        error(\"working context: symbol must be a non-empty string for \" + path)\n      if sym in seen_syms:\n        error(\"working context: contradictory working set: duplicate symbol \" + sym + \" in \" + path)\n      seen_syms = seen_syms + [sym]\n      ref = {f: path, s: sym}\n      if role != \"\":\n        ref = merge(ref, {role: role})\n      if len(expand) > 0:\n        ref = merge(ref, {x: expand})\n      refs = refs + [ref]\n\nif len(refs) == 0:\n  error(\"working context: empty working set\")\nif len(refs) > 128:\n  error(\"working context: too many references (\" + str(len(refs)) + \"); maximum is 128\")\n\nmanifest = {t: task, v: \"1.0\", r: refs}\nres = lci.context(operation:\"load\", from_string: json_stringify(manifest), max_tokens: mt)\nif type(res) == \"map\":\n  if has_key(res, \"available\") and res[\"available\"] == false:\n    error(\"working context: index unavailable: \" + get(res, \"reason\", \"\") + \" (\" + get(res, \"hint\", \"\") + \")\")\n  if has_key(res, \"success\") and res[\"success\"] == false:\n    error(\"working context: context load failed: \" + get(res, \"error\", \"\"))\nres\n"
+    },
+    {
+      "name": "resume_working_context",
+      "description": "Resume a saved working-context manifest by hydrating it against the current index in one shared-budget load. Returns the single hydrated context result; indexing or unavailable errors are surfaced.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "manifest": {
+            "type": "string",
+            "description": "A working-context manifest string previously returned by save_working_context or open_files_context."
+          },
+          "max_tokens": {
+            "type": "integer",
+            "default": 8000,
+            "description": "Shared token budget for the single load (default 8000)."
+          }
+        },
+        "required": [
+          "manifest"
+        ]
+      },
+      "body": "\nmanifest = args[\"manifest\"]\nmt = get(args, \"max_tokens\", 8000)\n\nif type(manifest) != \"string\" or len(manifest) == 0:\n  error(\"working context: manifest must be a non-empty string\")\nif type(mt) != \"int\" or mt < 1:\n  error(\"working context: max_tokens must be a positive integer\")\ntry:\n  parsed = json_parse(manifest)\ncatch:\n  error(\"working context: manifest is not valid JSON\")\nif type(parsed) != \"map\":\n  error(\"working context: manifest must be a JSON object\")\n\nres = lci.context(operation:\"load\", from_string: manifest, max_tokens: mt)\nif type(res) == \"map\":\n  if has_key(res, \"available\") and res[\"available\"] == false:\n    error(\"working context: index unavailable: \" + get(res, \"reason\", \"\") + \" (\" + get(res, \"hint\", \"\") + \")\")\n  if has_key(res, \"success\") and res[\"success\"] == false:\n    error(\"working context: context load failed: \" + get(res, \"error\", \"\"))\nres"
+    },
+    {
+      "name": "refresh_working_context",
+      "description": "Refresh a working-context manifest by re-resolving its references against the current index (cached fields such as source, stats and project root are dropped). Use after edits once indexing has finished; returns one shared-budget context result and surfaces indexing/unavailable errors.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "manifest": {
+            "type": "string",
+            "description": "A working-context manifest string previously returned by save_working_context or open_files_context."
+          },
+          "max_tokens": {
+            "type": "integer",
+            "default": 8000,
+            "description": "Shared token budget for the single load (default 8000)."
+          }
+        },
+        "required": [
+          "manifest"
+        ]
+      },
+      "body": "\nmanifest = args[\"manifest\"]\nmt = get(args, \"max_tokens\", 8000)\n\nif type(manifest) != \"string\" or len(manifest) == 0:\n  error(\"working context: manifest must be a non-empty string\")\nif type(mt) != \"int\" or mt < 1:\n  error(\"working context: max_tokens must be a positive integer\")\ntry:\n  parsed = json_parse(manifest)\ncatch:\n  error(\"working context: manifest is not valid JSON\")\nif type(parsed) != \"map\" or not has_key(parsed, \"r\") or type(parsed[\"r\"]) != \"list\":\n  error(\"working context: manifest must contain an r reference list\")\n\nrefs = []\nfor ref in parsed[\"r\"]:\n  if type(ref) != \"map\":\n    error(\"working context: manifest reference must be an object\")\n  if not has_key(ref, \"f\") or type(ref[\"f\"]) != \"string\" or len(ref[\"f\"]) == 0:\n    error(\"working context: manifest reference requires a non-empty string f\")\n  clean = {f: ref[\"f\"]}\n  if has_key(ref, \"s\") and type(ref[\"s\"]) == \"string\" and len(ref[\"s\"]) > 0:\n    clean = merge(clean, {s: ref[\"s\"]})\n  if has_key(ref, \"role\") and type(ref[\"role\"]) == \"string\" and len(ref[\"role\"]) > 0:\n    clean = merge(clean, {role: ref[\"role\"]})\n  if has_key(ref, \"x\") and type(ref[\"x\"]) == \"list\" and len(ref[\"x\"]) > 0:\n    clean = merge(clean, {x: ref[\"x\"]})\n  refs = refs + [clean]\nif len(refs) == 0:\n  error(\"working context: empty working set\")\nif len(refs) > 128:\n  error(\"working context: too many references (\" + str(len(refs)) + \"); maximum is 128\")\n\nbuilt = {t: get(parsed, \"t\", \"\"), v: \"1.0\", r: refs}\nres = lci.context(operation:\"load\", from_string: json_stringify(built), max_tokens: mt)\nif type(res) == \"map\":\n  if has_key(res, \"available\") and res[\"available\"] == false:\n    error(\"working context: index unavailable: \" + get(res, \"reason\", \"\") + \" (\" + get(res, \"hint\", \"\") + \")\")\n  if has_key(res, \"success\") and res[\"success\"] == false:\n    error(\"working context: context load failed: \" + get(res, \"error\", \"\"))\nres"
+    }
+  ]
+}
