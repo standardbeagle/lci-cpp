@@ -272,14 +272,17 @@ PuritySummary tally_purity(
         return allowed_paths == nullptr ||
                allowed_paths->contains(std::string_view(info.file_path));
     };
+    // One pinned generation for every count below, so pure + impure == total
+    // even if a reindex publishes mid-handler.
+    const SideEffectResults se_results = analyzer->results();
     int impure_n = 0;
-    for (const auto& [key, info] : analyzer->results()) {
+    for (const auto& [key, info] : se_results) {
         (void)key;
         if (in_scope(info) && !info.is_pure) ++impure_n;
     }
     int pure_n = 0;
     if (impure_n > 0) {
-        for (const auto& [key, info] : analyzer->results()) {
+        for (const auto& [key, info] : se_results) {
             (void)key;
             if (in_scope(info) && info.is_pure) ++pure_n;
         }
@@ -287,7 +290,7 @@ PuritySummary tally_purity(
     ps.pure_functions = pure_n;
     ps.impure_functions = impure_n;
     int total_n = 0;
-    for (const auto& [key, info] : analyzer->results()) {
+    for (const auto& [key, info] : se_results) {
         (void)key;
         if (in_scope(info)) ++total_n;
     }
@@ -298,7 +301,7 @@ PuritySummary tally_purity(
     // Effect breakdown (same category bits as side_effect_summary) so the
     // HEALTH purity block can emit the `effects:` line. Counts a function once
     // per category if it (transitively) exhibits it.
-    for (const auto& [key, info] : analyzer->results()) {
+    for (const auto& [key, info] : se_results) {
         (void)key;
         if (!in_scope(info)) continue;
         uint32_t combined = info.categories | info.transitive_categories;
@@ -650,6 +653,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                 // Reflection / eval escapes: the true "can jump anywhere"
                 // points, from the side-effect classifier.
                 if (analyzer != nullptr) {
+                    // One pinned generation for the whole scan: consistent
+                    // across a concurrent publish, and no per-symbol refcount.
+                    const SideEffectResults se_results = analyzer->results();
                     std::vector<std::string> escapes;
                     for (const auto& f : files_data) {
                         std::string rel =
@@ -662,7 +668,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                                 t2 != SymbolType::Method &&
                                 t2 != SymbolType::Constructor)
                                 continue;
-                            const auto* se = analyzer->get_result(
+                            const auto* se = se_results.find(
                                 f.path, sym->symbol.line, sym->symbol.column);
                             if (se == nullptr) continue;
                             if (se->categories & side_effect::kDynamicCall)

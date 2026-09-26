@@ -89,11 +89,17 @@ class SideEffectResults {
     auto begin() const { return map_->begin(); }
     auto end() const { return map_->end(); }
 
-    /// Keyed lookup within the pinned generation. Use this instead of
-    /// SideEffectAnalyzer::get_result when the returned pointer is stored
-    /// beyond one call — the handle guarantees the generation outlives it.
+    /// Keyed lookup within the pinned generation. The pointer is valid for
+    /// as long as THIS handle lives.
     const SideEffectInfo* find(std::string_view file, int line,
                                int column = 0) const;
+
+    /// Keyed lookup that owns its generation: the returned pointer aliases
+    /// this handle's map, so the record stays valid however many publishes
+    /// happen after the handle itself is gone.
+    std::shared_ptr<const SideEffectInfo> find_shared(std::string_view file,
+                                                      int line,
+                                                      int column = 0) const;
 
   private:
     std::shared_ptr<const SideEffectResultMap> map_;
@@ -185,8 +191,12 @@ class SideEffectAnalyzer {
     /// (non-publishing) use the handle aliases the live staging map and
     /// behaves exactly like the old `const Map&` accessor.
     SideEffectResults results() const;
-    const SideEffectInfo* get_result(std::string_view file, int line,
-                                     int column = 0) const;
+    /// One record from the published generation, owning that generation
+    /// (see SideEffectResults::find_shared). A raw pointer here would dangle
+    /// as soon as later publishes freed its generation (IDX-2 review B1).
+    std::shared_ptr<const SideEffectInfo> get_result(std::string_view file,
+                                                     int line,
+                                                     int column = 0) const;
 
     /// Bulk-index publication protocol (RCU, one swap on commit).
     ///
@@ -309,11 +319,6 @@ class SideEffectAnalyzer {
     /// has no concurrency and must keep reflecting writes immediately).
     mutable AtomicSharedPtr<const SideEffectResultMap> published_;
     mutable std::atomic<bool> read_published_{false};
-    /// The immediately previous generation is retained until the next
-    /// publish cycle, so a raw `SideEffectInfo*` returned by get_result
-    /// stays valid for far longer than any single handler request even when
-    /// a reindex commits in between. Only the publisher thread touches it.
-    std::shared_ptr<const SideEffectResultMap> retired_;
     /// Frozen pre-run generation, used to restore `results_` byte-for-byte
     /// when a staged bulk run is cancelled.
     std::shared_ptr<const SideEffectResultMap> pre_staging_;

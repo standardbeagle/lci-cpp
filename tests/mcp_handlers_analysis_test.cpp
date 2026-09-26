@@ -598,7 +598,7 @@ TEST(SideEffectsSameLineColumnTest, JsFunctionsOnOneLineStayDistinctAndErrorHand
         auto hs = snap->find_symbols_by_name(name);
         ASSERT_FALSE(hs.empty()) << name << " missing from the index";
         const EnhancedSymbol* es = hs[0].get();
-        const auto* info = analyzer->get_result(
+        auto info = analyzer->get_result(
             indexer->get_file_path(es->symbol.file_id), es->symbol.line,
             es->symbol.column);
         ASSERT_NE(info, nullptr)

@@ -859,7 +859,7 @@ void ExpansionEngine::populate_purity(HydratedRef& hr,
         hr.purity.unavailability_reason = "analyzer_unavailable";
         return;
     }
-    const SideEffectInfo* info = analyzer_->get_result(
+    auto info = analyzer_->get_result(
         get_file_path(sym->symbol.file_id), sym->symbol.line,
         sym->symbol.column);
     if (info == nullptr) {

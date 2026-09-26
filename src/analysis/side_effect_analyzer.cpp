@@ -473,23 +473,19 @@ const SideEffectInfo* SideEffectResults::find(std::string_view file, int line,
     return it != map_->end() ? &it->second : nullptr;
 }
 
-const SideEffectInfo* SideEffectAnalyzer::get_result(std::string_view file,
-                                                     int line,
-                                                     int column) const {
-    const std::string key = make_result_key(file, line, column);
-    if (!read_published_.load(std::memory_order_acquire)) {
-        // Direct mode: no concurrent publisher exists, so a pointer into the
-        // live staging map is stable for the caller's use.
-        auto it = results_.find(key);
-        return it != results_.end() ? &it->second : nullptr;
-    }
-    // Publishing mode: look up in the immutable published generation. The
-    // generation is held by `published_` or `retired_` until a later publish
-    // cycle, so the returned pointer stays valid across a commit.
-    auto snap = published_.load(std::memory_order_acquire);
-    if (!snap) return nullptr;
-    auto it = snap->find(key);
-    return it != snap->end() ? &it->second : nullptr;
+std::shared_ptr<const SideEffectInfo> SideEffectResults::find_shared(
+    std::string_view file, int line, int column) const {
+    const SideEffectInfo* info = find(file, line, column);
+    if (!info) return nullptr;
+    return std::shared_ptr<const SideEffectInfo>(map_, info);
+}
+
+std::shared_ptr<const SideEffectInfo> SideEffectAnalyzer::get_result(
+    std::string_view file, int line, int column) const {
+    // In publishing mode the handle pins the published generation and the
+    // aliasing shared_ptr keeps it alive for the caller. In direct mode it
+    // aliases the live map with no ownership, as the raw pointer did.
+    return results().find_shared(file, line, column);
 }
 
 SideEffectResults SideEffectAnalyzer::results() const {
@@ -508,17 +504,15 @@ SideEffectResults SideEffectAnalyzer::results() const {
 void SideEffectAnalyzer::begin_staging() {
     // Freeze the current generation for readers, then let writers keep
     // mutating `results_` as a private staging map. The frozen copy is what
-    // every reader sees until commit/abort; the previous generation is
-    // retained so get_result pointers into it stay valid.
+    // every reader sees until commit/abort; a reader still holding an older
+    // generation keeps it alive through its own handle.
     auto frozen = std::make_shared<const SideEffectResultMap>(results_);
-    retired_ = published_.load(std::memory_order_acquire);
     published_.store(frozen, std::memory_order_release);
     pre_staging_ = std::move(frozen);
     read_published_.store(true, std::memory_order_release);
 }
 
 void SideEffectAnalyzer::commit_staging() {
-    retired_ = published_.load(std::memory_order_acquire);
     published_.store(std::make_shared<const SideEffectResultMap>(results_),
                      std::memory_order_release);
     read_published_.store(true, std::memory_order_release);
@@ -528,7 +522,6 @@ void SideEffectAnalyzer::commit_staging() {
 void SideEffectAnalyzer::abort_staging() {
     if (pre_staging_) {
         results_ = *pre_staging_;
-        retired_ = published_.load(std::memory_order_acquire);
         published_.store(pre_staging_, std::memory_order_release);
         pre_staging_.reset();
     }
@@ -536,7 +529,6 @@ void SideEffectAnalyzer::abort_staging() {
 }
 
 void SideEffectAnalyzer::publish() {
-    retired_ = published_.load(std::memory_order_acquire);
     published_.store(std::make_shared<const SideEffectResultMap>(results_),
                      std::memory_order_release);
     read_published_.store(true, std::memory_order_release);

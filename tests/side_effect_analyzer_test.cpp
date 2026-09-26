@@ -363,12 +363,43 @@ TEST(SideEffectAnalyzerTest, TwoFunctionsOnOneLineGetDistinctKeys) {
     sa.end_function();
 
     EXPECT_EQ(sa.results().size(), 2u);
-    const auto* a = sa.get_result("a.js", 1, 4);
-    const auto* b = sa.get_result("a.js", 1, 30);
+    auto a = sa.get_result("a.js", 1, 4);
+    auto b = sa.get_result("a.js", 1, 30);
     ASSERT_NE(a, nullptr);
     ASSERT_NE(b, nullptr);
     EXPECT_EQ(a->function_name, "first");
     EXPECT_EQ(b->function_name, "second");
+}
+
+// IDX-2 review blocker B1. A get_result record held across later publishes
+// must stay valid. The old contract returned a raw pointer into a published
+// generation retained for only ONE more cycle, so after a few staging cycles
+// (a cancelled /reindex plus its restart are two) the pointer dangled.
+// Disclosed GUARD, not a RED: a dangling read of freed memory usually still
+// returns the old bytes, so without a sanitizer this passes pre-fix too. The
+// pre-fix defect was shown by an ASan driver running this same scenario
+// against the pre-fix liblci_lib.a: heap-use-after-free, READ of size 8 on
+// the held record's function_name (evidence on task 01M37YE78NVT1AGKG99CD1SH3E).
+TEST(SideEffectAnalyzerTest, HeldResultOutlivesLaterPublishCycles) {
+    SideEffectAnalyzer sa("go");
+    sa.begin_function("original", "a.go", 1, 5);
+    sa.end_function();
+    sa.publish();
+
+    auto held = sa.get_result("a.go", 1);
+    ASSERT_NE(held, nullptr);
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        sa.begin_staging();
+        sa.begin_function("renamed" + std::to_string(cycle), "a.go", 1, 5);
+        sa.end_function();
+        sa.commit_staging();
+    }
+
+    EXPECT_EQ(held->function_name, "original")
+        << "a held record changed or was freed by later publishes";
+    auto current = sa.get_result("a.go", 1);
+    ASSERT_NE(current, nullptr);
+    EXPECT_EQ(current->function_name, "renamed2");
 }
 
 // Callee-name classification must match on a whole identifier or a
@@ -677,7 +708,7 @@ TEST(TransitivePropagation, FixpointReasonsFollowSortedSymbolOrder) {
     auto snap = indexer.ref_tracker().pin();
     auto mid = snap->find_symbol_by_name("mid");
     ASSERT_NE(mid, nullptr);
-    const auto* info = analyzer.get_result(
+    auto info = analyzer.get_result(
         indexer.get_file_path(mid->symbol.file_id), mid->symbol.line,
         mid->symbol.column);
     ASSERT_NE(info, nullptr);
@@ -1057,7 +1088,8 @@ TEST(TransitivePropagation, ImpurityFlowsUpstreamThroughCallGraph) {
     SideEffectAnalyzer analyzer("generic");
     analyzer.populate_from_index(indexer);
 
-    auto result_for = [&](const char* name) -> const SideEffectInfo* {
+    auto result_for =
+        [&](const char* name) -> std::shared_ptr<const SideEffectInfo> {
         auto snapshot = indexer.ref_tracker().pin();
         auto sym = snapshot->find_symbol_by_name(name);
         if (!sym) return nullptr;
@@ -1067,9 +1099,9 @@ TEST(TransitivePropagation, ImpurityFlowsUpstreamThroughCallGraph) {
     };
 
     // Before propagation: only leaf() is impure (local IO); mid/top are pure.
-    const auto* leaf = result_for("leaf");
-    const auto* mid = result_for("mid");
-    const auto* top = result_for("top");
+    auto leaf = result_for("leaf");
+    auto mid = result_for("mid");
+    auto top = result_for("top");
     ASSERT_NE(leaf, nullptr);
     ASSERT_NE(mid, nullptr);
     ASSERT_NE(top, nullptr);
@@ -1128,7 +1160,7 @@ TEST(TransitivePropagation, ConfidenceDecaysToMinConfidenceFloor) {
         auto snapshot = indexer.ref_tracker().pin();
         auto sym = snapshot->find_symbol_by_name(name);
         EXPECT_NE(sym, nullptr) << name;
-        const auto* info = analyzer.get_result(
+        auto info = analyzer.get_result(
             indexer.get_file_path(sym->symbol.file_id), sym->symbol.line,
             sym->symbol.column);
         EXPECT_NE(info, nullptr) << name;

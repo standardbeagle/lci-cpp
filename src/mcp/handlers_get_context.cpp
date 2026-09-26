@@ -235,7 +235,7 @@ void attach_purity(nlohmann::json& ctx, const EnhancedSymbol& sym,
         sym.symbol.type != SymbolType::Method) {
         return;
     }
-    const SideEffectInfo* info = analyzer->get_result(
+    auto info = analyzer->get_result(
         indexer.get_file_path(sym.symbol.file_id), sym.symbol.line,
         sym.symbol.column);
     if (info == nullptr) return;
