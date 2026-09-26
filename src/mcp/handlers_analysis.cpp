@@ -51,18 +51,126 @@ namespace mcp {
 
 // -- SameNameCallGrouping -----------------------------------------------------
 
+namespace {
+
+/// Tail of a call-site spelling: the text after the last '.'/':' qualifier.
+/// Mirrors classify_same_name_calls' matching rule for bare-name queries.
+std::string_view call_tail(std::string_view spelling) {
+    auto dot = spelling.rfind('.');
+    auto colon = spelling.rfind(':');
+    size_t cut = std::string_view::npos;
+    if (dot != std::string_view::npos) cut = dot;
+    if (colon != std::string_view::npos && (cut == std::string_view::npos ||
+                                            colon > cut))
+        cut = colon;
+    return cut == std::string_view::npos ? spelling : spelling.substr(cut + 1);
+}
+
+/// Names carrying at least one bodiless DECLARATION (an interface / abstract /
+/// trait method spec). A call landing on such a symbol — or an unresolved call
+/// of that name through an unknown-typed receiver — is genuine runtime
+/// dispatch. This is the only positive dynamic-dispatch evidence a reference
+/// snapshot holds: `foreign_receiver` alone only says the receiver's static
+/// type is unknown, which is equally true of every stdlib member call
+/// (vector::size, set::empty) that the index simply cannot see (ANA-8).
+using DeclNames = absl::flat_hash_set<std::string>;
+
+DeclNames collect_declaration_names(const ReferenceTracker::Snapshot& snap) {
+    DeclNames names;
+    snap.symbols.range([&](SymbolID, const EnhancedSymbol& sym) {
+        if (!sym.symbol.declaration_only) return true;
+        switch (sym.symbol.type) {
+            case SymbolType::Function:
+            case SymbolType::Method:
+            case SymbolType::Constructor:
+                names.insert(sym.symbol.name);
+                break;
+            default:
+                break;
+        }
+        return true;
+    });
+    return names;
+}
+
+/// True when a live Call ref is genuine dynamic dispatch (evidence-based,
+/// ANA-8). `decl_names` is the precomputed declaration-name set.
+bool is_dynamic_call(const ReferenceTracker::Snapshot& snap, const StoredRef& r,
+                     const DeclNames& decl_names) {
+    if (r.target_symbol != 0) {
+        const auto* tsym = snap.symbols.get(r.target_symbol);
+        return tsym != nullptr && tsym->symbol.declaration_only;
+    }
+    return r.foreign_receiver &&
+           decl_names.contains(call_tail(snap.ref_names[r.name_id]));
+}
+
+/// Corpus-wide Call resolution split using the evidence rule above. Replaces
+/// Snapshot::call_resolution_totals, which counted every foreign-receiver call
+/// as dynamic (ANA-8).
+struct EvidenceCallTotals {
+    int resolved{};
+    int dynamic{};
+    int unresolved{};
+};
+
+EvidenceCallTotals evidence_call_totals(
+    const ReferenceTracker::Snapshot& snap, const DeclNames& decl_names) {
+    EvidenceCallTotals t;
+    for (const auto& [fid, vec] : snap.refs_by_file) {
+        for (const auto& r : vec) {
+            if (r.dead || r.type != ReferenceType::Call) continue;
+            if (r.target_symbol != 0) {
+                const auto* tsym = snap.symbols.get(r.target_symbol);
+                if (tsym != nullptr && tsym->symbol.declaration_only)
+                    ++t.dynamic;
+                else
+                    ++t.resolved;
+            } else if (is_dynamic_call(snap, r, decl_names)) {
+                ++t.dynamic;
+            } else {
+                ++t.unresolved;
+            }
+        }
+    }
+    return t;
+}
+
+/// Dynamic calls MADE BY `symbol_id` under the evidence rule. Replaces
+/// Snapshot::count_dynamic_calls_out (ANA-8).
+int evidence_dynamic_calls_out(const ReferenceTracker::Snapshot& snap,
+                               SymbolID symbol_id,
+                               const DeclNames& decl_names) {
+    auto it = snap.outgoing_refs.find(symbol_id);
+    if (it == snap.outgoing_refs.end()) return 0;
+    int n = 0;
+    for (uint64_t rid : it->second) {
+        const StoredRef* r = snap.find_ref(rid);
+        if (r == nullptr || r->type != ReferenceType::Call) continue;
+        if (is_dynamic_call(snap, *r, decl_names)) ++n;
+    }
+    return n;
+}
+
+}  // namespace
+
 SameNameCallGrouping SameNameCallGrouping::build(
     const ReferenceTracker::Snapshot& snap) {
     SameNameCallGrouping g;
     g.by_tail_.reserve(snap.ref_names.size());
+    const DeclNames decl_names = collect_declaration_names(snap);
     for (const auto& [fid, vec] : snap.refs_by_file) {
         for (const auto& r : vec) {
             if (r.dead || r.type != ReferenceType::Call) continue;
-            // Same split as Snapshot::classify_same_name_calls: a call
-            // resolved to a bodiless declaration is dynamic dispatch; an
-            // unresolved foreign-receiver call is dynamic; a bare
-            // unresolved name is unresolved. Resolved-to-body calls are not
-            // counted.
+            // DYNAMIC requires evidence (ANA-8): a call pinned to a bodiless
+            // declaration (the impl chosen at runtime), or an unresolved call
+            // whose name matches such a declaration (an interface method
+            // reached through an untyped receiver). A foreign-receiver call
+            // with no declaration behind its name is UNRESOLVED — the receiver
+            // type is unknown, not provably dynamic. Resolved-to-body calls
+            // are not counted.
+            std::string_view tail =
+                call_tail(snap.ref_names[r.name_id]);
             int Stats::* bucket;
             if (r.target_symbol != 0) {
                 const auto* tsym = snap.symbols.get(r.target_symbol);
@@ -70,16 +178,11 @@ SameNameCallGrouping SameNameCallGrouping::build(
                     continue;
                 }
                 bucket = &Stats::dynamic;
-            } else if (r.foreign_receiver) {
+            } else if (is_dynamic_call(snap, r, decl_names)) {
                 bucket = &Stats::dynamic;
             } else {
                 bucket = &Stats::unresolved;
             }
-            std::string_view spelling = snap.ref_names[r.name_id];
-            auto dot = spelling.rfind('.');
-            std::string_view tail = dot == std::string_view::npos
-                                        ? spelling
-                                        : spelling.substr(dot + 1);
             auto it = g.by_tail_.find(tail);
             if (it == g.by_tail_.end()) {
                 it = g.by_tail_.emplace(tail, Stats{}).first;
@@ -569,7 +672,8 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         // map tells a reader which seams need runtime reasoning/tests.
         {
             auto rt_snap = indexer.ref_tracker().pin();
-            auto totals = rt_snap->call_resolution_totals();
+            const DeclNames decl_names = collect_declaration_names(*rt_snap);
+            auto totals = evidence_call_totals(*rt_snap, decl_names);
             int all_calls =
                 totals.resolved + totals.dynamic + totals.unresolved;
             if (totals.dynamic > 0) {
@@ -580,8 +684,11 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                 out << "== DYNAMIC ==\n"
                     << "dynamic_call_sites=" << totals.dynamic << " of "
                     << all_calls << " calls (" << fmt2(pct)
-                    << "% dispatch through an unknown receiver — invisible to "
-                    << "the static call graph)\n";
+                    << "% dispatch through an interface/virtual target or "
+                       "reflection — invisible to the static call graph; "
+                    << totals.unresolved
+                    << " other calls are unresolved member/free calls, not "
+                       "dynamic dispatch)\n";
 
                 // Hubs: functions making the most dynamic calls (the framework
                 // / plugin / registry seams).
@@ -614,7 +721,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                         if (!callable) continue;
                         std::string loc =
                             rel + ":" + std::to_string(sym->symbol.line);
-                        int dout = rt_snap->count_dynamic_calls_out(sym->id);
+                        int dout =
+                            evidence_dynamic_calls_out(*rt_snap, sym->id,
+                                                       decl_names);
                         if (dout > 0) hubs.push_back({sym->symbol.name, loc, dout});
                         if (sym->incoming_ref_count == 0 &&
                             !sym->symbol.declaration_only) {

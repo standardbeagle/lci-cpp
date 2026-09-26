@@ -2554,13 +2554,19 @@ Symbol snc_sym(const std::string& name, SymbolType type, int line,
 
 }  // namespace
 
-// The grouping must answer exactly what Snapshot::classify_same_name_calls
-// answers for bare-name queries, including the qualified-spelling
-// ("Recv.name") suffix rule and the resolved-to-declaration dynamic case.
-TEST(SameNameCallGrouping, MatchesClassifySameNameCalls) {
+// The grouping must classify each same-name call site under the ANA-8
+// evidence rule: a call resolved to a bodiless DECLARATION is dynamic, and so
+// is an unresolved foreign-receiver call whose name matches such a declaration
+// (an interface method reached through an untyped receiver). An unresolved
+// foreign-receiver call with NO declaration behind its name is unresolved —
+// the receiver type is unknown, not provably dynamic — which is where the
+// grouping deliberately stops mirroring Snapshot::classify_same_name_calls
+// (that older split still treats every foreign receiver as dynamic).
+TEST(SameNameCallGrouping, ClassifiesDynamicFromDeclarationEvidence) {
     ReferenceTracker rt;
     std::vector<Symbol> symbols = {
         snc_sym("DeclFunc", SymbolType::Function, 1, /*decl_only=*/true),
+        snc_sym("Iface", SymbolType::Method, 2, /*decl_only=*/true),
         snc_sym("RealFunc", SymbolType::Function, 5),
         snc_sym("caller", SymbolType::Function, 10),
     };
@@ -2576,27 +2582,25 @@ TEST(SameNameCallGrouping, MatchesClassifySameNameCalls) {
         refs.push_back(std::move(r));
     };
     add_call("DeclFunc", 11, false);    // resolves to decl-only -> dynamic
-    add_call("recv.Dyn", 12, true);     // qualified foreign -> dynamic
-    add_call("other.Dyn", 13, true);    // same tail, another receiver
-    add_call("Bare", 14, false);        // unresolved
-    add_call("RealFunc", 15, false);    // resolves to a body -> not counted
+    add_call("recv.Iface", 12, true);   // foreign, Iface is decl-only -> dynamic
+    add_call("recv.Dyn", 13, true);     // foreign, no declaration -> unresolved
+    add_call("other.Dyn", 14, true);    // same tail, another receiver
+    add_call("Bare", 15, false);        // bare unresolved
+    add_call("RealFunc", 16, false);    // resolves to a body -> not counted
     std::vector<ScopeInfo> scopes;
     rt.process_file(1, "f.go", symbols, refs, scopes);
     rt.process_all_references();
 
     auto snap = rt.pin();
     auto grouping = SameNameCallGrouping::build(*snap);
-    for (const char* name : {"DeclFunc", "Dyn", "Bare", "RealFunc",
-                             "caller", "absent"}) {
-        auto want = snap->classify_same_name_calls(name);
-        auto got = grouping.lookup(name);
-        EXPECT_EQ(got.dynamic, want.dynamic) << name;
-        EXPECT_EQ(got.unresolved, want.unresolved) << name;
-    }
-    // And the grouping is non-trivially populated (not degenerate-equal).
     EXPECT_EQ(grouping.lookup("DeclFunc").dynamic, 1);
-    EXPECT_EQ(grouping.lookup("Dyn").dynamic, 2);
+    EXPECT_EQ(grouping.lookup("Iface").dynamic, 1);
+    EXPECT_EQ(grouping.lookup("Iface").unresolved, 0);
+    EXPECT_EQ(grouping.lookup("Dyn").dynamic, 0);
+    EXPECT_EQ(grouping.lookup("Dyn").unresolved, 2);
     EXPECT_EQ(grouping.lookup("Bare").unresolved, 1);
+    EXPECT_EQ(grouping.lookup("RealFunc").total(), 0);
+    EXPECT_EQ(grouping.lookup("absent").total(), 0);
 }
 
 // The quadratic this replaces: unified/deadcode modes classified every
