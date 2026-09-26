@@ -151,6 +151,18 @@ int edit_distance_capped(std::string_view a, std::string_view b, int limit) {
 // Max edit distance treated as a plausible typo for a word of this length.
 int misspell_limit(size_t len) { return len >= 8 ? 2 : 1; }
 
+// The unqualified member name: everything after the last `::`. A C++ (or
+// Rust/namespace-qualified) out-of-class definition carries its owner in the
+// symbol name (`UnifiedExtractor::extract`), and judging that spelling flags
+// the member for the OWNER's casing. Naming style, leading verb and tokens are
+// properties of the member, so strip the qualifier here. The extractor will
+// eventually store a real parent field; until then split on `::`.
+std::string_view member_name(std::string_view name) {
+    auto sep = name.rfind("::");
+    if (sep == std::string_view::npos) return name;
+    return name.substr(sep + 2);
+}
+
 // Naming-convention style of a raw (unsplit) symbol name.
 enum class NameStyle { Snake, Camel, Other };
 
@@ -263,12 +275,13 @@ NamingReport NamingAnalyzer::analyze(
             // snake_case and skew it). 14/15 guzzle "outliers" were magic
             // methods before this gate (2026-08-26 re-panel).
             if (sym->symbol.name.rfind("__", 0) == 0) continue;
-            auto tokens = splitter.split(sym->symbol.name);
+            std::string_view member = member_name(sym->symbol.name);
+            auto tokens = splitter.split(member);
             if (tokens.empty()) continue;
             absl::flat_hash_set<std::string> uniq(tokens.begin(), tokens.end());
             for (const auto& t : uniq) token_freq[t]++;
 
-            NameStyle style = classify_style(sym->symbol.name);
+            NameStyle style = classify_style(member);
             if (style == NameStyle::Snake) tally.snake++;
             if (style == NameStyle::Camel) tally.camel++;
             auto& et = ext_styles[ext];
@@ -465,7 +478,7 @@ NamingReport NamingAnalyzer::analyze(
         // what an agent will fail to search for).
         bool low_importance = fan_in < 2 && !c.sym->is_exported;
         const bool noun_leading = allows_noun_leading_function(
-            config, c.ext, c.sym->symbol.name);
+            config, c.ext, member_name(c.sym->symbol.name));
 
         std::string odd_term, reason;
         std::vector<std::string> suggested;
@@ -556,8 +569,8 @@ NamingReport NamingAnalyzer::analyze(
                     for (char ch : t)
                         upper += static_cast<char>(std::toupper(
                             static_cast<unsigned char>(ch)));
-                    return c.sym->symbol.name.find(upper) !=
-                           std::string::npos;
+                    return member_name(c.sym->symbol.name).find(upper) !=
+                           std::string_view::npos;
                 };
                 for (size_t token_index = 0; token_index < c.tokens.size();
                      ++token_index) {
