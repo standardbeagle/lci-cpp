@@ -13,8 +13,12 @@ if(NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
     endif()
 endif()
 
+# The release version is the pushed v* tag: release CI and the fleet deploy pass
+# -DLCI_VERSION=<x.y.z> from it. The literal is what an untagged local build reports.
+set(LCI_VERSION "0.10.1" CACHE STRING "lci version; release builds pass the v* tag's")
+
 project(lci
-    VERSION 0.10.1
+    VERSION ${LCI_VERSION}
     DESCRIPTION "Lightning Code Index - fast semantic code search"
     LANGUAGES C CXX
 )

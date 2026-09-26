@@ -1,5 +1,8 @@
 name: Release
 
+# The pushed v* tag IS the release version: every configure passes it as
+# LCI_VERSION, so `lci --version`, the packages and the tag always agree without
+# a CMakeLists.txt bump (worktrack delivery profile: deploy via tag).
 on:
   push:
     tags:
@@ -66,6 +69,7 @@ jobs:
           cmake --preset release \
             -G Ninja \
             -DFETCHCONTENT_BASE_DIR=$PWD/.deps-release-gcc-13 \
+            -DLCI_VERSION="${GITHUB_REF_NAME#v}" \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
 
       - name: Build
@@ -139,6 +143,7 @@ jobs:
           cmake --preset release `
             "-DFETCHCONTENT_BASE_DIR=$PWD/.deps-msvc" `
             -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
+            "-DLCI_VERSION=$($env:GITHUB_REF_NAME -replace '^v','')" `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 
       - name: Build
@@ -208,6 +213,7 @@ jobs:
           cmake --preset release \
             -G Ninja \
             -DFETCHCONTENT_BASE_DIR=$PWD/.deps-ninja \
+            -DLCI_VERSION="${GITHUB_REF_NAME#v}" \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
 
       - name: Build
