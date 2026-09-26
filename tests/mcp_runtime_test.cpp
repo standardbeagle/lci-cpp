@@ -1,8 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <set>
 #include <string>
+#include <thread>
 
 #include <lci/config.h>
 #include <lci/core/reference_tracker.h>
@@ -201,6 +206,96 @@ TEST(McpRuntimeAttrRegistryTest, CiEngineReceivesProjectAttributesIntoHealthGate
 
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
+}
+
+// IDX-2 review blocker B2. The server runs McpRuntime::warmup on its own
+// thread once the index is ready, and a /reindex can open its bulk window
+// while warmup is still writing. Warmup's side-effect passes and its
+// publish() must be excluded from that window: otherwise publish() swaps the
+// run's half-merged STAGING map in as the reader-visible generation before
+// the run commits (or after it is cancelled). The bulk thread is parked in
+// the post-parse hook — staging open, commit not reached — and warmup is
+// raced against it. Readers must still see the pre-run record set — not the
+// new file's SecondFunc, which exists only in the staging map. (Compared by
+// key set, not map identity: begin_staging itself publishes a frozen COPY of
+// the pre-run map.) Pre-fix warmup finishes inside the window and publishes
+// the staging map; with the fix it blocks until the run commits.
+TEST(McpRuntimeWarmupTest, WarmupDuringReindexCannotPublishTheStagingMap) {
+    auto dir = lci::test::unique_temp_dir("lci_runtime_warmup_race_");
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "a.go")
+        << "package main\nfunc First() { panic(\"x\") }\n";
+
+    Config config = make_default_config();
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    McpRuntime runtime(indexer);
+    indexer.set_side_effect_sink(&runtime.side_effects);
+    ASSERT_TRUE(indexer.index_directory(dir.string()));
+    runtime.warmup(indexer);
+
+    std::set<std::string> pre_run_keys;
+    for (const auto& [key, info] : runtime.side_effects.results()) {
+        pre_run_keys.insert(key);
+    }
+    ASSERT_FALSE(pre_run_keys.empty());
+
+    std::ofstream(dir / "b.go")
+        << "package main\nfunc SecondFunc() { panic(\"y\") }\n";
+
+    std::mutex mu;
+    std::condition_variable cv;
+    bool parked = false;
+    bool release = false;
+    bool warmup_done = false;
+    std::set<std::string> observed_keys;
+    std::thread warmer;
+    indexer.set_post_parse_hook([&] {
+        std::unique_lock lock(mu);
+        parked = true;
+        cv.notify_all();
+        cv.wait(lock, [&] { return release; });
+    });
+
+    std::thread reader([&] {
+        {
+            std::unique_lock lock(mu);
+            cv.wait(lock, [&] { return parked; });
+        }
+        warmer = std::thread([&] {
+            runtime.warmup(indexer);
+            std::lock_guard lock(mu);
+            warmup_done = true;
+            cv.notify_all();
+        });
+        // Give an unexcluded warmup ample time to finish on this two-file
+        // fixture; an excluded one is blocked for the whole wait.
+        {
+            std::unique_lock lock(mu);
+            cv.wait_for(lock, std::chrono::milliseconds(500),
+                        [&] { return warmup_done; });
+        }
+        for (const auto& [key, info] : runtime.side_effects.results()) {
+            observed_keys.insert(key);
+        }
+        std::lock_guard lock(mu);
+        release = true;
+        cv.notify_all();
+    });
+
+    ASSERT_TRUE(indexer.index_directory(dir.string()));
+    reader.join();
+    warmer.join();
+
+    EXPECT_EQ(observed_keys, pre_run_keys)
+        << "warmup published a generation inside the reindex bulk window";
+    bool has_second = false;
+    for (const auto& [key, info] : runtime.side_effects.results()) {
+        if (info.function_name == "SecondFunc") has_second = true;
+    }
+    EXPECT_TRUE(has_second)
+        << "the committed generation is missing the new run's record";
+    std::filesystem::remove_all(dir);
 }
 
 }  // namespace
