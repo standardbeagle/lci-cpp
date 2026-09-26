@@ -30,9 +30,9 @@ namespace lci {
 namespace mcp {
 namespace insight {
 
-// Canonical top-to-bottom depth of the architectural layers LayerAnalyzer
-// classifies into. Calls should flow downward (shallow -> deep). Utility is
-// cross-cutting and unknown layers are unranked — both exempt (return -1).
+// Calls should flow downward (shallow -> deep) by the ONE declared layer order
+// in LayerAnalyzer (layer_analyzer.h) — there is no separate table here.
+// Utility and unclassified are cross-cutting / unranked: both exempt.
 // Middleware/handler chain dispatch is the definitional shape of the pattern
 // (a middleware MUST call the next handler), not an architecture violation —
 // whitelist those call edges before flagging upward calls.
@@ -58,14 +58,6 @@ bool is_middleware_chain_call(std::string_view caller, std::string_view callee) 
         if (contains_ci(tail, "next")) return true;
     }
     return false;
-}
-
-int layer_depth(const std::string& layer) {
-    if (layer == "Presentation Layer") return 0;
-    if (layer == "Application Layer") return 1;
-    if (layer == "Domain Layer") return 2;
-    if (layer == "Data Layer") return 3;
-    return -1;
 }
 
 // Single build of analysis::CallGraph over the real call graph, yielding three
@@ -276,20 +268,20 @@ GraphSignals compute_graph_signals(const MasterIndex& indexer,
     // heuristic layer assignment itself is the suspect, and reporting the
     // edge as an architecture defect is the anti-signal the audits flagged.
     // First pass: per ordered layer pair, count edges each way.
-    absl::flat_hash_map<int, std::pair<int, int>> pair_flow;  // key: hi*4+lo
-    auto pair_key = [](int shallow, int deep) { return deep * 4 + shallow; };
+    absl::flat_hash_map<int, std::pair<int, int>> pair_flow;  // key: hi*5+lo
+    auto pair_key = [](int shallow, int deep) { return deep * 5 + shallow; };
     struct Upward {
         SymbolID u, v;
         int du, dv;
     };
     std::vector<Upward> upward;
     for (SymbolID u : nodes) {
-        int du = layer_depth(layer[u]);
+        int du = LayerAnalyzer::depth_of(layer[u]);
         if (du < 0) continue;
         for (SymbolID v : ref.get_callee_symbols(u)) {
             auto lv = layer.find(v);
             if (lv == layer.end()) continue;
-            int dv = layer_depth(lv->second);
+            int dv = LayerAnalyzer::depth_of(lv->second);
             if (dv < 0 || du == dv) continue;
             if (du < dv) {
                 // Downward (correct direction) for the pair (du, dv).

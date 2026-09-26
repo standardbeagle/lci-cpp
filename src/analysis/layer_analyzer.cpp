@@ -88,6 +88,28 @@ const LayerKeywords kLayerKeywords[] = {
 }  // namespace
 
 // ---------------------------------------------------------------------------
+// Declared dependency order (single source of truth, ANA-5)
+// ---------------------------------------------------------------------------
+
+const std::vector<std::string_view>& LayerAnalyzer::layer_order() {
+    // Shallowest first: a call should flow down this list. This is the ONLY
+    // table; insight_graph.cpp and the emitted `depth=` both read it.
+    static const std::vector<std::string_view> kOrder = {
+        "Presentation Layer", "Application Layer", "Domain Layer",
+        "Data Layer", "Infrastructure Layer"};
+    return kOrder;
+}
+
+int LayerAnalyzer::depth_of(std::string_view layer_name) {
+    const auto& order = layer_order();
+    for (size_t i = 0; i < order.size(); ++i) {
+        if (order[i] == layer_name) return static_cast<int>(i);
+    }
+    // Utility Layer and kUnclassified are cross-cutting / unknown: exempt.
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
 // Symbol classification
 // ---------------------------------------------------------------------------
 
@@ -123,7 +145,10 @@ std::string LayerAnalyzer::classify_symbol_to_layer(const EnhancedSymbol& sym) {
         }
     }
 
-    return "Utility Layer";
+    // No keyword matched: report it as unclassified rather than defaulting
+    // into Utility Layer, which fabricated a module inventory for layers the
+    // repo does not actually have (ANA-5).
+    return std::string(kUnclassified);
 }
 
 // ---------------------------------------------------------------------------
@@ -212,17 +237,30 @@ LayerAnalysis LayerAnalyzer::analyze(const std::vector<FileSymbolData>& files,
         layer_modules[best_layer].push_back(module);
     }
 
-    // Deterministic layer order (Karpathy rule 4). The maps above are absl
-    // hash maps, so without this both the emitted order AND the `depth`
-    // each layer is assigned come out of a per-process hash seed.
+    // Deterministic layer order (Karpathy rule 4): by declared rank, deepest
+    // last; unranked buckets (Utility, unclassified) after the ranked ones,
+    // then alphabetically. The maps above are absl hash maps, so without this
+    // both the emitted order AND the `depth` each layer is assigned come out
+    // of a per-process hash seed.
     std::vector<std::string> layer_names;
     layer_names.reserve(layer_symbols.size());
     for (const auto& [name, _] : layer_symbols) layer_names.push_back(name);
-    std::sort(layer_names.begin(), layer_names.end());
+    std::sort(layer_names.begin(), layer_names.end(),
+              [](const std::string& a, const std::string& b) {
+                  int da = LayerAnalyzer::depth_of(a);
+                  int db = LayerAnalyzer::depth_of(b);
+                  if (da != db) {
+                      // Ranked layers (>=0) before unranked (-1); shallower
+                      // ranked layers first.
+                      if (da < 0) return false;
+                      if (db < 0) return true;
+                      return da < db;
+                  }
+                  return a < b;
+              });
 
     std::vector<ArchitecturalLayer> layers;
     layers.reserve(layer_names.size());
-    int depth = 1;
     for (const auto& name : layer_names) {
         auto& syms = layer_symbols[name];
         if (syms.empty()) continue;
@@ -238,7 +276,10 @@ LayerAnalysis LayerAnalyzer::analyze(const std::vector<FileSymbolData>& files,
         ArchitecturalLayer al;
         al.name = name;
         al.modules = std::move(modules);
-        al.depth = depth++;
+        // Depth is the rank in the declared dependency order, NOT the
+        // alphabetical position. Unranked buckets (Utility, unclassified)
+        // get -1: cross-cutting / unknown, not a stack layer.
+        al.depth = LayerAnalyzer::depth_of(name);
         al.component_types = {name};
         al.metrics = m;
         layers.push_back(std::move(al));
