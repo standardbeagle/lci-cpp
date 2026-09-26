@@ -580,6 +580,102 @@ fun f() { val local: Int = 4 }
     EXPECT_EQ(at("local", SymbolType::Variable), graph.symbols.end());
 }
 
+// C# `namespace A.B;` is a FILE-SCOPED namespace: it has no closing brace and
+// every later declaration in the file belongs to it. The symbol does not close
+// the scope at its span, so it must be recorded as a Namespace scope covering
+// the remainder of the file — otherwise C is attributed to the global scope.
+TEST(LanguageConstructConformance, CSharpFileScopedNamespaceScopesMembers) {
+    constexpr std::string_view source = R"(namespace A.B;
+class C {}
+)";
+    auto graph =
+        extract_spec_fixture(Language::CSharp, ".cs", "Fixture.cs", source);
+
+    const auto ns = std::find_if(graph.scopes.begin(), graph.scopes.end(),
+                                 [](const ScopeInfo& s) {
+                                     return s.name == "A.B" &&
+                                            s.type == ScopeType::Namespace;
+                                 });
+    ASSERT_NE(ns, graph.scopes.end())
+        << "file-scoped namespace must open a Namespace scope";
+
+    const auto c = std::find_if(graph.symbols.begin(), graph.symbols.end(),
+                                [](const Symbol& s) {
+                                    return s.name == "C" &&
+                                           s.type == SymbolType::Class;
+                                });
+    ASSERT_NE(c, graph.symbols.end());
+    // The class sits on line 2; the namespace scope must contain it.
+    EXPECT_LE(ns->start_line, c->line);
+    EXPECT_GE(ns->end_line, c->line)
+        << "class C is not enclosed by namespace A.B";
+}
+
+// Python module- and class-level assignments are data declarations, and the
+// class body's assignment is owned by the class. Function-body assignments are
+// locals and must not be indexed as module symbols.
+TEST(LanguageConstructConformance, PythonAssignmentsAreScopedVariables) {
+    constexpr std::string_view source = R"(X = 1
+class K:
+    Y = 2
+    def m(self):
+        Z = 3
+)";
+    auto graph =
+        extract_spec_fixture(Language::Python, ".py", "fixture.py", source);
+
+    auto at = [&](std::string_view name) {
+        return std::find_if(graph.symbols.begin(), graph.symbols.end(),
+                            [&](const Symbol& s) { return s.name == name; });
+    };
+    const auto x = at("X");
+    ASSERT_NE(x, graph.symbols.end()) << "module assignment X is not indexed";
+    EXPECT_EQ(x->type, SymbolType::Variable);
+    EXPECT_EQ(x->line, 1);
+
+    const auto y = at("Y");
+    ASSERT_NE(y, graph.symbols.end()) << "class-body assignment Y is not indexed";
+    EXPECT_EQ(y->type, SymbolType::Variable);
+    EXPECT_EQ(y->line, 3);
+
+    // Y is owned by class K: a Class scope containing it must exist.
+    const bool class_owns_y = std::any_of(
+        graph.scopes.begin(), graph.scopes.end(), [&](const ScopeInfo& s) {
+            return s.name == "K" && s.type == ScopeType::Class &&
+                   s.start_line <= y->line && s.end_line >= y->line;
+        });
+    EXPECT_TRUE(class_owns_y) << "Y is not scoped under class K";
+
+    EXPECT_EQ(at("Z"), graph.symbols.end())
+        << "function-local assignment Z must not be a module symbol";
+}
+
+// Ruby `FOO = 1` at file level is a constant; `attr_accessor :a, :b` declares
+// two reader/writer methods with no `def` body.
+TEST(LanguageConstructConformance, RubyConstantsAndAttrAccessorAreSymbols) {
+    constexpr std::string_view source = R"(FOO = 1
+class K
+  attr_accessor :a, :b
+end
+)";
+    auto graph =
+        extract_spec_fixture(Language::Ruby, ".rb", "fixture.rb", source);
+
+    auto at = [&](std::string_view name, SymbolType type) {
+        return std::find_if(graph.symbols.begin(), graph.symbols.end(),
+                            [&](const Symbol& s) {
+                                return s.name == name && s.type == type;
+                            });
+    };
+    const auto foo = at("FOO", SymbolType::Constant);
+    ASSERT_NE(foo, graph.symbols.end()) << "FOO is not a Constant symbol";
+
+    const auto a = at("a", SymbolType::Method);
+    ASSERT_NE(a, graph.symbols.end()) << "attr_accessor :a is not a Method";
+    const auto b = at("b", SymbolType::Method);
+    ASSERT_NE(b, graph.symbols.end()) << "attr_accessor :b is not a Method";
+}
+
 TEST(LanguageConstructConformance, C) {
     constexpr std::string_view source = R"(#include <stddef.h>
 typedef struct Point { int x; } Point;
