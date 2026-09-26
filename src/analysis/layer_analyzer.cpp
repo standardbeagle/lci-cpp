@@ -10,10 +10,6 @@ namespace lci {
 
 namespace {
 
-bool contains(std::string_view haystack, std::string_view needle) {
-    return haystack.find(needle) != std::string_view::npos;
-}
-
 bool is_function_like(SymbolType t) {
     return t == SymbolType::Function || t == SymbolType::Method;
 }
@@ -114,25 +110,34 @@ int LayerAnalyzer::depth_of(std::string_view layer_name) {
 // ---------------------------------------------------------------------------
 
 std::string LayerAnalyzer::classify_symbol_to_layer(const EnhancedSymbol& sym) {
-    std::string name = text::ascii_lower(sym.symbol.name);
+    // Match keyword tables on whole identifier words, never substrings: the
+    // original (case-preserving) name is what carries the camel boundaries,
+    // so `contains_word` gets `sym.symbol.name`, not the lowercased copy.
+    const std::string& raw = sym.symbol.name;
 
     // Check symbol type for strong classification.
     if (is_class_like(sym.symbol.type)) {
-        if (contains(name, "service") || contains(name, "manager"))
+        if (analysis::contains_word(raw, "service") ||
+            analysis::contains_word(raw, "manager"))
             return "Application Layer";
-        if (contains(name, "model") || contains(name, "entity"))
+        if (analysis::contains_word(raw, "model") ||
+            analysis::contains_word(raw, "entity"))
             return "Domain Layer";
-        if (contains(name, "repository") || contains(name, "dao"))
+        if (analysis::contains_word(raw, "repository") ||
+            analysis::contains_word(raw, "dao"))
             return "Data Layer";
-        if (contains(name, "component") || contains(name, "view"))
+        if (analysis::contains_word(raw, "component") ||
+            analysis::contains_word(raw, "view"))
             return "Presentation Layer";
     }
     if (is_function_like(sym.symbol.type)) {
-        if (contains(name, "render"))
+        if (analysis::contains_word(raw, "render"))
             return "Presentation Layer";
-        if (contains(name, "save") || contains(name, "load"))
+        if (analysis::contains_word(raw, "save") ||
+            analysis::contains_word(raw, "load"))
             return "Data Layer";
-        if (contains(name, "validate") || contains(name, "compute"))
+        if (analysis::contains_word(raw, "validate") ||
+            analysis::contains_word(raw, "compute"))
             return "Domain Layer";
     }
 
@@ -140,7 +145,7 @@ std::string LayerAnalyzer::classify_symbol_to_layer(const EnhancedSymbol& sym) {
     // ("ui" in "build", "log" in "catalog") is not a signal.
     for (const auto& entry : kLayerKeywords) {
         for (auto kw : entry.keywords) {
-            if (analysis::contains_word(sym.symbol.name, kw))
+            if (analysis::contains_word(raw, kw))
                 return std::string(entry.layer);
         }
     }

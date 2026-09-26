@@ -1,5 +1,6 @@
 #include <lci/analysis/ci_vocabulary_analyzer.h>
 
+#include <lci/analysis/word_match.h>
 #include <lci/reference.h>
 #include <lci/core/text.h>
 
@@ -11,10 +12,6 @@
 namespace lci {
 
 namespace {
-
-bool contains(std::string_view haystack, std::string_view needle) {
-    return haystack.find(needle) != std::string_view::npos;
-}
 
 bool starts_with(std::string_view s, std::string_view prefix) {
     return s.size() >= prefix.size() && s.substr(0, prefix.size()) == prefix;
@@ -69,6 +66,10 @@ std::pair<std::string, double> CIVocabularyAnalyzer::classify_term_with_strength
     std::string best_domain;
     double best_strength = 0.0;
 
+    // Whole-word keyword matching (ANA-6): a keyword matches only as a whole
+    // identifier word, so `latest` no longer reads as Testing ("test") nor
+    // `unhandler` as HTTP/API ("handler"). `term` (case-preserving) carries
+    // the camel boundaries; `term_lower` is kept for the edge bonus below.
     for (const auto& [domain, pattern] : domain_patterns_) {
         for (const auto& keyword : pattern.keywords) {
             if (term_lower == keyword) {
@@ -78,8 +79,11 @@ std::pair<std::string, double> CIVocabularyAnalyzer::classify_term_with_strength
                     best_domain = domain;
                     best_strength = pattern.exact_weight;
                 }
-            } else if (contains(term_lower, keyword)) {
+            } else if (analysis::contains_word(term, keyword)) {
                 double strength = pattern.prefix_weight;
+                // Edge bonus when the matched word sits at the start or end of
+                // the compound (query_handler -> handler): still a whole-word
+                // match, just a stronger positional signal.
                 if (starts_with(term_lower, keyword) ||
                     ends_with(term_lower, keyword)) {
                     strength = pattern.prefix_weight +

@@ -1,7 +1,6 @@
 #include <lci/analysis/feature_analyzer.h>
 
 #include <algorithm>
-#include <cctype>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -9,19 +8,16 @@
 #include <absl/container/flat_hash_map.h>
 
 #include <lci/analysis/call_graph.h>
-#include <lci/core/text.h>
+#include <lci/analysis/word_match.h>
 
 namespace lci {
 
 namespace {
 
-bool contains(std::string_view haystack, std::string_view needle) {
-    return haystack.find(needle) != std::string_view::npos;
-}
-
-bool contains_any(std::string_view s, const std::vector<std::string_view>& subs) {
-    for (auto sub : subs) {
-        if (contains(s, sub)) return true;
+bool contains_word_any(std::string_view s,
+                       const std::vector<std::string_view>& kws) {
+    for (auto kw : kws) {
+        if (analysis::contains_word(s, kw)) return true;
     }
     return false;
 }
@@ -47,26 +43,33 @@ std::string dir_base(const std::string& path) {
 // ---------------------------------------------------------------------------
 
 std::string FeatureAnalyzer::classify_component_type(const EnhancedSymbol& sym) {
-    std::string name = text::ascii_lower(sym.symbol.name);
+    // Whole-word matching on the case-preserving name: the camel boundary is
+    // the signal, so pass `sym.symbol.name`, not a lowercased copy.
+    const std::string& name = sym.symbol.name;
 
     if (is_function_like(sym.symbol.type)) {
-        if (contains(name, "handler") || contains(name, "controller"))
+        if (analysis::contains_word(name, "handler") ||
+            analysis::contains_word(name, "controller"))
             return "Controller";
-        if (contains(name, "service") || contains(name, "manager"))
+        if (analysis::contains_word(name, "service") ||
+            analysis::contains_word(name, "manager"))
             return "Service";
-        if (contains(name, "repository") || contains(name, "dao"))
+        if (analysis::contains_word(name, "repository") ||
+            analysis::contains_word(name, "dao"))
             return "Repository";
-        if (contains(name, "model") || contains(name, "entity"))
+        if (analysis::contains_word(name, "model") ||
+            analysis::contains_word(name, "entity"))
             return "Model";
-        if (contains(name, "util") || contains(name, "helper"))
+        if (analysis::contains_word(name, "util") ||
+            analysis::contains_word(name, "helper"))
             return "Utility";
         return "Function";
     }
     if (is_class_like(sym.symbol.type)) {
-        if (contains(name, "service")) return "Service";
-        if (contains(name, "controller")) return "Controller";
-        if (contains(name, "model")) return "Model";
-        if (contains(name, "repository")) return "Repository";
+        if (analysis::contains_word(name, "service")) return "Service";
+        if (analysis::contains_word(name, "controller")) return "Controller";
+        if (analysis::contains_word(name, "model")) return "Model";
+        if (analysis::contains_word(name, "repository")) return "Repository";
         return "Class";
     }
     if (sym.symbol.type == SymbolType::Interface) return "Interface";
@@ -77,27 +80,29 @@ std::string FeatureAnalyzer::classify_component_type(const EnhancedSymbol& sym) 
 }
 
 std::string FeatureAnalyzer::classify_feature_type(std::string_view name) {
-    std::string lower = text::ascii_lower(name);
-
-    if (contains_any(lower, {"user", "auth", "login", "register", "account", "profile"}))
+    // Whole-word keyword matching (ANA-6): `profiled` is not "profile",
+    // `ordered` is not "order". The keyword tables stay lowercase; the
+    // matcher lowercases candidate words itself, so the original name (with
+    // its camel boundaries) is what gets matched.
+    if (contains_word_any(name, {"user", "auth", "login", "register", "account", "profile"}))
         return "User Management";
-    if (contains_any(lower, {"order", "cart", "checkout", "payment", "billing", "invoice"}))
+    if (contains_word_any(name, {"order", "cart", "checkout", "payment", "billing", "invoice"}))
         return "E-commerce";
-    if (contains_any(lower, {"product", "catalog", "inventory", "stock", "price"}))
+    if (contains_word_any(name, {"product", "catalog", "inventory", "stock", "price"}))
         return "Product Management";
-    if (contains_any(lower, {"notification", "email", "sms", "push", "alert"}))
+    if (contains_word_any(name, {"notification", "email", "sms", "push", "alert"}))
         return "Communication";
-    if (contains_any(lower, {"report", "analytics", "dashboard", "metric", "statistic"}))
+    if (contains_word_any(name, {"report", "analytics", "dashboard", "metric", "statistic"}))
         return "Reporting";
-    if (contains_any(lower, {"search", "filter", "query", "sort"}))
+    if (contains_word_any(name, {"search", "filter", "query", "sort"}))
         return "Search";
-    if (contains_any(lower, {"upload", "download", "file", "image", "document"}))
+    if (contains_word_any(name, {"upload", "download", "file", "image", "document"}))
         return "File Management";
-    if (contains_any(lower, {"config", "setting", "preference", "option"}))
+    if (contains_word_any(name, {"config", "setting", "preference", "option"}))
         return "Configuration";
-    if (contains_any(lower, {"api", "endpoint", "service", "controller"}))
+    if (contains_word_any(name, {"api", "endpoint", "service", "controller"}))
         return "API";
-    if (contains_any(lower, {"database", "db", "sql", "cache", "session"}))
+    if (contains_word_any(name, {"database", "db", "sql", "cache", "session"}))
         return "Data Management";
 
     return "General Feature";
