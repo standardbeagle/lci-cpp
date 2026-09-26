@@ -2,10 +2,11 @@
 """Controlled lci MCP fixture for the working-context tests.
 
 This is the external boundary stand-in for the real ``lci`` MCP server.  The
-working-context custom tools call ``lci.context``; this fixture answers those
-calls from a JSON control file so the tests can drive resolved, unresolved,
-error and indexing-unavailable paths deterministically.  Every tool call is
-appended to a JSONL record so the tests can assert exactly what the tools sent.
+working-context custom tools call ``lci.context`` and ``lci.search``; this
+fixture answers those calls from a JSON control file so the tests can drive
+resolved, unresolved, ambiguous, error and indexing-unavailable paths
+deterministically.  Every tool call is appended to a JSONL record so the tests
+can assert exactly what the tools sent.
 
 It speaks newline-delimited JSON-RPC 2.0 over stdio (the slop-mcp stdio MCP
 transport).  It is intentionally dependency-free.
@@ -49,6 +50,49 @@ def _compact_ref(ref):
     if ref.get("x"):
         out["x"] = ref["x"]
     return out
+
+
+def _handle_search(args, control):
+    term = args.get("pattern")
+    if term is None:
+        term = args.get("patterns", "")
+    if control.get("search_is_error"):
+        envelope = {
+            "success": False,
+            "operation": "search",
+            "error": control.get("search_error", "search failed"),
+        }
+        return {"text": json.dumps(envelope), "is_error": True}
+    if control.get("search_unavailable"):
+        envelope = {
+            "operation": "search",
+            "available": False,
+            "reason": control.get("search_unavailable_reason", "indexing in progress"),
+            "hint": control.get("search_unavailable_hint", "retry shortly"),
+        }
+        return {"text": json.dumps(envelope), "is_error": False}
+    entry = control.get("searches", {}).get(term)
+    if entry is None:
+        entry = {"results": [], "total_matches": 0}
+    if entry.get("error"):
+        envelope = {
+            "success": False,
+            "operation": "search",
+            "error": entry["error"],
+        }
+        return {"text": json.dumps(envelope), "is_error": False}
+    if entry.get("unavailable"):
+        envelope = {
+            "operation": "search",
+            "available": False,
+            "reason": entry.get("reason", "indexing in progress"),
+            "hint": entry.get("hint", "retry shortly"),
+        }
+        return {"text": json.dumps(envelope), "is_error": False}
+    payload = dict(entry)
+    payload.setdefault("pattern", term)
+    payload.setdefault("total_matches", 0)
+    return {"text": json.dumps(payload, ensure_ascii=False), "is_error": False}
 
 
 def _handle_context(args, control):
@@ -109,11 +153,20 @@ def _handle_context(args, control):
             return {"text": json.dumps(envelope), "is_error": True}
 
         index = control.get("index", {})
+        ambiguous = {
+            (a.get("file"), a.get("symbol"))
+            for a in control.get("ambiguous", [])
+        }
         refs = []
         unresolved = []
         for ref in manifest.get("r", []):
             path = ref.get("f")
             symbol = ref.get("s")
+            if (path, symbol) in ambiguous:
+                unresolved.append(
+                    {"file": path, "symbol": symbol, "reason": "ambiguous_symbol"}
+                )
+                continue
             available = index.get(path)
             if symbol is None:
                 if available is None:
@@ -194,7 +247,15 @@ def main():
                                     "type": "object",
                                     "properties": {},
                                 },
-                            }
+                            },
+                            {
+                                "name": "search",
+                                "description": "fixture search",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {},
+                                },
+                            },
                         ]
                     },
                 }
@@ -206,6 +267,8 @@ def main():
             _record({"tool": name, "args": args})
             if name == "context":
                 outcome = _handle_context(args, _control())
+            elif name == "search":
+                outcome = _handle_search(args, _control())
             else:
                 outcome = {
                     "text": json.dumps({"fixture": True, "tool": name}),
