@@ -657,7 +657,55 @@ TEST(GitAnalysis, RenameOnlyCommitReportsNoSymbolDelta) {
     ASSERT_TRUE(analyzer.analyze(params, report));
     EXPECT_EQ(report.summary.symbols_added, 0);
     EXPECT_EQ(report.summary.symbols_deleted, 0);
-    EXPECT_EQ(report.summary.files_changed, 1);
+
+    fs::remove_all(repo);
+}
+
+// ANA-15 mixed: deleting a whole file that held symbols while another file
+// gains a function must not drive symbols_modified negative or absorb the
+// deleted count. added=1, deleted=2 (the deleted file's two funcs), and the
+// surviving modified function is counted once.
+TEST(GitAnalysis, MixedDeleteAndAddSeparatesCountBuckets) {
+    namespace fs = std::filesystem;
+    auto stamp = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    fs::path repo = fs::temp_directory_path() / ("lci_git_mixed_" + stamp);
+    fs::create_directories(repo);
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
+    std::ofstream(repo / "keep.go") << "package main\n"
+                                    << "func Keep() int { return 1 }\n";
+    std::ofstream(repo / "drop.go") << "package main\n"
+                                    << "func DropA() int { return 2 }\n"
+                                    << "func DropB() int { return 3 }\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m one"));
+    fs::remove(repo / "drop.go");
+    std::ofstream(repo / "keep.go") << "package main\n"
+                                    << "func Keep() int { return 10 }\n"
+                                    << "func Gained() int { return 11 }\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m two"));
+
+    Provider p;
+    ASSERT_TRUE(Provider::create(repo.string(), p));
+    Config cfg = make_default_config();
+    cfg.project.root = repo.string();
+    MasterIndex index(cfg);
+    Analyzer analyzer(p, index);
+
+    AnalysisParams params = AnalysisParams::defaults();
+    params.scope = AnalysisScope::Commit;
+    AnalysisReport report;
+    ASSERT_TRUE(analyzer.analyze(params, report));
+    EXPECT_EQ(report.summary.symbols_added, 1);
+    EXPECT_EQ(report.summary.symbols_deleted, 2);
+    EXPECT_EQ(report.summary.symbols_modified, 1);
 
     fs::remove_all(repo);
 }

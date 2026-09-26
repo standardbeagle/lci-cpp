@@ -4,6 +4,7 @@
 #include <string_view>
 #include <vector>
 
+#include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
 #include <nlohmann/json_fwd.hpp>
 
@@ -77,10 +78,15 @@ class Analyzer {
 
     /// Extracts symbols from every readable changed file. `skipped_out`
     /// receives the count of files whose content could not be read.
-    bool parse_changed_files(const std::vector<ChangedFile>& files,
-                             const AnalysisParams& params,
-                             std::vector<SymbolInfo>& out,
-                             int& skipped_out);
+    /// `post_names_out` receives, per changed path, the function/method names
+    /// present at the target ref. Files whose content is unreadable or whose
+    /// symbol set cannot be enumerated are absent from the map, so the
+    /// deleted-symbol diff can tell "no symbols" apart from "not measured".
+    bool parse_changed_files(
+        const std::vector<ChangedFile>& files, const AnalysisParams& params,
+        std::vector<SymbolInfo>& out, int& skipped_out,
+        absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>&
+            post_names_out);
 
     /// Snapshots the indexed function/method symbols. `with_content` gates
     /// the per-symbol body extraction — only the duplicate finder reads
@@ -105,7 +111,8 @@ class Analyzer {
                        std::vector<MetricsFinding>& out);
 
     void build_report(const std::vector<ChangedFile>& files,
-                      const std::vector<SymbolInfo>& symbols,
+                      int symbols_modified, int symbols_added,
+                      int symbols_deleted,
                       std::vector<DuplicateFinding>& duplicates,
                       std::vector<NamingFinding>& naming_issues,
                       std::vector<MetricsFinding>& metrics_issues,
@@ -115,6 +122,13 @@ class Analyzer {
 
     void empty_report(const AnalysisParams& params, int64_t elapsed_ms,
                       AnalysisReport& out);
+
+    /// Names of function/method symbols in `content` for `path`, using the
+    /// same extractor and filters as parse_changed_files. Returns false when
+    /// the file cannot be parsed, so callers never treat an unparsed file as
+    /// "zero symbols" — which would fabricate a full-file deletion.
+    bool extract_symbol_names(std::string_view content, std::string_view path,
+                              absl::flat_hash_set<std::string>& out);
 };
 
 }  // namespace git

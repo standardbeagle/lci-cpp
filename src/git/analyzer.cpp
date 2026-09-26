@@ -96,7 +96,10 @@ bool Analyzer::analyze(const AnalysisParams& params, AnalysisReport& out) {
 
     std::vector<SymbolInfo> new_symbols;
     int skipped_unreadable = 0;
-    if (!parse_changed_files(files, params, new_symbols, skipped_unreadable))
+    absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>
+        post_names;
+    if (!parse_changed_files(files, params, new_symbols, skipped_unreadable,
+                             post_names))
         return false;
 
     // Scope to the CHANGE, not the file: parse_changed_files parses whole
@@ -145,11 +148,111 @@ bool Analyzer::analyze(const AnalysisParams& params, AnalysisReport& out) {
         check_metrics(new_symbols, existing_symbols, params, metrics_issues);
     }
 
+    // ANA-15: symbols_added/deleted must be derived from the pre/post symbol
+    // sets of every measured file, not left at zero. Reuse the same extractor
+    // on the base-ref blob (symmetry with the target-side names
+    // parse_changed_files already collected). The provider runs with
+    // --no-renames, so a pure rename arrives as Deleted(old)+Added(new) with
+    // no linking field: a deleted file whose full pre-image equals an added
+    // file's full post-image is a move, and its symbols are neither added nor
+    // deleted. A file whose old content or parse fails is skipped rather than
+    // counted as a full-file deletion (silent-zero guard), and counts are
+    // de-duplicated per (path, name) so a name repeated in one file cannot
+    // inflate the summary.
+    int symbols_added = 0;
+    int symbols_deleted = 0;
+    std::string base_ref;
+    provider_.get_base_ref(params, base_ref);
+
+    absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> pre_names;
+    absl::flat_hash_map<std::string, std::string> pre_content;
+    for (const auto& file : files) {
+        if (file.status != FileChangeStatus::Modified &&
+            file.status != FileChangeStatus::Deleted)
+            continue;
+        std::string old_content;
+        if (!provider_.get_file_content(base_ref, file.path, old_content))
+            continue;
+        absl::flat_hash_set<std::string> names;
+        if (!extract_symbol_names(old_content, file.path, names)) continue;
+        for (auto& n : names) pre_names[file.path].insert(std::move(n));
+        pre_content.emplace(file.path, std::move(old_content));
+    }
+    // Cancel rename pairs: identical pre/post content means the file moved, so
+    // its symbols must not surface as added+deleted. Pair each Deleted file
+    // with at most one Added file (and vice versa) so a duplicated content
+    // block cannot cancel two moves.
+    absl::flat_hash_set<std::string> renamed_deleted;
+    absl::flat_hash_set<std::string> renamed_added;
+    const std::string target_ref = provider_.get_target_ref(params);
+    absl::flat_hash_map<std::string, std::string> added_content;
+    for (const auto& add : files) {
+        if (add.status != FileChangeStatus::Added) continue;
+        std::string new_content;
+        if (provider_.get_file_content(target_ref, add.path, new_content))
+            added_content.emplace(add.path, std::move(new_content));
+    }
+    for (const auto& del : files) {
+        if (del.status != FileChangeStatus::Deleted) continue;
+        auto pre_it = pre_content.find(del.path);
+        if (pre_it == pre_content.end()) continue;
+        for (const auto& add : files) {
+            if (add.status != FileChangeStatus::Added) continue;
+            if (renamed_added.contains(add.path)) continue;
+            auto new_it = added_content.find(add.path);
+            if (new_it == added_content.end()) continue;
+            if (new_it->second == pre_it->second) {
+                renamed_deleted.insert(del.path);
+                renamed_added.insert(add.path);
+                break;
+            }
+        }
+    }
+
+    for (const auto& file : files) {
+        if (file.status == FileChangeStatus::Added) {
+            if (renamed_added.contains(file.path)) continue;
+            auto post_it = post_names.find(file.path);
+            if (post_it != post_names.end())
+                symbols_added += static_cast<int>(post_it->second.size());
+            continue;
+        }
+        if (file.status == FileChangeStatus::Deleted) {
+            if (renamed_deleted.contains(file.path)) continue;
+            auto pre_it = pre_names.find(file.path);
+            if (pre_it != pre_names.end())
+                symbols_deleted += static_cast<int>(pre_it->second.size());
+            continue;
+        }
+        if (file.status != FileChangeStatus::Modified) continue;
+        auto pre_it = pre_names.find(file.path);
+        auto post_it = post_names.find(file.path);
+        if (pre_it == pre_names.end() || post_it == post_names.end()) continue;
+        const auto& cur = post_it->second;
+        for (const auto& name : cur) {
+            if (!pre_it->second.contains(name)) ++symbols_added;
+        }
+        for (const auto& name : pre_it->second) {
+            if (!cur.contains(name)) ++symbols_deleted;
+        }
+    }
+
+    // Modified = a target-side symbol whose (file, name) already existed at
+    // the base ref. Derived from the same scope-filtered `new_symbols` the
+    // findings use, so a deleted file cannot push it negative.
+    int symbols_modified = 0;
+    for (const auto& sym : new_symbols) {
+        auto pre_it = pre_names.find(sym.file_path);
+        if (pre_it != pre_names.end() && pre_it->second.contains(sym.name))
+            ++symbols_modified;
+    }
+
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - start)
                         .count();
-    build_report(files, new_symbols, duplicates, naming_issues, metrics_issues,
-                 params, elapsed, skipped_unreadable, out);
+    build_report(files, symbols_modified, symbols_added, symbols_deleted,
+                 duplicates, naming_issues, metrics_issues, params, elapsed,
+                 skipped_unreadable, out);
     return true;
 }
 
@@ -157,10 +260,11 @@ bool Analyzer::analyze(const AnalysisParams& params, AnalysisReport& out) {
 // Symbol extraction
 // ============================================================================
 
-bool Analyzer::parse_changed_files(const std::vector<ChangedFile>& files,
-                                   const AnalysisParams& params,
-                                   std::vector<SymbolInfo>& out,
-                                   int& skipped_out) {
+bool Analyzer::parse_changed_files(
+    const std::vector<ChangedFile>& files, const AnalysisParams& params,
+    std::vector<SymbolInfo>& out, int& skipped_out,
+    absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>&
+        post_names_out) {
     std::string target_ref = provider_.get_target_ref(params);
     skipped_out = 0;
 
@@ -199,9 +303,12 @@ bool Analyzer::parse_changed_files(const std::vector<ChangedFile>& files,
         extractor.extract(tree.get());
         auto extracted = extractor.take_results();
 
+        auto& post_names = post_names_out[file.path];
         for (const auto& sym : extracted.symbols) {
             auto type = std::string(to_string(sym.type));
             if (type != "function" && type != "method") continue;
+
+            post_names.insert(sym.name);
 
             SymbolInfo si;
             si.name = sym.name;
@@ -224,6 +331,34 @@ bool Analyzer::parse_changed_files(const std::vector<ChangedFile>& files,
 
             out.push_back(std::move(si));
         }
+    }
+    return true;
+}
+
+bool Analyzer::extract_symbol_names(std::string_view content,
+                                    std::string_view path,
+                                    absl::flat_hash_set<std::string>& out) {
+    auto ext = std::filesystem::path(path).extension().string();
+    parser::Language lang{};
+    if (!parser::language_from_extension(ext, lang)) return false;
+
+    parser::PooledParser parser_guard(lang);
+    if (!parser_guard) return false;
+
+    parser::UniqueTree tree(ts_parser_parse_string(
+        parser_guard.get(), nullptr, content.data(),
+        static_cast<uint32_t>(content.size())));
+    if (!tree) return false;
+
+    parser::UnifiedExtractor extractor;
+    extractor.init(content, FileID{1}, ext, path);
+    extractor.extract(tree.get());
+    auto extracted = extractor.take_results();
+
+    for (const auto& sym : extracted.symbols) {
+        auto type = std::string(to_string(sym.type));
+        if (type != "function" && type != "method") continue;
+        out.insert(sym.name);
     }
     return true;
 }
@@ -756,23 +891,14 @@ void Analyzer::check_metrics(const std::vector<SymbolInfo>& new_symbols,
 // ============================================================================
 
 void Analyzer::build_report(const std::vector<ChangedFile>& files,
-                            const std::vector<SymbolInfo>& symbols,
+                            int symbols_modified, int symbols_added,
+                            int symbols_deleted,
                             std::vector<DuplicateFinding>& duplicates,
                             std::vector<NamingFinding>& naming_issues,
                             std::vector<MetricsFinding>& metrics_issues,
                             const AnalysisParams& params,
                             int64_t elapsed_ms, int skipped_unreadable,
                             AnalysisReport& out) {
-    int symbols_added = 0;
-    for (const auto& file : files) {
-        if (file.status == FileChangeStatus::Added) {
-            for (const auto& sym : symbols) {
-                if (sym.file_path == file.path) ++symbols_added;
-            }
-        }
-    }
-    int symbols_modified = static_cast<int>(symbols.size()) - symbols_added;
-
     double risk = calculate_risk_score(duplicates, naming_issues, metrics_issues);
     std::string top_rec = generate_top_recommendation(duplicates, naming_issues, metrics_issues);
 
@@ -783,6 +909,7 @@ void Analyzer::build_report(const std::vector<ChangedFile>& files,
     out.summary.files_changed = static_cast<int>(files.size());
     out.summary.symbols_added = symbols_added;
     out.summary.symbols_modified = symbols_modified;
+    out.summary.symbols_deleted = symbols_deleted;
     out.summary.duplicates_found = static_cast<int>(duplicates.size());
     out.summary.naming_issues_found = static_cast<int>(naming_issues.size());
     out.summary.metrics_issues_found = static_cast<int>(metrics_issues.size());
