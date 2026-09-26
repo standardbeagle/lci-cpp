@@ -1332,6 +1332,116 @@ TEST(LanguageExtractionTest, OneBranchScoresTwoInEveryLanguage) {
     }
 }
 
+// PAR-11: the complexity visitor's construct list omitted several grammars'
+// multi-way and boolean spellings, so their decision points scored 0. Each
+// fixture below isolates ONE construct; the function baseline is 1, so the
+// expected total is 1 + the construct's contribution. A minimal no-branch
+// function in the same grammar (criterion 2) pins the baseline.
+TEST(LanguageExtractionTest, ComplexityCountsMultiWayConstructs) {
+    struct Case {
+        Language lang;
+        std::string_view ext;
+        std::string_view src;
+        std::string_view fn;
+        int contribution;
+    };
+    const Case cases[] = {
+        // Python if/elif/elif: `if_statement` + two `elif_clause` = 3.
+        {Language::Python, ".py",
+         "def f(a, b, c):\n"
+         "    if a:\n        return 1\n"
+         "    elif b:\n        return 2\n"
+         "    elif c:\n        return 3\n"
+         "    return 0\n",
+         "f", 3},
+        // Rust 3-arm match: three `match_arm`.
+        {Language::Rust, ".rs",
+         "fn f(x: i32) -> i32 {\n"
+         "    match x {\n"
+         "        1 => 1,\n"
+         "        2 => 2,\n"
+         "        _ => 0,\n"
+         "    }\n"
+         "}\n",
+         "f", 3},
+        // Java 3-case switch: three `switch_label` (`case`), no default.
+        {Language::Java, ".java",
+         "class K { int f(int x) { switch (x) {"
+         " case 1: return 1; case 2: return 2; case 3: return 3; }"
+         " return 0; } }\n",
+         "f", 3},
+        // Kotlin 3-entry when: three `when_entry`, no `else`.
+        {Language::Kotlin, ".kt",
+         "fun f(x: Int): Int { return when (x) {"
+         " 1 -> 1; 2 -> 2; 3 -> 3 } }\n",
+         "f", 3},
+        // Python `a and b or c`: two `boolean_operator` nodes.
+        {Language::Python, ".py",
+         "def f(a, b, c):\n    return a and b or c\n",
+         "f", 2},
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.ext);
+        if (!parse(c.lang, c.src)) {
+            ADD_FAILURE() << c.ext << " parser unavailable";
+            continue;
+        }
+        auto r = extract(c.lang, c.ext, c.src,
+                         std::string("cx") + std::string(c.ext));
+        const Symbol* s = find_symbol(r, c.fn);
+        ASSERT_NE(s, nullptr) << c.ext << " " << c.fn;
+        int cc = -1;
+        for (const auto& [key, cx] : r.complexity) {
+            if (key.line == s->line && key.column == s->column) cc = cx;
+        }
+        EXPECT_EQ(cc, 1 + c.contribution)
+            << c.ext << " " << c.fn << " total complexity";
+    }
+}
+
+// PAR-11: C# and PHP `foreach_statement` is a loop and must score like the
+// other loop spellings (base 1 + 1). The counter's list knew `for_statement`
+// and `for_in_statement` but not the C#/PHP name.
+TEST(LanguageExtractionTest, ComplexityCountsForeachLoops) {
+    struct Case {
+        Language lang;
+        std::string_view ext;
+        std::string_view src;
+        std::string_view fn;
+    };
+    const Case cases[] = {
+        {Language::CSharp, ".cs",
+         "class K {\n"
+         "  void F(int[] xs) {\n"
+         "    foreach (var x in xs) { G(x); }\n"
+         "  }\n"
+         "  void G(int x) {}\n"
+         "}\n",
+         "F"},
+        {Language::PHP, ".php",
+         "<?php\n"
+         "function f($xs) { foreach ($xs as $x) { g($x); } }\n"
+         "function g($x) {}\n",
+         "f"},
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.ext);
+        if (!parse(c.lang, c.src)) {
+            ADD_FAILURE() << c.ext << " parser unavailable";
+            continue;
+        }
+        auto r = extract(c.lang, c.ext, c.src,
+                         std::string("cx") + std::string(c.ext));
+        const Symbol* s = find_symbol(r, c.fn);
+        ASSERT_NE(s, nullptr) << c.ext << " " << c.fn;
+        int cc = -1;
+        for (const auto& [key, cx] : r.complexity) {
+            if (key.line == s->line && key.column == s->column) cc = cx;
+        }
+        EXPECT_EQ(cc, 2) << c.ext << " " << c.fn;
+    }
+}
+
 // Pins Ruby `module` extraction, which is served by the shared "module" /
 // "mod_item" branch. A second, later `.rb`-gated branch used to sit behind it
 // calling a byte-identical extract_ruby_module; this test is the guard that the
