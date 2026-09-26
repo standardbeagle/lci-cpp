@@ -470,7 +470,7 @@ I/O, throws), with transitive call-graph analysis.
 | `symbol_id` | string | (empty) | For `symbol` mode, instead of `symbol_name`. |
 | `file_path` | string | (empty) | For `file` mode (or symbol lookup). |
 | `category` | string | (empty) | For `category` mode. |
-| `include_reasons` | boolean | false | Impurity reason strings. |
+| `include_reasons` | boolean | false | Impurity reason strings. Every impure result carries at least one: callee classification (names the callee + category), throw sites (line), writes, dynamic calls, or unresolved calls that block a pure verdict. |
 | `include_transitive` | boolean | false | Transitive effects from callees. |
 | `include_confidence` | boolean | false | Confidence levels. |
 | `max_results` | integer | 100 | Clamped [1, 10000]. |
