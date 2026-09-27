@@ -1266,9 +1266,21 @@ int SearchEngine::process_file(
     const LangId file_lang = language_info_for_path(path).language;
 
     // Honor a caller-set per-file cap (options.max_count_per_file); otherwise
-    // scan every match so the file's true count is known. Retention, not
-    // scanning, is what the per-file bound limits.
+    // scan up to the rows this file can contribute to the answer. Retention,
+    // not scanning, is what the per-file bound limits.
+    //
+    // The old scan left max_count_per_file at 0, so find_content_matches fell
+    // back to the hidden kMaxMatchesPerFile=100 default and silently truncated
+    // dense files (a 601-match file returned 100 rows and lost the tail -- the
+    // CLI paging contract SearchPagingTest pins). execute_search had avoided
+    // this by setting the budget from the remaining max_results. Set it here
+    // from per_file_cap (== the output cap), which is the most rows this file
+    // can ever place in the answer; per_file_cap<=0 means unbounded output and
+    // leaves the historical default in place.
     SearchOptions scan_options = options;
+    if (scan_options.max_count_per_file <= 0 && per_file_cap > 0) {
+        scan_options.max_count_per_file = per_file_cap;
+    }
     auto matches = find_matches(content_sv, pattern, scan_options);
     // Invert reports non-matching lines, so a file with zero matches is the
     // most productive input there is -- it contributes all of its lines.
