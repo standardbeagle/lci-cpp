@@ -454,10 +454,12 @@ Entries resolve against indexed symbols by `file` plus `symbol` and/or `line`.
 *If neither include flag is set, both default on.
 
 **Output**: `{annotations[], total_count}`. Each annotation: `symbol_name`,
-`file_id`, `symbol_id`, `file_path`, `line`, optional `direct_labels[]`,
-`category`, `tags{}`, `propagated_labels[]` (`label`, `strength`, `hops`,
-`source_name`, `source_file`). Category results de-duped against label results
-by `symbol_id`.
+`file_id`, `id` (base-63 object ID accepted by `get_context`/`inspect_symbol`;
+omitted when no indexed symbol sits on the annotated line), `file_path`,
+`line`, optional `direct_labels[]`, `category`, `tags{}`,
+`propagated_labels[]` (`label`, `strength`, `hops`, `source_name`,
+`source_file`). Category results de-duped against label results by source
+position (`file_id` + `line`).
 
 **Errors**: neither `label` nor `category`.
 

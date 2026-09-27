@@ -302,11 +302,29 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
     nlohmann::json annotations = nlohmann::json::array();
     int count = 0;
 
+    // The annotator keys results by position (annotation_key), not by the
+    // indexed EnhancedSymbol::id. Resolve each annotated position back to its
+    // real symbol so we can emit a base-63 object id that get_context,
+    // inspect_symbol and the other tools accept (MCP-14). One pinned snapshot
+    // spans the whole handler; walk it in the same file_id+line order the
+    // propagator path below uses.
+    std::shared_ptr<const ReferenceTracker::Snapshot> rt_snap;
+    if (indexer) rt_snap = indexer->ref_tracker().pin();
+    auto resolve_real_id = [&](const AnnotatedSymbol* sym) -> SymbolID {
+        if (!rt_snap) return 0;
+        for (const auto& es : rt_snap->get_file_enhanced_symbols(sym->file_id)) {
+            if (es && es->symbol.line == sym->line) return es->id;
+        }
+        return 0;
+    };
+
     auto serialize_direct = [&](const AnnotatedSymbol* sym) {
         nlohmann::json item;
         item["symbol_name"] = sym->name;
         item["file_id"] = static_cast<int>(sym->file_id);
-        item["symbol_id"] = std::to_string(sym->symbol_id);
+        if (SymbolID rid = resolve_real_id(sym); rid != 0) {
+            item["id"] = encode_symbol_id(rid);
+        }
         item["file_path"] = std::string(relative_to_root(sym->file_path, root));
         item["line"] = sym->line;
         if (!sym->annotation.labels.empty())
@@ -342,8 +360,6 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
     // #4: deterministic — get_file_enhanced_symbols returns ordered list,
     // we match the first symbol on the target line.
     if (!label.empty() && include_propagated && propagator && indexer) {
-        const auto& ref = indexer->ref_tracker();
-        auto rt_snap = ref.pin();
         for (auto& item : annotations) {
             auto file_id = static_cast<FileID>(
                 item.value("file_id", 0));
@@ -395,16 +411,19 @@ ToolResult handle_semantic_annotations(const nlohmann::json& raw_params,
     if (!category.empty() && include_direct) {
         auto symbols = annotator.get_symbols_by_category(category);
         // De-dup against any already-collected (label query may have added
-        // the same symbol). Match Go: check existing items by symbol_id.
-        absl::flat_hash_set<std::string> seen;
+        // the same symbol). Identity is (file_id, line): the label item no
+        // longer carries the annotator's position key.
+        absl::flat_hash_set<uint64_t> seen;
         for (auto& item : annotations) {
-            auto sid = item.value("symbol_id", "");
-            if (!sid.empty()) seen.insert(sid);
+            auto fid = static_cast<uint64_t>(item.value("file_id", 0));
+            int line = item.value("line", -1);
+            if (line >= 0) seen.insert((fid << 32) | static_cast<uint64_t>(line));
         }
         for (const auto& sym : symbols) {
             if (count >= max_results) break;
-            auto sid_str = std::to_string(sym->symbol_id);
-            if (seen.contains(sid_str)) continue;
+            uint64_t key = (static_cast<uint64_t>(sym->file_id) << 32) |
+                           static_cast<uint64_t>(sym->line);
+            if (seen.contains(key)) continue;
             annotations.push_back(serialize_direct(sym));
             ++count;
         }
