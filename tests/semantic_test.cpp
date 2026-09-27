@@ -1,7 +1,9 @@
+#include <lci/core/semantic_annotator.h>
 #include <lci/semantic/fuzzy_matcher.h>
 #include <lci/semantic/name_splitter.h>
 #include <lci/semantic/stemmer.h>
 #include <lci/semantic/synonym_table.h>
+#include <lci/symbol.h>
 
 #include <gtest/gtest.h>
 
@@ -402,6 +404,102 @@ TEST(SynonymTableTest, BuildFromOpsRejectsMisplacedClearAll) {
         {SynonymOp::Kind::ClearAll, {}}};  // not first
     auto result = SynonymTable::build_from_ops(ops);
     EXPECT_FALSE(result.has_value());
+}
+
+// -- SemanticAnnotator comment-span scoping (ANA-3) ---------------------------
+//
+// `@lci:` must be honoured only inside a real comment. A string literal that
+// happens to contain the marker (this repo's own tests, docs, fixtures) is
+// DATA, not an annotation; treating it as one mints false labels that seed the
+// side-effect propagator and let entry_signatures report confidence=annotated.
+
+namespace {
+
+Symbol make_symbol(const std::string& name, int line) {
+    Symbol sym;
+    sym.name = name;
+    sym.line = line;
+    sym.column = 0;
+    sym.type = SymbolType::Function;
+    return sym;
+}
+
+SymbolID key_for(int line) {
+    return static_cast<SymbolID>(1) << 32 |
+           static_cast<SymbolID>(line) << 16;
+}
+
+}  // namespace
+
+// Criterion 1a: a marker inside a string literal is not an annotation.
+TEST(SemanticAnnotatorTest, StringLiteralMarkerIsNotAnnotation) {
+    SemanticAnnotator sa;
+    std::string content =
+        "// decoy above\n"
+        "const char* s = \"@lci:labels[fake]\";\n"
+        "void f() {}\n";
+
+    // Symbols are 1-indexed: the `void f` declaration is on line 3.
+    sa.extract_annotations(1, "f.cpp", content, {make_symbol("f", 3)});
+
+    EXPECT_EQ(sa.get_annotation(1, key_for(3)), nullptr);
+    EXPECT_TRUE(sa.get_symbols_by_label("fake").empty());
+    EXPECT_TRUE(sa.get_symbols_by_label("decoy").empty());
+    EXPECT_EQ(sa.total_annotations(), 0);
+}
+
+// Criterion 1b: the comment form of the same marker IS an annotation.
+TEST(SemanticAnnotatorTest, CommentMarkerIsAnnotation) {
+    SemanticAnnotator sa;
+    std::string content =
+        "// @lci:labels[pure]\n"
+        "void f() {}\n";
+
+    sa.extract_annotations(1, "f.cpp", content, {make_symbol("f", 2)});
+
+    auto* ann = sa.get_annotation(1, key_for(2));
+    ASSERT_NE(ann, nullptr);
+    ASSERT_EQ(ann->labels.size(), 1u);
+    EXPECT_EQ(ann->labels[0], "pure");
+}
+
+// Criterion 3: a real comment annotation is still recognised in each of
+// C++, Python and JS (all three must survive the string-literal restriction).
+TEST(SemanticAnnotatorTest, CommentAnnotationRecognisedInCppPythonJs) {
+    {
+        SemanticAnnotator sa;
+        sa.extract_annotations(1, "a.cpp", "// @lci:labels[cpp]\nvoid a() {}\n",
+                               {make_symbol("a", 2)});
+        EXPECT_FALSE(sa.get_symbols_by_label("cpp").empty());
+    }
+    {
+        SemanticAnnotator sa;
+        sa.extract_annotations(1, "b.py", "# @lci:labels[py]\ndef b():\n    pass\n",
+                               {make_symbol("b", 2)});
+        EXPECT_FALSE(sa.get_symbols_by_label("py").empty());
+    }
+    {
+        SemanticAnnotator sa;
+        sa.extract_annotations(1, "c.js", "// @lci:labels[js]\nfunction c() {}\n",
+                               {make_symbol("c", 2)});
+        EXPECT_FALSE(sa.get_symbols_by_label("js").empty());
+    }
+}
+
+// Criterion 1a (block-comment / string coexistence): a `//` marker on a code
+// line is a trailing comment and counts; the literal on the same line does not.
+TEST(SemanticAnnotatorTest, TrailingStringMarkerNotAnnotation) {
+    SemanticAnnotator sa;
+    std::string content =
+        "const char* s = \"@lci:pure\"; // @lci:labels[real]\n"
+        "void f() {}\n";
+
+    sa.extract_annotations(1, "f.cpp", content, {make_symbol("f", 2)});
+
+    auto* ann = sa.get_annotation(1, key_for(2));
+    ASSERT_NE(ann, nullptr);
+    EXPECT_EQ(ann->labels.size(), 1u);
+    EXPECT_EQ(ann->labels[0], "real");
 }
 
 }  // anonymous namespace

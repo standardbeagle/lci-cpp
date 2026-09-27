@@ -15,8 +15,10 @@
 #include <lci/analysis/scope_set.h>
 #include <lci/analysis/english_words.h>
 #include <lci/config.h>
+#include <lci/core/semantic_annotator.h>
 #include <lci/reference.h>
 #include <lci/semantic/synonym_table.h>
+#include <lci/symbol.h>
 
 #include "unique_temp.h"
 
@@ -2120,6 +2122,59 @@ TEST(EntrySignatures, NonDirectoryEntriesAreSkipped) {
 
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
+}
+
+// ===========================================================================
+// entry_signatures: confidence=annotated must be EARNED (ANA-3). A source
+// file that only mentions `@lci:entry` inside a STRING LITERAL must not mint
+// an entry label, so resolve_entry_hints falls through to heuristic/framework.
+// Before the fix the annotator scanned raw text, so the literal seeded the
+// "entry" label index and this repo's own string constants made the self
+// probe report confidence=annotated.
+// ===========================================================================
+TEST(EntrySignatures, StringLiteralEntryLabelDoesNotEarnAnnotated) {
+    SemanticAnnotator sa;
+    Symbol sym;
+    sym.name = "main";
+    sym.line = 2;
+    sym.column = 0;
+    sym.type = SymbolType::Function;
+
+    std::string content =
+        "const char* hint = \"@lci:labels[entry]\";\n"
+        "int main() { return 0; }\n";
+
+    sa.extract_annotations(1, "main.cpp", content, {sym});
+
+    // The literal is a "code" line, so the contiguous comment block above the
+    // symbol is empty: no label, and no annotated confidence.
+    InsightConfig insight;
+    auto hints = analysis::resolve_entry_hints(insight, "", &sa);
+    EXPECT_NE(hints.confidence, "annotated");
+    EXPECT_TRUE(hints.pins.empty());
+}
+
+// Control: a REAL comment annotation above the symbol still earns the label,
+// so the guard above is not vacuous.
+TEST(EntrySignatures, CommentEntryLabelEarnsAnnotated) {
+    SemanticAnnotator sa;
+    Symbol sym;
+    sym.name = "main";
+    sym.line = 2;
+    sym.column = 0;
+    sym.type = SymbolType::Function;
+
+    std::string content =
+        "// @lci:labels[entry]\n"
+        "int main() { return 0; }\n";
+
+    sa.extract_annotations(1, "main.cpp", content, {sym});
+
+    InsightConfig insight;
+    auto hints = analysis::resolve_entry_hints(insight, "", &sa);
+    EXPECT_EQ(hints.confidence, "annotated");
+    ASSERT_EQ(hints.pins.size(), 1u);
+    EXPECT_EQ(hints.pins[0], "main");
 }
 
 }  // namespace
