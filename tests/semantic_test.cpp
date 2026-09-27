@@ -1,4 +1,10 @@
+#include <lci/config.h>
 #include <lci/core/semantic_annotator.h>
+#include <lci/idcodec.h>
+#include <lci/indexing/master_index.h>
+#include <lci/mcp/handlers_core.h>
+#include <lci/mcp/handlers_explore.h>
+#include <lci/mcp/handlers_side_effects.h>
 #include <lci/semantic/fuzzy_matcher.h>
 #include <lci/semantic/name_splitter.h>
 #include <lci/semantic/stemmer.h>
@@ -6,11 +12,15 @@
 #include <lci/symbol.h>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
+
+#include "unique_temp.h"
 
 namespace lci {
 namespace {
@@ -528,6 +538,100 @@ TEST(SemanticAnnotatorTest, BlockCommentContinuationIsAnnotation) {
     sa.extract_annotations(1, "f.cpp", content, {make_symbol("f", 4)});
 
     EXPECT_FALSE(sa.get_symbols_by_label("cont").empty());
+}
+
+// -- semantic_annotations object-id emission (MCP-14) -------------------------
+//
+// The handler used to emit the annotator's internal symbol_id (the position
+// key `annotation_key(file_id, line, column)`) as a decimal string. No other
+// tool accepts that value: get_context and inspect_symbol both decode their
+// id/object_id argument with the base-63 object-id codec. Emit the real
+// EnhancedSymbol id encoded with encode_symbol_id so agents can chain tools.
+
+class SemanticAnnotationsObjectIdTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        dir_ = lci::test::unique_temp_dir("lci_sem_ann_oid_");
+        std::filesystem::create_directories(dir_);
+        {
+            std::ofstream out(dir_ / "handler.go");
+            out << "package main\n\n"
+                   "// @lci:labels[api,public]\n"
+                   "// @lci:category[endpoint]\n"
+                   "func handleRequest() {}\n";
+        }
+        Config config;
+        config.project.root = dir_.string();
+        indexer_ = std::make_unique<MasterIndex>(config);
+        ASSERT_TRUE(indexer_->index_directory(dir_.string()));
+        annotator_ = std::make_unique<SemanticAnnotator>();
+        ASSERT_GE(annotator_->populate_from_index(*indexer_), 1);
+    }
+
+    void TearDown() override {
+        annotator_.reset();
+        indexer_.reset();
+        std::error_code ec;
+        std::filesystem::remove_all(dir_, ec);
+    }
+
+    nlohmann::json query_label(const std::string& label) const {
+        nlohmann::json params;
+        params["label"] = label;
+        auto result = mcp::handle_semantic_annotations(params, *annotator_, nullptr,
+                                                  indexer_.get());
+        EXPECT_FALSE(result.is_error) << result.text;
+        return nlohmann::json::parse(result.text);
+    }
+
+    std::filesystem::path dir_;
+    std::unique_ptr<MasterIndex> indexer_;
+    std::unique_ptr<SemanticAnnotator> annotator_;
+};
+
+// Criterion 1: the emitted id round-trips through get_context {id}.
+TEST_F(SemanticAnnotationsObjectIdTest, EmittedIdRoundTripsThroughGetContext) {
+    auto out = query_label("api");
+    ASSERT_EQ(out["total_count"].get<int>(), 1) << out.dump();
+    const auto& ann = out["annotations"][0];
+    ASSERT_TRUE(ann.contains("id")) << out.dump();
+    const std::string id = ann["id"].get<std::string>();
+    ASSERT_FALSE(id.empty()) << out.dump();
+
+    nlohmann::json params;
+    params["id"] = id;
+    auto result = mcp::handle_get_context(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto ctx = nlohmann::json::parse(result.text);
+    ASSERT_EQ(ctx["count"].get<int>(), 1) << result.text;
+    ASSERT_FALSE(ctx["contexts"].empty()) << result.text;
+    EXPECT_EQ(ctx["contexts"][0]["symbol_name"].get<std::string>(),
+              "handleRequest")
+        << result.text;
+}
+
+// Criterion 1: the emitted id resolves through inspect_symbol {id}.
+TEST_F(SemanticAnnotationsObjectIdTest, EmittedIdResolvesThroughInspectSymbol) {
+    auto out = query_label("api");
+    ASSERT_EQ(out["total_count"].get<int>(), 1) << out.dump();
+    const std::string id = out["annotations"][0]["id"].get<std::string>();
+    ASSERT_FALSE(id.empty());
+
+    nlohmann::json params;
+    params["id"] = id;
+    auto result = mcp::handle_inspect_symbol(params, *indexer_);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_EQ(json["count"].get<int>(), 1) << result.text;
+    EXPECT_EQ(json["symbols"][0]["name"].get<std::string>(), "handleRequest")
+        << result.text;
+}
+
+// Criterion 2: the raw decimal symbol_id field is gone.
+TEST_F(SemanticAnnotationsObjectIdTest, NoRawDecimalSymbolIdField) {
+    auto out = query_label("api");
+    ASSERT_EQ(out["total_count"].get<int>(), 1) << out.dump();
+    EXPECT_FALSE(out["annotations"][0].contains("symbol_id")) << out.dump();
 }
 
 }  // anonymous namespace
