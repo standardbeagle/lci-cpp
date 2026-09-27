@@ -3,10 +3,12 @@
 #include <lci/core/portable.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/indexing/master_index.h>
+#include <lci/language_map.h>
 #include <lci/search/search_engine.h>
 #include <lci/symbol.h>
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <filesystem>
 #include <fstream>
@@ -73,6 +75,125 @@ absl::flat_hash_map<std::string, std::string> json_string_map(
     }
     return out;
 }
+
+// Returns the byte offset of the first `@lci:` marker that sits inside a
+// COMMENT token on `line`, or npos when every occurrence is inside a string /
+// char literal or ordinary code. ANA-3: without this the annotator scanned raw
+// text, so `const char* s = "@lci:labels[x]";` minted a real label and seeded
+// the side-effect propagator / entry_signatures' confidence=annotated.
+//
+// Classification reuses the single shared whole-line predicate
+// `lci::line_is_comment_only` (so `#` is a comment only where the language
+// says so, and a C/C++ preprocessor line is never a comment) and then scans
+// left-to-right for a `//`/`/*`/`#` opener that lies before the marker while
+// honouring string/char literals and same-line block closers. This mirrors the
+// column-aware rule the CLI/`--comments-only` path uses; the annotator lives
+// in core and cannot include the CLI-layer ast_filters header.
+size_t first_marker_in_comment(std::string_view line, LangId lang) {
+    constexpr std::string_view kMarker = "@lci:";
+    if (line.find(kMarker) == std::string_view::npos) {
+        return std::string_view::npos;
+    }
+
+    // A line whose trimmed form is entirely comment body makes every column
+    // (including any marker) a comment byte.
+    if (line_is_comment_only(line, lang)) return line.find(kMarker);
+
+    // Collect the [start,end) comment ranges introduced on THIS line, then
+    // return the first marker that falls inside one. Ranges, not a single
+    // opener: a line can hold a marker in a string literal AND a real marker in
+    // a trailing comment (`const char* s = "@lci:x"; // @lci:labels[real]`).
+    // The first marker must not decide the answer.
+    auto marker_in = [&](size_t start, size_t end) -> size_t {
+        size_t p = line.find(kMarker);
+        while (p != std::string_view::npos) {
+            if (p >= start && p < end) return p;
+            p = line.find(kMarker, p + 1);
+        }
+        return std::string_view::npos;
+    };
+
+    enum class State { Code, SingleQuote, DoubleQuote, BlockComment };
+    State state = State::Code;
+    size_t i = 0;
+    while (i < line.size()) {
+        const char c = line[i];
+        switch (state) {
+            case State::Code: {
+                // Inline `// ...`: comment runs to end of line.
+                if (c == '/' && i + 1 < line.size() && line[i + 1] == '/') {
+                    return marker_in(i, line.size());
+                }
+                // `#` opens a comment only where the language says so. Ask the
+                // shared predicate on the tail: `#include` in C/C++ is code,
+                // `# note` in Python is comment.
+                if (c == '#') {
+                    if (line_is_comment_only(line.substr(i), lang)) {
+                        return marker_in(i, line.size());
+                    }
+                    ++i;
+                    continue;
+                }
+                // `/* ...`: comment from `i` until a same-line `*/` (or EOL).
+                if (c == '/' && i + 1 < line.size() && line[i + 1] == '*') {
+                    const size_t close = line.find("*/", i + 2);
+                    if (close == std::string_view::npos) {
+                        return marker_in(i, line.size());
+                    }
+                    const size_t hit = marker_in(i, close + 2);
+                    if (hit != std::string_view::npos) return hit;
+                    i = close + 2;
+                    continue;
+                }
+                if (c == '\'') { state = State::SingleQuote; ++i; continue; }
+                if (c == '"') { state = State::DoubleQuote; ++i; continue; }
+                ++i;
+                break;
+            }
+            case State::SingleQuote: {
+                if (c == '\\' && i + 1 < line.size()) { i += 2; continue; }
+                if (c == '\'') { state = State::Code; ++i; continue; }
+                ++i;
+                break;
+            }
+            case State::DoubleQuote: {
+                if (c == '\\' && i + 1 < line.size()) { i += 2; continue; }
+                if (c == '"') { state = State::Code; ++i; continue; }
+                ++i;
+                break;
+            }
+            case State::BlockComment: {
+                if (c == '*' && i + 1 < line.size() && line[i + 1] == '/') {
+                    state = State::Code;
+                    i += 2;
+                    continue;
+                }
+                ++i;
+                break;
+            }
+        }
+    }
+    return std::string_view::npos;
+}
+
+bool line_has_annotation(LangId lang, std::string_view trimmed) {
+    // A block-comment continuation (" * @lci:...") is handled by
+    // first_marker_in_comment only when the opener is on the same line, which
+    // it is not; the whole-line predicate also declines it. Accept it when the
+    // line is a continuation inside a C-style block comment: the trimmed form
+    // starts with '*' and the annotator's block-boundary walk has already
+    // established the line sits in a contiguous comment block. `*/` alone is
+    // never an annotation.
+    if (first_marker_in_comment(trimmed, lang) != std::string_view::npos) {
+        return true;
+    }
+    if (!trimmed.empty() && trimmed.front() == '*' &&
+        trimmed.substr(0, 2) != "*/" &&
+        trimmed.find("@lci:") != std::string_view::npos) {
+        return true;
+    }
+    return false;
+}
 }  // namespace
 
 SemanticAnnotator::Patterns SemanticAnnotator::make_patterns() {
@@ -111,8 +232,14 @@ void SemanticAnnotator::extract_annotations(
         start = end + 1;
     }
 
+    // ANA-3: annotations are only valid inside real comments. The language of
+    // the file is needed to classify a line's columns (a `#` is a comment only
+    // in Python/Ruby/PHP, never in a C/C++ preprocessor line).
+    const LangId lang = language_info_for_path(file_path).language;
+
     for (const auto& symbol : symbols) {
-        auto* annotation = extract_symbol_annotation(file_id, symbol, lines);
+        auto* annotation =
+            extract_symbol_annotation(file_id, symbol, lang, lines);
         if (annotation) {
             SymbolID sym_id =
                 annotation_key(file_id, symbol.line, symbol.column);
@@ -424,12 +551,13 @@ int SemanticAnnotator::unique_labels() const {
 // Private
 // ---------------------------------------------------------------------------
 
-bool SemanticAnnotator::is_annotation_line(std::string_view line) const {
-    return line.find("@lci:") != std::string_view::npos;
+bool SemanticAnnotator::is_annotation_line(std::string_view line,
+                                           LangId lang) const {
+    return line_has_annotation(lang, line);
 }
 
 SemanticAnnotation* SemanticAnnotator::extract_symbol_annotation(
-    FileID /*file_id*/, const Symbol& symbol,
+    FileID /*file_id*/, const Symbol& symbol, LangId lang,
     const std::vector<std::string_view>& lines) {
 
     int start_search = std::max(0, symbol.line - 10);
@@ -459,7 +587,7 @@ SemanticAnnotation* SemanticAnnotator::extract_symbol_annotation(
                (trimmed.front() == ' ' || trimmed.front() == '\t')) {
             trimmed.remove_prefix(1);
         }
-        if (is_annotation_line(trimmed)) {
+        if (is_annotation_line(trimmed, lang)) {
             annotation_lines.push_back(trimmed);
         } else if (!is_comment_or_blank(trimmed)) {
             break;  // reached the previous symbol / code — boundary

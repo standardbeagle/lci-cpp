@@ -9,6 +9,7 @@
 
 #include <absl/container/flat_hash_map.h>
 
+#include <lci/language_map.h>
 #include <lci/types.h>
 
 namespace lci {
@@ -148,9 +149,9 @@ class SemanticAnnotator {
     };
 
     static Patterns make_patterns();
-    bool is_annotation_line(std::string_view line) const;
+    bool is_annotation_line(std::string_view line, LangId lang) const;
     SemanticAnnotation* extract_symbol_annotation(
-        FileID file_id, const Symbol& symbol,
+        FileID file_id, const Symbol& symbol, LangId lang,
         const std::vector<std::string_view>& lines);
     void parse_annotation_line(std::string_view line,
                                SemanticAnnotation& annotation);
