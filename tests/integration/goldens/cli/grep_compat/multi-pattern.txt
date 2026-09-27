@@ -1,7 +1,7 @@
 Found 7 matches in <MS> (grep mode)
 
-calculator.cpp:2:12:// Provides Add, Subtract, Multiply functions.
 calculator.cpp:5:4:int Add(int a, int b) {
+calculator.cpp:2:12:// Provides Add, Subtract, Multiply functions.
 calculator.h:4:4:int Add(int a, int b);
 calculator_test.cpp:5:17:    int result = Add(2, 3);
 calculator.cpp:9:4:int Subtract(int a, int b) {

@@ -480,6 +480,17 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
                     // the first byte of the line.
                     row["column"] = kColumnUnknown;
                     row["match"] = std::string(line);
+                    // Placeholder score for a row this client-side full scan
+                    // synthesized. This branch (pure-meta regex that no
+                    // trigram seed can represent) NEVER goes through the
+                    // server, so there is no engine score being overwritten
+                    // here — the ranked server/CLI path keeps the
+                    // SearchEngine score untouched (see the server /search
+                    // handler routing through SearchEngine::search, and
+                    // SearchRankingServerTest in
+                    // tests/integration/server_lifecycle_test.cpp). Kept so
+                    // every row carries the same JSON shape for the shared
+                    // render pipeline and `--rank-by`.
                     row["score"] = 1.0;
                     // Single-line context block, same shape as the
                     // server's, so the shared render/filter pipeline

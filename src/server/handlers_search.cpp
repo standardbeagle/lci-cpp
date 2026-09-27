@@ -81,9 +81,25 @@ void IndexServer::handle_search(const httplib::Request& req,
     // OR across entries). Empty leaves search unscoped (unchanged behavior).
     opts.path_scopes = request->paths;
 
-    // RCU read, same pin discipline as /callers: no shared_lock on mu_.
-    std::vector<SearchResult> results =
-        indexer_->search_with_options(request->pattern, opts);
+    // One ranking door: when the index has a published SearchEngine, rank
+    // through SearchEngine::search exactly like the MCP search tool
+    // (src/mcp/handlers_search.cpp). That path scores the full match set,
+    // applies the definition bonus and builds the dirs histogram. Without an
+    // engine (older indexers / engine-less embedders) fall back to the
+    // MasterIndex path, matching the MCP no-engine fallback.
+    //
+    // `declaration_only` is the one exception: the ranked engine path has no
+    // symbol-declaration mode, and a silent switch from symbols to text hits
+    // would be a wrong-answer regression. It is not reachable from the CLI
+    // (Client::search always sends false) and `/definition` is the supported
+    // declaration surface, so declaration_only keeps the execute_search path.
+    std::vector<SearchResult> results;
+    SearchEngine* engine = search_engine_.load(std::memory_order_acquire);
+    if (engine != nullptr && !opts.declaration_only) {
+        results = engine->search(request->pattern, opts);
+    } else {
+        results = indexer_->search_with_options(request->pattern, opts);
+    }
 
     int max_res = opts.max_results;
     if (static_cast<int>(results.size()) > max_res) {

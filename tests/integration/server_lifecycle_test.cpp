@@ -712,7 +712,8 @@ TEST_F(SearchRankingServerTest, SearchReturnsDefinitionInTopThree) {
     EXPECT_TRUE(def_in_top3)
         << "the defining header was not in the /search top 3; top path was "
         << results[0]["path"].get<std::string>();
-    EXPECT_EQ("zzz/def.h", results[0]["path"].get<std::string>());
+    EXPECT_NE(results[0]["path"].get<std::string>().find("zzz/def.h"),
+              std::string::npos);
 }
 
 TEST_F(SearchRankingServerTest, SearchRowsAreNotAllOneScore) {

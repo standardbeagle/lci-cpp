@@ -1,12 +1,12 @@
 Found 4 matches in <MS> (grep mode)
 
-calculator.cpp-1-// Calculator implementation file.
-calculator.cpp:2:17:// Provides Add, Subtract, Multiply functions.
-calculator.cpp-3-#include "calculator.h"
---
 calculator.cpp-8-
 calculator.cpp:9:4:int Subtract(int a, int b) {
 calculator.cpp-10-    // subtract b from a
+--
+calculator.cpp-1-// Calculator implementation file.
+calculator.cpp:2:17:// Provides Add, Subtract, Multiply functions.
+calculator.cpp-3-#include "calculator.h"
 --
 calculator.h-4-int Add(int a, int b);
 calculator.h:5:4:int Subtract(int a, int b);

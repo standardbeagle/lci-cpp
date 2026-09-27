@@ -465,7 +465,7 @@ namespace {
 
 /// True when the root-relative path falls inside the requested scope.
 /// Non-glob scope = directory prefix; glob scope = FileScanner::match_glob.
-bool path_in_scope(std::string_view rel, const std::string& scope,
+bool path_in_scope(std::string_view rel, std::string_view scope,
                    bool scope_is_glob) {
     if (scope_is_glob) return FileScanner::match_glob(scope, rel);
     if (rel.size() == scope.size()) return rel == scope;
@@ -732,18 +732,49 @@ std::vector<SearchResult> SearchEngine::search(
         type_filter_snap = index_.ref_tracker().pin();
     }
 
+    // Normalize the multi-path CLI scopes ONCE (strip leading "./", trailing
+    // "/") so the per-candidate scan compares string_views with no allocation
+    // (Karpathy rule 2). Views point into options, which outlives the search.
+    std::vector<std::string_view> normalized_scopes;
+    normalized_scopes.reserve(options.path_scopes.size());
+    for (const auto& sc : options.path_scopes) {
+        std::string_view norm = sc;
+        if (norm.size() >= 2 && norm[0] == '.' && norm[1] == '/') {
+            norm.remove_prefix(2);
+        }
+        while (norm.size() > 1 && norm.back() == '/') norm.remove_suffix(1);
+        normalized_scopes.push_back(norm);
+    }
+
     int total_matches = 0;
     DirHistogram dir_hist;
 
     std::vector<CandidateRow> file_rows;
     for (FileID fid : candidates) {
         // Path scope (`path` param): root-relative prefix or glob.
-        if (!options.path_scope.empty() || !options.filter_globs.empty()) {
+        if (!options.path_scope.empty() || !options.filter_globs.empty() ||
+            !options.path_scopes.empty()) {
             auto rel = relative_to_root(index_.id_to_path(*file_snap, fid),
                                         proj_root);
             if (!options.path_scope.empty() &&
                 !path_in_scope(rel, options.path_scope, scope_is_glob)) {
                 continue;
+            }
+            // Multi-path CLI positional (`lci search pattern <path>...`):
+            // root-relative exact file or directory prefix, OR across entries.
+            // Same semantics MasterIndex::execute_search applies so routing
+            // the server /search handler through the engine does not drop
+            // scope filtering. `normalized_scopes` is precomputed before the
+            // scan loop, so this stays allocation-free.
+            if (!normalized_scopes.empty()) {
+                bool any = false;
+                for (std::string_view norm : normalized_scopes) {
+                    if (path_in_scope(rel, norm, false)) {
+                        any = true;
+                        break;
+                    }
+                }
+                if (!any) continue;
             }
             // Include filter (`filter` param): any-glob match survives.
             if (!options.filter_globs.empty()) {
