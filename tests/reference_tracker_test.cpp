@@ -2643,5 +2643,115 @@ TEST(ReferenceTrackerTest, CppLocalVariableIsNeverExported) {
         << "function-local variable must never be marked exported";
 }
 
+// ---------------------------------------------------------------------------
+// MCP-3: remove_file must refresh reference stats
+// ---------------------------------------------------------------------------
+
+// RED (MCP-3). a is defined in file A; file B calls a three times. After
+// remove_file(B) the incoming count on a must drop to zero. At HEAD the
+// per-symbol counts set by update_reference_stats survive removal, so callers
+// counts and sort=refs go stale.
+TEST(ReferenceTrackerTest, RemoveFileResetsIncomingRefCount) {
+    ReferenceTracker rt;
+
+    auto a = rt.process_file(1, "a.go",
+                             std::vector<Symbol>{make_sym(
+                                 "a", SymbolType::Function, 1, 1, 5)},
+                             {}, {});
+    ASSERT_EQ(a.size(), 1u);
+    const SymbolID a_id = a[0].id;
+
+    std::vector<Reference> refs = {
+        make_call("a", 3, 4), make_call("a", 4, 4), make_call("a", 5, 4)};
+    rt.process_file(2, "b.go",
+                    std::vector<Symbol>{
+                        make_sym("b", SymbolType::Function, 2, 1, 10)},
+                    refs, {});
+    rt.process_all_references();
+
+    {
+        auto sym = rt.pin()->get_enhanced_symbol(a_id);
+        ASSERT_NE(sym, nullptr);
+        EXPECT_EQ(sym->incoming_ref_count, 3)
+            << "setup: b's three calls did not count as incoming refs";
+    }
+
+    rt.remove_file(2);
+
+    auto sym = rt.pin()->get_enhanced_symbol(a_id);
+    ASSERT_NE(sym, nullptr);
+    EXPECT_EQ(sym->incoming_ref_count, 0)
+        << "remove_file(b) left a's incoming_ref_count stale";
+}
+
+// RED (MCP-3). The global reference statistics (index_stats) must equal a
+// fresh index of the surviving tree after remove_file, not the pre-removal
+// totals.
+TEST(ReferenceTrackerTest, RemoveFileRefreshesGlobalStats) {
+    ReferenceTracker rt;
+
+    // Reference (A) defines a; reference (B) defines b and calls a twice.
+    rt.process_file(1, "a.go",
+                    std::vector<Symbol>{
+                        make_sym("a", SymbolType::Function, 1, 1, 5)},
+                    {}, {});
+    rt.process_file(2, "b.go",
+                    std::vector<Symbol>{
+                        make_sym("b", SymbolType::Function, 2, 1, 10)},
+                    std::vector<Reference>{make_call("a", 3, 4),
+                                           make_call("a", 4, 4)},
+                    {});
+    rt.process_all_references();
+
+    const ReferenceStats before = rt.get_reference_stats();
+    ASSERT_EQ(before.total_references, 2);
+
+    rt.remove_file(2);
+    const ReferenceStats after_remove = rt.get_reference_stats();
+
+    // Fresh index of only the surviving tree (file A).
+    ReferenceTracker fresh;
+    fresh.process_file(1, "a.go",
+                       std::vector<Symbol>{
+                           make_sym("a", SymbolType::Function, 1, 1, 5)},
+                       {}, {});
+    fresh.process_all_references();
+    const ReferenceStats fresh_stats = fresh.get_reference_stats();
+
+    EXPECT_EQ(after_remove.total_references, fresh_stats.total_references);
+    EXPECT_EQ(after_remove.total_symbols, fresh_stats.total_symbols);
+    EXPECT_EQ(after_remove.files_with_refs, fresh_stats.files_with_refs);
+    EXPECT_EQ(after_remove.symbol_refs, fresh_stats.symbol_refs);
+    EXPECT_EQ(after_remove.total_references, 0)
+        << "remove_file left the pre-removal reference total in stats";
+}
+
+// GREEN (MCP-3). Stats are recomputed from the surviving per-file vectors, so
+// a second remove_file is a no-op and does not drive counts negative.
+TEST(ReferenceTrackerTest, RemoveFileStatsIdempotentOnDoubleRemove) {
+    ReferenceTracker rt;
+
+    rt.process_file(1, "a.go",
+                    std::vector<Symbol>{
+                        make_sym("a", SymbolType::Function, 1, 1, 5)},
+                    {}, {});
+    rt.process_file(2, "b.go",
+                    std::vector<Symbol>{
+                        make_sym("b", SymbolType::Function, 2, 1, 10)},
+                    std::vector<Reference>{make_call("a", 3, 4)},
+                    {});
+    rt.process_all_references();
+
+    rt.remove_file(2);
+    const ReferenceStats first = rt.get_reference_stats();
+    rt.remove_file(2);
+    const ReferenceStats second = rt.get_reference_stats();
+
+    EXPECT_EQ(first.total_references, second.total_references);
+    EXPECT_EQ(first.total_symbols, second.total_symbols);
+    EXPECT_EQ(first.files_with_refs, second.files_with_refs);
+    EXPECT_EQ(first.symbol_refs, second.symbol_refs);
+}
+
 }  // namespace
 }  // namespace lci
