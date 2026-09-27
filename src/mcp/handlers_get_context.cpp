@@ -314,9 +314,10 @@ void resolve_object_id(std::string_view id, MasterIndex& indexer,
     ctx["object_id"] = std::string(id);
     // Incoming-reference count, matching search's per-hit `callers` field —
     // chokepoint questions answerable without a follow-up call-hierarchy
-    // request.
-    if (sym->incoming_ref_count != 0) {
-        ctx["callers"] = static_cast<int>(sym->incoming_ref_count);
+    // request. Excludes the definition's own self-reference (see
+    // Snapshot::caller_count): an uncalled symbol reports 0, not 1.
+    if (int callers = rt_snap->caller_count(sym->id); callers != 0) {
+        ctx["callers"] = callers;
     }
     ctx["symbol_type"] = std::string(to_string(sym->symbol.type));
     ctx["symbol_name"] = std::string(sym->symbol.name);
@@ -447,9 +448,9 @@ ToolResult handle_get_context(const nlohmann::json& params,
             ctx["line"] = sym->symbol.line;
             ctx["object_id"] = encode_symbol_id(sym->id);
             // Caller count parity with search hits — see resolve_object_id.
-            if (sym->incoming_ref_count != 0) {
-                ctx["callers"] =
-                    static_cast<int>(sym->incoming_ref_count);
+            // Excludes the definition's own self-reference.
+            if (int callers = rt_snap->caller_count(sym->id); callers != 0) {
+                ctx["callers"] = callers;
             }
             ctx["symbol_type"] = std::string(to_string(sym->symbol.type));
             ctx["symbol_name"] = std::string(sym->symbol.name);
@@ -463,15 +464,18 @@ ToolResult handle_get_context(const nlohmann::json& params,
             attach_source_excerpt(ctx, *sym, indexer);
 
             if (include_call_hierarchy && want_relationships) {
-                nlohmann::json callers = nlohmann::json::array();
+                // `callers` above is the INTEGER count and must stay an
+                // integer across every mode (MCP-4). The name list is a
+                // distinct field so the two never collide.
+                nlohmann::json caller_names = nlohmann::json::array();
                 nlohmann::json callees = nlohmann::json::array();
                 for (const auto& cn : tracker.get_caller_names(sym->id)) {
-                    callers.push_back(cn);
+                    caller_names.push_back(cn);
                 }
                 for (const auto& cn : tracker.get_callee_names(sym->id)) {
                     callees.push_back(cn);
                 }
-                ctx["callers"] = std::move(callers);
+                ctx["caller_names"] = std::move(caller_names);
                 ctx["callees"] = std::move(callees);
 
                 // Recursive call tree to `max_depth` levels.

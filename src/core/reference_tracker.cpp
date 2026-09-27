@@ -344,6 +344,24 @@ size_t ReferenceTracker::Snapshot::live_ref_count() const {
     return n;
 }
 
+int ReferenceTracker::Snapshot::caller_count(SymbolID symbol_id) const {
+    auto it = incoming_refs.find(symbol_id);
+    if (it == incoming_refs.end()) return 0;
+    const auto* sym = symbols.get(symbol_id);
+    const int def_line = sym != nullptr ? sym->symbol.line : 0;
+    int n = 0;
+    for (uint64_t rid : it->second) {
+        const StoredRef* r = find_ref(rid);
+        if (r == nullptr) continue;
+        // The extractor emits a self-reference at the definition line (the
+        // def name resolving to itself). It is not call traffic; everything
+        // else — including a recursive call on another line — counts.
+        if (r->source_symbol == symbol_id && r->line == def_line) continue;
+        ++n;
+    }
+    return n;
+}
+
 std::vector<Reference> ReferenceTracker::Snapshot::get_references_by_id(
     std::span<const uint64_t> ref_ids) const {
     std::vector<Reference> result;

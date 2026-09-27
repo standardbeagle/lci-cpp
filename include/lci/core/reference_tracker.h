@@ -596,6 +596,17 @@ class ReferenceTracker {
         /// Count of live references (tombstones excluded).
         size_t live_ref_count() const;
 
+        /// Incoming-reference count EXCLUDING the symbol's own definition-site
+        /// self-reference. Extractors emit a `usage` reference at the
+        /// definition line whose source and target are the symbol itself, so
+        /// raw incoming_ref_count reports 1 for an uncalled method/function in
+        /// languages that emit it (Go methods, Python/JS/TS functions). The
+        /// per-hit `callers` field means real reference traffic, so this is
+        /// the accessor it must read. Recursion (a self-call on a line other
+        /// than the definition) still counts, and the definition self-ref
+        /// stays in the refs total and in incoming_ref_count.
+        int caller_count(SymbolID symbol_id) const;
+
         /// Number of live Call references named `name` (bare, or a
         /// qualified "Type.name" spelling) with NO resolved target — the
         /// dynamic-dispatch call sites the no-guess policy leaves out of the

@@ -914,8 +914,10 @@ ToolResult handle_search(const nlohmann::json& params,
                 if (sym->is_exported) h["exported"] = true;
                 // Incoming-reference count bridges straight to get_context:
                 // "which function is the chokepoint" is answerable from the
-                // search response itself.
-                auto callers = static_cast<int>(sym->incoming_ref_count);
+                // search response itself. Excludes the definition's own
+                // self-reference (uncalled -> 0, not 1) — see
+                // Snapshot::caller_count.
+                auto callers = rt_snap->caller_count(sym->id);
                 if (callers > 0) h["callers"] = callers;
 
                 if (include_signature && !sym->signature.empty()) {
@@ -936,7 +938,8 @@ ToolResult handle_search(const nlohmann::json& params,
                 if (normalized >= 0.5) {
                     if (include_refs) {
                         h["references"] = {
-                            {"incoming_count", callers},
+                            {"incoming_count",
+                             static_cast<int>(sym->incoming_ref_count)},
                             {"outgoing_count",
                              static_cast<int>(sym->outgoing_ref_count)}};
                     }

@@ -101,7 +101,9 @@ metadata.
 (omitted when every hit shares one uniform match, hoisted to top-level
 `match` instead), and — deduped across consecutive hits inside the same
 symbol — `sym`, `type`, `id` (object ID), `exported`, `callers`
-(incoming-reference count), optional `signature`, optional `references`
+(incoming-reference count excluding the symbol's own definition-site
+self-reference; omitted at zero), optional `signature`, optional
+`references`
 {`incoming_count`,`outgoing_count`}, optional `breadcrumbs[]`, and `text`
 (trimmed matched source line) or `ctx[]` when `output` requests full
 context. Non-code files with hits collapse into `other_files{path: count}`
@@ -191,10 +193,13 @@ hierarchy and purity. `id` and `name` are mutually exclusive.
 
 **Output** (id path): `{count, contexts[], errors[]}`. Each context:
 `file_path`, `line`, `object_id`, `symbol_name`, `symbol_type`, `is_exported`,
-`signature` (if any), `definition`, `context[]`, and `purity`
+`signature` (if any), `definition`, `context[]`, `callers` (integer
+incoming-reference count excluding the definition's own self-reference,
+omitted at zero; always an integer, never an array), and `purity`
 {`is_pure`, `purity_score`, `confidence`, `local_effects[]`,
 `transitive_effects[]`, `reasons[]`} for functions/methods. Name+mode path
-adds `callers[]`, `callees[]`, `call_tree` (cycle-marked).
+adds `caller_names[]`, `callees[]`, `call_tree` (cycle-marked); the
+hierarchy lists are separate keys so `callers` keeps one type in every mode.
 
 **Errors**: neither `id` nor `name`; both `id` and `name`; per-id resolution
 errors collected in `errors[]`; index unavailable.

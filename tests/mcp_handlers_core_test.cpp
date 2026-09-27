@@ -1764,6 +1764,25 @@ TEST(GetContextCallersTypeTest, CallersStaysIntegerWithCallHierarchy) {
     ASSERT_TRUE(ctx.contains("caller_names")) << result.text;
     ASSERT_TRUE(ctx["caller_names"].is_array()) << result.text;
 
+    // Criterion 4: the definition-line self reference is excluded from the
+    // per-hit `callers` count but STILL counted in the reference total, so
+    // refs/def consumers see the whole truth while chokepoint reads do not.
+    auto snap = indexer.ref_tracker().pin();
+    auto matches = snap->find_symbols_by_name("target");
+    ASSERT_FALSE(matches.empty());
+    const auto& sym = matches.front();
+    EXPECT_EQ(snap->caller_count(sym->id), 2);
+    EXPECT_EQ(static_cast<int>(sym->incoming_ref_count), 3)
+        << "definition self-reference must stay in the refs total";
+    bool self_ref_seen = false;
+    for (const auto& ref : snap->get_symbol_references(sym->id, "incoming")) {
+        if (ref.source_symbol == sym->id && ref.line == sym->symbol.line) {
+            self_ref_seen = true;
+        }
+    }
+    EXPECT_TRUE(self_ref_seen)
+        << "definition-line self reference must stay in get_symbol_references";
+
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
 }
