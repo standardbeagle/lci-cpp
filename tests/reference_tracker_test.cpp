@@ -2648,9 +2648,9 @@ TEST(ReferenceTrackerTest, CppLocalVariableIsNeverExported) {
 // ---------------------------------------------------------------------------
 
 // RED (MCP-3). a is defined in file A; file B calls a three times. After
-// remove_file(B) the incoming count on a must drop to zero. At HEAD the
-// per-symbol counts set by update_reference_stats survive removal, so callers
-// counts and sort=refs go stale.
+// remove_file(B) the incoming count on a must drop to zero. Before MCP-3 the
+// per-symbol counts set by update_reference_stats survived removal, so callers
+// counts and sort=refs went stale.
 TEST(ReferenceTrackerTest, RemoveFileResetsIncomingRefCount) {
     ReferenceTracker rt;
 
