@@ -176,6 +176,51 @@ size_t first_marker_in_comment(std::string_view line, LangId lang) {
     return std::string_view::npos;
 }
 
+// Returns true when the marker at `marker` sits inside a string/char literal
+// on `line`. Used to reject a `*`-continuation false positive like
+// `*p = "@lci:labels[x]";`, whose marker is DATA even though the line opens
+// with `*` the way a block-comment continuation does.
+bool marker_in_string_literal(std::string_view line, size_t marker, LangId lang) {
+    enum class State { Code, SingleQuote, DoubleQuote };
+    State state = State::Code;
+    size_t i = 0;
+    while (i < line.size()) {
+        const char c = line[i];
+        switch (state) {
+            case State::Code: {
+                if (c == '/' && i + 1 < line.size() && line[i + 1] == '/') {
+                    return false;  // comment tail; marker past here is comment
+                }
+                if (c == '#') {
+                    // A '#include' line is code; a Python '# ...' is comment.
+                    if (line_is_comment_only(line.substr(i), lang)) return false;
+                    ++i;
+                    continue;
+                }
+                if (c == '\'') { state = State::SingleQuote; ++i; continue; }
+                if (c == '"') { state = State::DoubleQuote; ++i; continue; }
+                ++i;
+                break;
+            }
+            case State::SingleQuote: {
+                if (c == '\\' && i + 1 < line.size()) { i += 2; continue; }
+                if (c == '\'') { state = State::Code; ++i; continue; }
+                if (i == marker) return true;
+                ++i;
+                break;
+            }
+            case State::DoubleQuote: {
+                if (c == '\\' && i + 1 < line.size()) { i += 2; continue; }
+                if (c == '"') { state = State::Code; ++i; continue; }
+                if (i == marker) return true;
+                ++i;
+                break;
+            }
+        }
+    }
+    return false;
+}
+
 bool line_has_annotation(LangId lang, std::string_view trimmed) {
     // A block-comment continuation (" * @lci:...") is handled by
     // first_marker_in_comment only when the opener is on the same line, which
@@ -183,14 +228,19 @@ bool line_has_annotation(LangId lang, std::string_view trimmed) {
     // line is a continuation inside a C-style block comment: the trimmed form
     // starts with '*' and the annotator's block-boundary walk has already
     // established the line sits in a contiguous comment block. `*/` alone is
-    // never an annotation.
-    if (first_marker_in_comment(trimmed, lang) != std::string_view::npos) {
+    // never an annotation, and a marker that is actually INSIDE a string on
+    // such a line (`*p = "@lci:labels[x]";`) is DATA, not a continuation.
+    const size_t marker = first_marker_in_comment(trimmed, lang);
+    if (marker != std::string_view::npos) {
         return true;
     }
     if (!trimmed.empty() && trimmed.front() == '*' &&
-        trimmed.substr(0, 2) != "*/" &&
-        trimmed.find("@lci:") != std::string_view::npos) {
-        return true;
+        trimmed.substr(0, 2) != "*/") {
+        const size_t cont = trimmed.find("@lci:");
+        if (cont != std::string_view::npos &&
+            !marker_in_string_literal(trimmed, cont, lang)) {
+            return true;
+        }
     }
     return false;
 }
