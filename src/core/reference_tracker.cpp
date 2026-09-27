@@ -830,6 +830,17 @@ void ReferenceTracker::remove_file(FileID file_id) {
         // any tombstones the symbol walk above left in it die with it.
         s.refs_by_file.erase(file_id);
         s.scopes_by_file.erase(file_id);
+
+        // Recompute, don't decrement. update_reference_stats derives every
+        // count from the surviving incoming/outgoing maps and refs_by_file,
+        // so it is exact (no blind decrement can go negative or miss an
+        // edge) and idempotent (a second remove of an already-gone file
+        // re-derives the same numbers). Without this, remove_file erased the
+        // edge maps but left the per-symbol counts and the global stats set
+        // at their pre-removal values, so callers counts and sort=refs
+        // (incoming_ref_count) and index_stats went stale after any watch
+        // delete or update_file (MCP-3).
+        update_reference_stats(s);
     });
 
     import_resolver_.remove_file(file_id);
