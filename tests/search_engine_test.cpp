@@ -648,17 +648,19 @@ TEST(SearchEngineIntegrationTest, CappedCollectionTakesLowestFileIds) {
 TEST(SearchEngineFullRankTest, BestRankedMatchInHighestFileIdIsTopHit) {
     TempDir dir;
     // 3000 matching lines below the cap's reach, all in files that sort before
-    // the definition file. 4 lines per file => 750 files named aa..zy.
+    // the definition file. 4 lines per file => 750 files named bulk/f0000..0749.
+    // The token is embedded in a larger identifier so it has no word-boundary
+    // or exact-case bonus; the definition below does.
     for (int f = 0; f < 750; ++f) {
         char name[32];
         std::snprintf(name, sizeof(name), "bulk/f%04d.go", f);
         std::string content = "package main\n";
         for (int i = 0; i < 4; ++i) {
-            content += "    needleToken\n";  // indented: no line-start bonus
+            content += "    xneedleTokenx\n";  // substring, no boundary bonus
         }
         dir.write_file(name, content);
     }
-    // Highest FileID (sorts after bulk/): exact, column-0, line-start match.
+    // Highest FileID (sorts after bulk/): exact, column-0, word-boundary match.
     dir.write_file("zz_definition.go",
                    "package main\n"
                    "needleToken\n");
@@ -684,9 +686,10 @@ TEST(SearchEngineFullRankTest, BestRankedMatchInHighestFileIdIsTopHit) {
     SearchOptions opts;  // max_results default 100 => old cap 800.
     auto results = engine.search("needleToken", opts);
     ASSERT_FALSE(results.empty());
-    EXPECT_EQ("zz_definition.go", results.front().path)
+    EXPECT_TRUE(results.front().path.ends_with("zz_definition.go"))
         << "the globally best-ranked match was never collected: ranking ran "
-           "on a FileID-order prefix";
+           "on a FileID-order prefix; top path was "
+        << results.front().path;
     EXPECT_EQ(2, results.front().line);
 }
 
@@ -711,7 +714,6 @@ TEST(SearchEngineFullRankTest, DirHistogramCoversFullMatchSet) {
         for (int i = 0; i < 4; ++i) content += "    needleToken\n";
         dir.write_file(name, content);
     }
-
     Config cfg = make_default_config();
     cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
@@ -739,6 +741,43 @@ TEST(SearchEngineFullRankTest, DirHistogramCoversFullMatchSet) {
     }
     EXPECT_TRUE(has_zz) << "dirs omitted a directory whose matches sort past "
                            "the old collection cap";
+}
+
+// MCP-2: `search SearchEngine` must surface the DEFINING header, not just a
+// bundle of references. The definition file sorts after the reference files
+// (highest FileID) and the reference hits are word-boundary exact-case matches
+// too, so path order alone puts every reference first. Ranking all of the
+// matches (criteria 2-3) is not enough by itself; a match that IS the symbol's
+// definition must outrank uses of that symbol.
+TEST(SearchEngineFullRankTest, DefinitionHeaderOutranksReferences) {
+    TempDir dir;
+    // 40 files that reference the symbol but never define it. Each is a
+    // whole-word, exact-case hit, so they tie the definition on match quality.
+    for (int f = 0; f < 40; ++f) {
+        char name[40];
+        std::snprintf(name, sizeof(name), "aaa/ref%03d.go", f);
+        dir.write_file(name,
+                       "package main\n"
+                       "var x = SearchEngine\n");
+    }
+    // Highest FileID: the one line that DEFINES SearchEngine.
+    dir.write_file("zzz/def.go",
+                   "package main\n"
+                   "func SearchEngine() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    auto results = engine.search("SearchEngine", opts);
+    ASSERT_FALSE(results.empty());
+    EXPECT_TRUE(results.front().path.ends_with("zzz/def.go"))
+        << "the defining header did not outrank its references; top path was "
+        << results.front().path;
+    EXPECT_EQ(2, results.front().line);
 }
 
 // -- Line/column resolution ---------------------------------------------------
