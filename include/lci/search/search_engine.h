@@ -176,13 +176,17 @@ class SearchEngine {
 
     /// Processes a single file for matches and produces results. `snap` is the
     /// query's pinned file snapshot, used to resolve the path once (no per-match
-    /// re-fetch).
-    void process_file(FileID file_id,
-                      std::string_view pattern,
-                      const SearchOptions& options,
-                      int effective_cap,
-                      std::vector<SearchResult>& results,
-                      const FileSnapshot& snap) const;
+    /// re-fetch). At most `per_file_cap` rows are appended to `results` (the
+    /// ones that can survive the global top-`per_file_cap` selection); the
+    /// return value is the total number of matching rows found in the file,
+    /// including those not retained, so the caller can report the true count
+    /// and directory histogram. `per_file_cap <= 0` retains every match.
+    int process_file(FileID file_id,
+                     std::string_view pattern,
+                     const SearchOptions& options,
+                     int per_file_cap,
+                     std::vector<SearchResult>& results,
+                     const FileSnapshot& snap) const;
 };
 
 // -- Search coordinator -------------------------------------------------------

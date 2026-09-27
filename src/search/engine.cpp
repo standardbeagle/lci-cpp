@@ -441,18 +441,20 @@ bool path_in_scope(std::string_view rel, const std::string& scope,
            rel.substr(0, scope.size()) == scope && rel[scope.size()] == '/';
 }
 
+/// Top-level directory of a root-relative path ("." for root files).
+std::string_view top_level_dir(std::string_view rel) {
+    auto slash = rel.find('/');
+    return slash == std::string_view::npos ? std::string_view(".")
+                                           : rel.substr(0, slash);
+}
+
 /// Builds SearchStats.dir_counts: top-level-dir histogram over the full
 /// pre-truncation result set. Deterministic order: count desc, then name.
 void fill_dir_counts(const std::vector<SearchResult>& results,
                      std::string_view root, SearchStats& stats) {
     absl::flat_hash_map<std::string, int> counts;
     for (const auto& r : results) {
-        auto rel = relative_to_root(r.path, root);
-        auto slash = rel.find('/');
-        std::string_view dir = slash == std::string_view::npos
-                                   ? std::string_view(".")
-                                   : rel.substr(0, slash);
-        ++counts[std::string(dir)];
+        ++counts[std::string(top_level_dir(relative_to_root(r.path, root)))];
     }
     stats.dir_counts.assign(counts.begin(), counts.end());
     std::sort(stats.dir_counts.begin(), stats.dir_counts.end(),
@@ -461,6 +463,78 @@ void fill_dir_counts(const std::vector<SearchResult>& results,
                   return a.first < b.first;
               });
 }
+
+/// The total order SearchCoordinator::rank emits, expressed as a strict
+/// "a comes before b" predicate. Kept next to the bounded collector so the
+/// two can never disagree about which rows survive selection.
+bool ranked_before(const SearchResult& a, const SearchResult& b) {
+    if (a.from_synonym != b.from_synonym) return !a.from_synonym;
+    if (a.score != b.score) return a.score > b.score;
+    if (a.path != b.path) return a.path < b.path;
+    if (a.line != b.line) return a.line < b.line;
+    if (a.column != b.column) return a.column < b.column;
+    return a.match_text < b.match_text;
+}
+
+/// Bounded rank-preserving collector for the single-pattern search path.
+///
+/// The collection cap used to be applied in FileID order BEFORE scoring, so a
+/// globally best-ranked match in a later-scanned file was never collected and
+/// the reported totals/dirs described only that prefix (MCP-2). Selecting the
+/// true top-K requires scoring every match, but not RETAINING every match:
+/// `search()` scores each row in place and offers it here, and only the K best
+/// survive. K is the output cap, and because no single file can contribute
+/// more than K rows to a K-row answer, retaining the global top-K is exact.
+struct BoundedTopK {
+    size_t cap{0};  // 0 = retain everything (unbounded output).
+    std::vector<SearchResult> heap;  // min-heap under `ranked_before`.
+
+    explicit BoundedTopK(size_t k) : cap(k) {
+        if (cap > 0) heap.reserve(cap);
+    }
+
+    void offer(SearchResult&& r) {
+        if (cap == 0) {
+            heap.push_back(std::move(r));
+            return;
+        }
+        if (heap.size() < cap) {
+            heap.push_back(std::move(r));
+            std::push_heap(heap.begin(), heap.end(), ranked_before);
+            return;
+        }
+        // Full: replace the current worst only when this row beats it.
+        if (ranked_before(r, heap.front())) {
+            std::pop_heap(heap.begin(), heap.end(), ranked_before);
+            heap.back() = std::move(r);
+            std::push_heap(heap.begin(), heap.end(), ranked_before);
+        }
+    }
+
+    /// Returns the retained rows in rank order.
+    std::vector<SearchResult> take_sorted() {
+        std::sort(heap.begin(), heap.end(), ranked_before);
+        return std::move(heap);
+    }
+};
+
+/// Accumulates the top-level-directory histogram incrementally, over every
+/// match seen (not just the retained rows), so dirs is the full-match-set
+/// histogram the tool description promises.
+struct DirHistogram {
+    absl::flat_hash_map<std::string, int> counts;
+    void add(std::string_view root_relative_path, int n = 1) {
+        counts[std::string(top_level_dir(root_relative_path))] += n;
+    }
+    void fill(SearchStats& stats) const {
+        stats.dir_counts.assign(counts.begin(), counts.end());
+        std::sort(stats.dir_counts.begin(), stats.dir_counts.end(),
+                  [](const auto& a, const auto& b) {
+                      if (a.second != b.second) return a.second > b.second;
+                      return a.first < b.first;
+                  });
+    }
+};
 
 }  // namespace
 
@@ -553,45 +627,41 @@ std::vector<SearchResult> SearchEngine::search(
     // between runs on an identical corpus.
     std::sort(candidates.begin(), candidates.end());
 
-    // Output cap (what the caller asked for) vs collection cap (how many raw
-    // matches we gather before scoring). They must differ: if we stop
-    // collecting at the output cap, the kept set is the first-N matches in
-    // candidate-file order and the later score+rank only reorders those N — so
-    // on doc-heavy repos the docs/ files fill the cap before code files are
-    // reached and code matches are never collected (measured: fastapi
-    // "APIRouter" -> 96/100 markdown, 3/100 code). Over-collect, then rank,
-    // then truncate, so high-value matches (code scores ~2x prose) win the cap.
+    // Output cap = how many rows the caller gets AND the rank-preserving
+    // retention bound. The old separate collection cap (max*8, hard 2000)
+    // ranked only a FileID-order prefix, so the true best matches in
+    // later-scanned files never entered scoring and dirs/total described that
+    // prefix (MCP-2). Instead every candidate is scanned and scored, but only
+    // the top-`retain` rows are kept: no single file can contribute more than
+    // `retain` rows to a `retain`-row answer, so the global top-`retain` over
+    // the per-file top-`retain` sets is exact. Counts and the dir histogram
+    // are accumulated over EVERY match, which is what makes total_found and
+    // dirs describe the full universe rather than a prefix.
     int output_cap = options.max_results;
-    int effective_cap = options.max_results;
-    if (effective_cap <= 0) {
-        effective_cap = (static_cast<int>(candidates.size()) >= 400) ? 25 : 0;
-        output_cap = effective_cap;
-    } else {
-        effective_cap = std::min(effective_cap * 8, 2000);
+    if (output_cap <= 0) {
+        output_cap = (static_cast<int>(candidates.size()) >= 400) ? 25 : 0;
     }
-
-    std::vector<SearchResult> results;
+    const int retain = output_cap;
+    BoundedTopK topk(retain > 0 ? static_cast<size_t>(retain) : 0);
 
     // Pin the file snapshot once for the whole query: path resolution below
     // (filter + per-file path) reads a string_view into it, no per-call atomic
     // load or string copy.
     auto file_snap = index_.load_snapshot();
 
-    // Symbol-type filter runs INSIDE the collection loop (before the cap):
-    // filtering after collection let non-matching results consume the
-    // collection budget, silently starving matching files that sorted later.
+    // Symbol-type filter runs INSIDE the collection loop (before selection):
+    // filtering after collection let non-matching results consume the budget,
+    // silently starving matching files that sorted later.
     std::shared_ptr<const ReferenceTracker::Snapshot> type_filter_snap;
     if (!options.symbol_types.empty()) {
         type_filter_snap = index_.ref_tracker().pin();
     }
 
-    bool hit_collection_cap = false;
+    int total_matches = 0;
+    DirHistogram dir_hist;
+
+    std::vector<SearchResult> file_results;
     for (FileID fid : candidates) {
-        if (effective_cap > 0 &&
-            static_cast<int>(results.size()) >= effective_cap) {
-            hit_collection_cap = true;
-            break;
-        }
         // Path scope (`path` param): root-relative prefix or glob.
         if (!options.path_scope.empty() || !options.filter_globs.empty()) {
             auto rel = relative_to_root(index_.id_to_path(*file_snap, fid),
@@ -615,48 +685,51 @@ std::vector<SearchResult> SearchEngine::search(
                 continue;
             }
         }
-        size_t before = results.size();
-        process_file(fid, pattern, options, effective_cap, results, *file_snap);
-        if (type_filter_snap && results.size() > before) {
-            results.erase(
-                std::remove_if(
-                    results.begin() +
-                        static_cast<std::ptrdiff_t>(before),
-                    results.end(),
-                    [&](const SearchResult& r) {
-                        auto sym = type_filter_snap->get_symbol_at_line(
-                            r.file_id, r.line);
-                        if (sym == nullptr) return true;
-                        return !symbol_type_matches_filter(
-                            options.symbol_types,
-                            to_string(sym->symbol.type));
-                    }),
-                results.end());
+        file_results.clear();
+        int file_matches = process_file(fid, pattern, options, retain,
+                                        file_results, *file_snap);
+    if (file_matches <= 0) continue;
+
+    if (type_filter_snap) {
+        file_results.erase(
+            std::remove_if(
+                file_results.begin(), file_results.end(),
+                [&](const SearchResult& r) {
+                    auto sym = type_filter_snap->get_symbol_at_line(
+                        r.file_id, r.line);
+                    if (sym == nullptr) return true;
+                    return !symbol_type_matches_filter(
+                        options.symbol_types,
+                        to_string(sym->symbol.type));
+                }),
+            file_results.end());
+    }
+
+    // Counts are over all matches, not the retained subset.
+    total_matches += file_matches;
+    dir_hist.add(relative_to_root(index_.id_to_path(*file_snap, fid),
+                                  proj_root), file_matches);
+
+        for (auto& r : file_results) {
+            // process_file seeded the match-quality bonus; add the
+            // file-and-pattern component (same for every row of this file).
+            r.score += score_result(r, pattern);
+            topk.offer(std::move(r));
         }
     }
 
-    // Score and rank results. process_file has already seeded each row with
-    // its match-quality bonus (word boundary / line start / exact case) --
-    // the only place the match's byte range and the file's bytes are both in
-    // hand -- so this ADDS the file-and-pattern component rather than
-    // overwriting it. Overwriting is what made every hit for one pattern in
-    // one file tie, leaving rank() to order them positionally.
-    for (auto& r : results) {
-        r.score += score_result(r, pattern);
-    }
+    std::vector<SearchResult> results = topk.take_sorted();
 
-    SearchCoordinator::rank(results);
-
-    // Record the TRUE universe before truncation — the handler reports this
-    // instead of the old total==max cap-saturation lie.
+    // Record the TRUE universe — the handler reports this instead of the old
+    // total==max cap-saturation lie. There is no collection cap any more, so
+    // the count is exact and hit_collection_cap stays false.
     if (stats != nullptr) {
-        stats->total_found = static_cast<int>(results.size());
-        stats->hit_collection_cap = hit_collection_cap;
-        fill_dir_counts(results, proj_root, *stats);
+        stats->total_found = total_matches;
+        stats->hit_collection_cap = false;
+        dir_hist.fill(*stats);
     }
 
-    // Truncate to the requested cap AFTER ranking, so the returned set is the
-    // top-scored matches across all candidates (not the first-found).
+    // topk already holds at most `retain` rows in rank order.
     if (output_cap > 0 && static_cast<int>(results.size()) > output_cap) {
         results.resize(static_cast<size_t>(output_cap));
     }
@@ -1008,11 +1081,11 @@ double SearchEngine::score_result(const SearchResult& result,
     return score;
 }
 
-void SearchEngine::process_file(
+int SearchEngine::process_file(
     FileID file_id,
     std::string_view pattern,
     const SearchOptions& options,
-    int effective_cap,
+    int per_file_cap,
     std::vector<SearchResult>& results,
     const FileSnapshot& snap) const {
 
@@ -1024,7 +1097,7 @@ void SearchEngine::process_file(
     std::string reloaded;
     if (content_sv.empty()) {
         reloaded = index_.reload_evicted_content(snap, file_id);
-        if (reloaded.empty()) return;
+        if (reloaded.empty()) return 0;
         content_sv = reloaded;
     }
 
@@ -1033,7 +1106,7 @@ void SearchEngine::process_file(
     // re-fetched (atomic load + map lookup + string copy) after every match.
     std::string_view path = index_.id_to_path(snap, file_id);
 
-    if (options.exclude_tests && is_test_file(path)) return;
+    if (options.exclude_tests && is_test_file(path)) return 0;
 
     // Resolved once per file, not per match: '#' means a comment in some
     // languages and a preprocessor directive in others, and the comment filter
@@ -1041,17 +1114,13 @@ void SearchEngine::process_file(
     // table lookup on the extension, so this is a few byte compares.
     const LangId file_lang = language_info_for_path(path).language;
 
-    // Per-file collection bounded by the remaining collection budget, not
-    // the hidden kMaxMatchesPerFile constant (silent 100-per-file cap).
+    // Honor a caller-set per-file cap (options.max_count_per_file); otherwise
+    // scan every match so the file's true count is known. Retention, not
+    // scanning, is what the per-file bound limits.
     SearchOptions scan_options = options;
-    if (scan_options.max_count_per_file <= 0 && effective_cap > 0) {
-        scan_options.max_count_per_file =
-            effective_cap - static_cast<int>(results.size());
-    }
     auto matches = find_matches(content_sv, pattern, scan_options);
-    // Invert reports non-matching lines, so a file with zero matches is the
     // most productive input there is -- it contributes all of its lines.
-    if (matches.empty() && !options.invert_match) return;
+    if (matches.empty() && !options.invert_match) return 0;
 
     // Block-aware context is not yet wired; context_extractor falls back to
     // line-window extraction with an empty block list. (Previously this fetched
@@ -1106,9 +1175,71 @@ void SearchEngine::process_file(
                                  static_cast<size_t>(end - line_start));
     };
 
+    // Within one file the file-and-pattern score component is constant, so the
+    // rows worth retaining are simply the `per_file_cap` highest match-quality
+    // ones. Rows below that can never win the global top-`per_file_cap`: their
+    // own file already supplies `per_file_cap` rows that outrank them.
+    // Building a SearchResult (path + match_text copies, context) only for the
+    // retained rows keeps a dense file from allocating a row per match.
+    // `per_file_cap <= 0` means unbounded output: retain every row.
+    struct PendingRow {
+        int line;
+        int column;
+        std::string match_text;
+        double quality;
+    };
+    std::vector<PendingRow> pending;
+    if (per_file_cap > 0) pending.reserve(static_cast<size_t>(per_file_cap));
+
+    auto worst_pending = [&]() -> size_t {
+        size_t worst = 0;
+        for (size_t i = 1; i < pending.size(); ++i) {
+            if (pending[i].quality < pending[worst].quality) worst = i;
+        }
+        return worst;
+    };
+    auto keep_pending = [&](PendingRow&& row) {
+        if (per_file_cap <= 0) {
+            pending.push_back(std::move(row));
+            return;
+        }
+        if (pending.size() < static_cast<size_t>(per_file_cap)) {
+            pending.push_back(std::move(row));
+            return;
+        }
+        size_t worst = worst_pending();
+        if (row.quality > pending[worst].quality) {
+            pending[worst] = std::move(row);
+        }
+    };
+
+    // Materialize one retained row (used by both the invert and normal paths).
+    auto emit = [&](int line, int column, std::string match_text,
+                    double quality) {
+        SearchContext ctx;
+        if (options.max_context_lines > 0) {
+            // Hand over the bytes we already hold. Re-resolving by FileID
+            // costs a second store read, and for a file reloaded above after
+            // LRU eviction the store has nothing to return -- the row would
+            // carry a match with an empty context block.
+            ctx = context_extractor_.extract(file_id, blocks, line,
+                                              options.max_context_lines,
+                                              content_sv);
+        }
+        results.push_back(SearchResult{
+            file_id, std::string(path), line, column,
+            std::move(match_text), quality, std::move(ctx)});
+    };
+
+    int match_count = 0;
+
     if (options.invert_match) {
         // Mark every line carrying a match, then emit the rest. One forward
-        // pass each, no per-line allocation (Karpathy rule 2).
+        // pass each, no per-line allocation (Karpathy rule 2). Invert rows all
+        // score 0, so rank() orders them by path then line; each file retains
+        // its first `per_file_cap` non-matching lines, which preserves the
+        // global top-K by the same per-file argument (a file cannot fill more
+        // than K output slots).
         absl::flat_hash_set<int> matching_lines;
         matching_lines.reserve(matches.size());
         for (const auto& match : matches) {
@@ -1130,39 +1261,26 @@ void SearchEngine::process_file(
             if (!at_end && content_sv[static_cast<size_t>(i)] != '\n') continue;
             if (at_end && i == line_start) break;  // no trailing partial line
 
-            if (effective_cap > 0 &&
-                static_cast<int>(results.size()) >= effective_cap) {
-                return;
-            }
             if (!matching_lines.contains(line_no)) {
                 auto text = line_text_at(line_start);
                 if (!options.exclude_comments ||
                     !line_is_comment_only_with_spans(
                         content_sv, line_start, i, file_lang, comment_spans,
                         span_pos)) {
-                    SearchContext ctx;
-                    if (options.max_context_lines > 0) {
-                        ctx = context_extractor_.extract(
-                            file_id, blocks, line_no,
-                            options.max_context_lines, content_sv);
+                    ++match_count;
+                    if (per_file_cap <= 0 ||
+                        static_cast<int>(results.size()) < per_file_cap) {
+                        emit(line_no, 0, std::string(text), 0.0);
                     }
-                    results.push_back(SearchResult{
-                        file_id, std::string(path), line_no, 0,
-                        std::string(text), 0.0, std::move(ctx)});
                 }
             }
             ++line_no;
             line_start = i + 1;
         }
-        return;
+        return match_count;
     }
 
     for (const auto& match : matches) {
-        if (effective_cap > 0 &&
-            static_cast<int>(results.size()) >= effective_cap) {
-            break;
-        }
-
         int match_start = match.start < 0 ? 0 : match.start;
         if (match_start > content_len) match_start = content_len;
         for (; cursor < match_start; ++cursor) {
@@ -1199,18 +1317,7 @@ void SearchEngine::process_file(
                                   static_cast<size_t>(match.end - match.start)));
         }
 
-        SearchContext ctx;
-        if (options.max_context_lines > 0) {
-            // Hand over the bytes we already hold. Re-resolving by FileID
-            // costs a second store read, and for a file reloaded above after
-            // LRU eviction the store has nothing to return -- the row would
-            // carry a match with an empty context block.
-            ctx = context_extractor_.extract(file_id, blocks, line,
-                                              options.max_context_lines,
-                                              content_sv);
-        }
-
-        // Match-quality bonus, seeded here because this is the only point
+        // Match-quality bonus, computed here because this is the only point
         // where the match offsets and the file bytes are both available.
         // kBaseMatchScore is subtracted out: score_result contributes it once,
         // in SearchEngine::search.
@@ -1218,10 +1325,16 @@ void SearchEngine::process_file(
                                                  match.end, pattern) -
                          kBaseMatchScore;
 
-        results.push_back(SearchResult{
-            file_id, std::string(path), line, col,
-            std::move(match_text), quality, std::move(ctx)});
+        ++match_count;
+        keep_pending(PendingRow{line, col, std::move(match_text), quality});
     }
+
+    // Materialize the retained rows in ascending line order; the exact order
+    // does not matter because SearchEngine::search re-ranks the survivors.
+    for (auto& row : pending) {
+        emit(row.line, row.column, std::move(row.match_text), row.quality);
+    }
+    return match_count;
 }
 
 }  // namespace lci
