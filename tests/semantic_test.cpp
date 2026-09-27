@@ -502,5 +502,33 @@ TEST(SemanticAnnotatorTest, TrailingStringMarkerNotAnnotation) {
     EXPECT_EQ(ann->labels[0], "real");
 }
 
+// A `*`-leading CODE line whose marker is inside a string is not a
+// block-comment continuation and must not mint a label.
+TEST(SemanticAnnotatorTest, StarDerefStringMarkerNotAnnotation) {
+    SemanticAnnotator sa;
+    std::string content =
+        "*hint = \"@lci:labels[fake]\";\n"
+        "void f() {}\n";
+
+    sa.extract_annotations(1, "f.cpp", content, {make_symbol("f", 2)});
+
+    EXPECT_TRUE(sa.get_symbols_by_label("fake").empty());
+    EXPECT_EQ(sa.total_annotations(), 0);
+}
+
+// A genuine ` * @lci:...` block-comment continuation is still recognised.
+TEST(SemanticAnnotatorTest, BlockCommentContinuationIsAnnotation) {
+    SemanticAnnotator sa;
+    std::string content =
+        "/*\n"
+        " * @lci:labels[cont]\n"
+        " */\n"
+        "void f() {}\n";
+
+    sa.extract_annotations(1, "f.cpp", content, {make_symbol("f", 4)});
+
+    EXPECT_FALSE(sa.get_symbols_by_label("cont").empty());
+}
+
 }  // anonymous namespace
 }  // namespace lci
