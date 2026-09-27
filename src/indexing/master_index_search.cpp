@@ -216,6 +216,30 @@ std::string MasterIndex::validate_search_components() const {
 
 // -- Search execution ---------------------------------------------------------
 
+// Caller probe (task 01M3J09SEHGB9RQW7PC0EKTF1M, criterion 1).
+//
+// Callers of MasterIndex::search_with_options / execute_search and their
+// disposition for "one ranking door: every search surface calls
+// SearchEngine::search":
+//
+//   search_with_options
+//   - src/server/handlers_search.cpp:86  (/search)      REROUTED to
+//       SearchEngine::search when an engine is published; fallback to
+//       search_with_options only for an engine-less index (mirrors MCP).
+//   - src/server/handlers_search.cpp:266 (/references)  KEPT: usage/context
+//       listing, not ranked search; it wants FileID-stable ordering and the
+//       structured context, and never emitted a ranking claim.
+//   - src/mcp/handlers_search.cpp:593,607              KEPT: existing
+//       no-engine fallback (MCP-2 already routes through SearchEngine::search
+//       when an engine exists; this is the older-indexer shim).
+//   - src/indexing/master_index_search.cpp:75,126,134  KEPT: internal
+//       convenience wrappers (search/search_definitions/search_references).
+//   - tests/* and benchmarks                           KEPT: test/bench seams.
+//   execute_search
+//   - src/indexing/master_index_search.cpp:92          KEPT: the literal
+//       engine used by search_with_options, which itself survives only for
+//       the callers above.
+
 std::vector<SearchResult> MasterIndex::execute_search(
     const std::string& pattern,
     const std::vector<FileID>& candidates,

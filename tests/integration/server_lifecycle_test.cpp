@@ -8,8 +8,10 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <set>
 #include <fstream>
@@ -602,6 +604,127 @@ TEST(ServerRssCapTest, ExceededCapStopsServer) {
     std::error_code ec;
     std::filesystem::remove_all(tmp, ec);
     std::filesystem::remove(sock, ec);
+}
+
+// -- /search must rank through SearchEngine, not the FileID-prefix path -------
+//
+// One ranking door (task 01M3J09SEHGB9RQW7PC0EKTF1M). The MCP search tool
+// routes through SearchEngine::search, which ranks the full match set and
+// applies the definition bonus. The HTTP /search handler went to
+// MasterIndex::search_with_options -> execute_search, which sorts candidates
+// by FileID, stops at max_results and stamps every row with a flat 855.5.
+// A defining header that sorts LAST (highest FileID) therefore never reached
+// the response, and every emitted row carried the same score.
+//
+// Fixture: 40 whole-word, exact-case references to SearchEngine in files that
+// sort BEFORE the definition, and the defining header in a file that sorts
+// LAST. With default options the definition must be in the top 3, and the
+// scores must not all be identical (ranking happened).
+
+class SearchRankingServerTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        // 40 lower-FileID files reference the symbol but never define it.
+        for (int f = 0; f < 40; ++f) {
+            char name[40];
+            std::snprintf(name, sizeof(name), "aaa/ref%03d.go", f);
+            dir_.write_file(name,
+                            "package main\n"
+                            "var x = SearchEngine\n");
+        }
+        // Highest FileID: the one line that DEFINES SearchEngine.
+        dir_.write_file("zzz/def.h", "class SearchEngine {};\n");
+
+        config_.project.root = dir_.path().string();
+        config_.project.name = "search-ranking-test";
+
+        indexer_ = std::make_unique<MasterIndex>(config_);
+        ASSERT_TRUE(indexer_->index_directory(config_.project.root));
+        search_engine_ = std::make_unique<SearchEngine>(*indexer_);
+
+        // Precondition for this test's meaning: the definition file must be
+        // the highest FileID, so the old FileID-order collection/emission
+        // would never surface it within the default max_results.
+        auto ids = indexer_->get_all_file_ids();
+        ASSERT_FALSE(ids.empty());
+        const FileID max_id =
+            *std::max_element(ids.begin(), ids.end());
+        EXPECT_EQ(max_id, indexer_->path_to_id(
+                              (dir_.path() / "zzz/def.h").string()))
+            << "fixture assumption broken: definition file is not the "
+               "highest FileID";
+
+        server_ = std::make_unique<IndexServer>(
+            config_, *indexer_, search_engine_.get());
+        socket_path_ =
+            (std::filesystem::temp_directory_path() /
+             ("lci_search_rank_" + std::to_string(::getpid()) + "_" +
+              std::to_string(socket_counter_++) + ".sock"))
+                .string();
+        server_->set_socket_path(socket_path_);
+        server_->set_build_id_override("search-ranking-test-id");
+        ASSERT_TRUE(server_->start());
+    }
+
+    void TearDown() override {
+        if (server_ && server_->is_running()) server_->shutdown();
+        std::error_code ec;
+        std::filesystem::remove(socket_path_, ec);
+    }
+
+    nlohmann::json post(const std::string& path,
+                        const nlohmann::json& body = nlohmann::json{}) {
+        httplib::Client cli(socket_path_);
+        cli.set_address_family(AF_UNIX);
+        cli.set_connection_timeout(std::chrono::seconds{5});
+        cli.set_read_timeout(std::chrono::seconds{5});
+        auto res = cli.Post(path, body.dump(), "application/json");
+        if (!res) return {{"error", "connection failed"}};
+        try {
+            return nlohmann::json::parse(res->body);
+        } catch (...) {
+            return {{"raw", res->body}};
+        }
+    }
+
+    TempDir dir_;
+    Config config_;
+    std::unique_ptr<MasterIndex> indexer_;
+    std::unique_ptr<SearchEngine> search_engine_;
+    std::unique_ptr<IndexServer> server_;
+    std::string socket_path_;
+    static inline int socket_counter_ = 0;
+};
+
+TEST_F(SearchRankingServerTest, SearchReturnsDefinitionInTopThree) {
+    auto j = post("/search", {{"pattern", "SearchEngine"}});
+    ASSERT_TRUE(j.contains("results")) << j.dump();
+    const auto& results = j["results"];
+    ASSERT_GE(results.size(), 3u) << j.dump();
+
+    bool def_in_top3 = false;
+    for (size_t i = 0; i < 3; ++i) {
+        if (results[i]["path"].get<std::string>().find("zzz/def.h") !=
+            std::string::npos) {
+            def_in_top3 = true;
+        }
+    }
+    EXPECT_TRUE(def_in_top3)
+        << "the defining header was not in the /search top 3; top path was "
+        << results[0]["path"].get<std::string>();
+    EXPECT_EQ("zzz/def.h", results[0]["path"].get<std::string>());
+}
+
+TEST_F(SearchRankingServerTest, SearchRowsAreNotAllOneScore) {
+    auto j = post("/search", {{"pattern", "SearchEngine"}});
+    ASSERT_TRUE(j.contains("results")) << j.dump();
+    const auto& results = j["results"];
+    ASSERT_GE(results.size(), 2u) << j.dump();
+
+    std::set<double> scores;
+    for (const auto& r : results) scores.insert(r["score"].get<double>());
+    EXPECT_GT(scores.size(), 1u)
+        << "every /search row scored the same flat value: ranking was skipped";
 }
 
 }  // namespace
