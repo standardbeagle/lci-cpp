@@ -186,7 +186,7 @@ hierarchy and purity. `id` and `name` are mutually exclusive.
 | `id` | string | (empty) | Comma-separated object IDs. Aliases: `symbol_id`, `object_id`, `object_ids`, `oid`. Accepts `oid=VE,tG` form. |
 | `name` | string | (empty) | Symbol name (enables name path + call hierarchy). Works with or without `mode`; `mode` only tunes depth/sections. |
 | `mode` | string | (empty) | `full` (depth 5, ai text), `quick` (depth 2, sections relationships+structure), `relationships`, `semantic`, `usage`, `variables`. |
-| `include_call_hierarchy` | boolean | false | Callers/callees/call_tree (name path only). |
+| `include_call_hierarchy` | boolean | false | Adds `caller_names[]`/`callees[]`/`call_tree` (name path only); integer `callers` is unaffected. |
 | `max_depth` | int | 1 (or mode preset) | Call-tree depth, clamped [1, 10]. |
 | `include_sections` / `exclude_sections` | array | — | Whitelist/blacklist of `relationships`, `variables`, `semantic`, `structure`, `usage`, `ai`. |
 | `symbol` + `path` | string | (empty) | Auto-search path: if both set with no `id`, returns a workflow hint, not context. |
