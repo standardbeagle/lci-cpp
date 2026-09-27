@@ -639,6 +639,108 @@ TEST(SearchEngineIntegrationTest, CappedCollectionTakesLowestFileIds) {
     }
 }
 
+// MCP-2: the collection cap (max_results*8, hard 2000) is applied in FileID
+// order BEFORE scoring, so a match that ranks #1 globally is never collected
+// when enough lower-FileID files hold lower-ranked matches. Here 3000
+// lower-FileID lines carry the token indented (no line-start bonus) and the
+// definition file — highest FileID, scanned last — carries it at column 0 with
+// exact case and the line-start bonus. The definition must be the top hit.
+TEST(SearchEngineFullRankTest, BestRankedMatchInHighestFileIdIsTopHit) {
+    TempDir dir;
+    // 3000 matching lines below the cap's reach, all in files that sort before
+    // the definition file. 4 lines per file => 750 files named aa..zy.
+    for (int f = 0; f < 750; ++f) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "bulk/f%04d.go", f);
+        std::string content = "package main\n";
+        for (int i = 0; i < 4; ++i) {
+            content += "    needleToken\n";  // indented: no line-start bonus
+        }
+        dir.write_file(name, content);
+    }
+    // Highest FileID (sorts after bulk/): exact, column-0, line-start match.
+    dir.write_file("zz_definition.go",
+                   "package main\n"
+                   "needleToken\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    FileID def_id = mi.path_to_id(
+        (dir.path() / "zz_definition.go").string());
+    ASSERT_NE(def_id, FileID{0});
+    // Precondition for this test's meaning: the definition file is scanned
+    // LAST, i.e. the old prefix cap would never reach it.
+    auto ids = mi.get_all_file_ids();
+    ASSERT_FALSE(ids.empty());
+    FileID max_id = *std::max_element(ids.begin(), ids.end());
+    ASSERT_EQ(max_id, def_id)
+        << "fixture assumption broken: definition file is not the highest "
+           "FileID";
+
+    SearchEngine engine(mi);
+    SearchOptions opts;  // max_results default 100 => old cap 800.
+    auto results = engine.search("needleToken", opts);
+    ASSERT_FALSE(results.empty());
+    EXPECT_EQ("zz_definition.go", results.front().path)
+        << "the globally best-ranked match was never collected: ranking ran "
+           "on a FileID-order prefix";
+    EXPECT_EQ(2, results.front().line);
+}
+
+// MCP-2: the `dirs` histogram is documented as a histogram over the FULL
+// pre-truncation match set, but it was built from the FileID-order prefix.
+// Its counts must sum to total_matches.
+TEST(SearchEngineFullRankTest, DirHistogramCoversFullMatchSet) {
+    TempDir dir;
+    // Two directories; put the matches that sort AFTER the cap into dir "zz".
+    // 750 files x 4 lines = 3000 matches in "bulk" (all below the cap).
+    for (int f = 0; f < 750; ++f) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "bulk/f%04d.go", f);
+        std::string content = "package main\n";
+        for (int i = 0; i < 4; ++i) content += "    needleToken\n";
+        dir.write_file(name, content);
+    }
+    for (int f = 0; f < 25; ++f) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "zz/t%04d.go", f);
+        std::string content = "package main\n";
+        for (int i = 0; i < 4; ++i) content += "    needleToken\n";
+        dir.write_file(name, content);
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    SearchStats stats;
+    auto results = engine.search("needleToken", opts, &stats);
+    ASSERT_FALSE(results.empty());
+
+    int dir_sum = 0;
+    for (const auto& [d, count] : stats.dir_counts) dir_sum += count;
+    EXPECT_EQ(stats.total_found, dir_sum)
+        << "dirs counts must cover the full pre-truncation match set";
+    // 775 files x 4 = 3100 matches total.
+    EXPECT_EQ(3100, stats.total_found);
+    EXPECT_FALSE(stats.hit_collection_cap);
+    bool has_zz = false;
+    for (const auto& [d, count] : stats.dir_counts) {
+        if (d == "zz") {
+            has_zz = true;
+            EXPECT_EQ(100, count);
+        }
+    }
+    EXPECT_TRUE(has_zz) << "dirs omitted a directory whose matches sort past "
+                           "the old collection cap";
+}
+
 // -- Line/column resolution ---------------------------------------------------
 
 // process_file resolves lines with an incremental cursor instead of rescanning
