@@ -1703,11 +1703,12 @@ TEST_F(HandlersFixture, SearchUnknownParamErrorListsAllowedParams) {
     EXPECT_TRUE(has_path);
 }
 
-// get_context carries a callers count (incoming references), matching the
-// search per-hit field — chokepoint questions answerable without an extra
-// call-hierarchy request. main() calls handleRequest? No — fixture has no
-// cross-file calls guaranteed, so assert shape: field absent when zero,
-// present and positive when the tracker records incoming refs.
+// get_context carries a callers count (incoming references, EXCLUDING the
+// symbol's own definition-site reference), matching the search per-hit field
+// — chokepoint questions answerable without an extra call-hierarchy request.
+// main() calls handleRequest? No — fixture has no cross-file calls
+// guaranteed, so assert shape: field absent when zero, present and positive
+// when the tracker records incoming refs.
 TEST_F(HandlersFixture, GetContextCallersFieldMatchesIncomingRefs) {
     auto& tracker = indexer_->ref_tracker();
     auto snap = tracker.pin();
@@ -1721,12 +1722,50 @@ TEST_F(HandlersFixture, GetContextCallersFieldMatchesIncomingRefs) {
     auto json = nlohmann::json::parse(result.text);
     ASSERT_EQ(json["count"].get<int>(), 1);
     const auto& ctx = json["contexts"][0];
-    if (sym->incoming_ref_count == 0) {
+    const int expected = static_cast<int>(sym->incoming_ref_count);
+    if (expected == 0) {
         EXPECT_FALSE(ctx.contains("callers"));
     } else {
-        EXPECT_EQ(ctx["callers"].get<int>(),
-                  static_cast<int>(sym->incoming_ref_count));
+        ASSERT_TRUE(ctx.contains("callers"));
+        EXPECT_EQ(ctx["callers"].get<int>(), expected);
     }
+}
+
+// MCP-4: `callers` must keep ONE type across get_context modes. Without a
+// call hierarchy it is the integer count; WITH include_call_hierarchy=true it
+// was overwritten by the caller-name array. The hierarchy list now lives under
+// `caller_names`, and `callers` stays an integer in every mode.
+TEST(GetContextCallersTypeTest, CallersStaysIntegerWithCallHierarchy) {
+    auto dir = lci::test::unique_temp_dir("lci_ctx_callers_type_");
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "main.go")
+        << "package main\n\ntype T struct{}\n\n"
+           "func (t *T) target() int { return 1 }\n\n"
+           "func (t *T) callerA() int { return t.target() }\n\n"
+           "func (t *T) callerB() int { return t.target() }\n";
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    indexer.index_directory(dir.string());
+
+    nlohmann::json params;
+    params["name"] = "target";
+    params["include_call_hierarchy"] = true;
+    auto result = handle_get_context(params, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto json = nlohmann::json::parse(result.text);
+    ASSERT_FALSE(json["contexts"].empty()) << result.text;
+    const auto& ctx = json["contexts"][0];
+    ASSERT_TRUE(ctx.contains("callers")) << result.text;
+    ASSERT_TRUE(ctx["callers"].is_number_integer())
+        << "callers must stay an integer in call-hierarchy mode: "
+        << ctx["callers"].dump();
+    EXPECT_EQ(ctx["callers"].get<int>(), 2) << result.text;
+    ASSERT_TRUE(ctx.contains("caller_names")) << result.text;
+    ASSERT_TRUE(ctx["caller_names"].is_array()) << result.text;
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
 }
 
 // Regression: a project whose ROOT lives under a dotted directory
