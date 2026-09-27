@@ -783,6 +783,42 @@ TEST(SearchEngineFullRankTest, DefinitionHeaderOutranksReferences) {
     EXPECT_EQ(2, results.front().line);
 }
 
+// MCP-2 + one-door: a single dense file must not be silently truncated to the
+// hidden kMaxMatchesPerFile=100 default. The CLI pages /search by re-requesting
+// a larger max_results, so the engine's per-file scan budget must scale with
+// the output cap; otherwise a match past row 100 in one file is reported absent
+// (SearchPagingTest.MatchBeyondRow500IsReturned pins the CLI end of this).
+TEST(SearchEngineFullRankTest, DenseFileNotSilentlyCappedAtHundred) {
+    TempDir dir;
+    std::string content = "package main\n";
+    for (int i = 0; i < 250; ++i) {
+        content += "needle filler line " + std::to_string(i) + "\n";
+    }
+    content += "needle_unique_tail\n";
+    dir.write_file("big.go", content);
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.max_results = 1000;
+    SearchStats stats;
+    auto results = engine.search("needle", opts, &stats);
+    EXPECT_EQ(251, stats.total_found)
+        << "the engine reported " << stats.total_found
+        << " matches for a 251-match file (silent per-file cap)";
+    ASSERT_FALSE(results.empty());
+    bool tail = false;
+    for (const auto& r : results) {
+        if (r.line == 252) tail = true;
+    }
+    EXPECT_TRUE(tail) << "a match past the hidden 100/default per-file cap was "
+                         "silently dropped";
+}
+
 // -- Line/column resolution ---------------------------------------------------
 
 // process_file resolves lines with an incremental cursor instead of rescanning
