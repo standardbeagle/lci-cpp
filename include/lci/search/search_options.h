@@ -186,8 +186,11 @@ struct SearchStats {
     /// hit_collection_cap is false; a lower bound otherwise.
     int total_found{0};
 
-    /// True when even the over-collection cap (max_results*8, <=2000) was
-    /// reached — total_found is then "at least this many".
+    /// True when total_found is only "at least this many". The single-pattern
+    /// search scans and counts every match, so it always leaves this false;
+    /// the multi-pattern search sets it when a sub-pattern's rows were
+    /// truncated before the cross-pattern dedup (so the merged count is a
+    /// floor).
     bool hit_collection_cap{false};
 
     /// Root-relative top-level directory -> match count over the full

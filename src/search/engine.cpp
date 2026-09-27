@@ -657,9 +657,10 @@ std::vector<SearchResult> SearchEngine::search(
     // Deterministic scan order (Karpathy rule 4). Both sources above are
     // built by walking an absl hash map (TrigramIndex's per-file counts,
     // MasterIndex::file_map), whose iteration order is randomized per
-    // process. That order decides WHICH matches survive the collection cap
-    // below, so without this sort the ranked top-N of a capped query differs
-    // between runs on an identical corpus.
+    // process. Selection below no longer depends on scan order (every match
+    // is scored and BoundedTopK keeps the top rows under a total order), but
+    // the sort keeps the scan itself reproducible between runs on an
+    // identical corpus.
     std::sort(candidates.begin(), candidates.end());
 
     // Output cap = how many rows the caller gets AND the rank-preserving

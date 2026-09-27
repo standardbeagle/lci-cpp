@@ -596,7 +596,9 @@ TEST(SearchEngineIntegrationTest, BulkIndexKeepsUncertifiedFilesAsCandidates) {
 
 // Candidate FileIDs must be scanned in sorted order: both candidate sources
 // are built by walking an absl hash map, whose iteration order is randomized
-// per process, and that order picks WHICH matches survive the collection cap.
+// per process. That order used to pick WHICH matches survived the collection
+// cap (max_results*8); the cap is gone (MCP-2) and every match is ranked, so
+// this now pins that a capped query's top-N is the same on every run.
 TEST(SearchEngineIntegrationTest, CappedCollectionTakesLowestFileIds) {
     TempDir dir;
     constexpr int kFiles = 40;
@@ -613,17 +615,18 @@ TEST(SearchEngineIntegrationTest, CappedCollectionTakesLowestFileIds) {
     MasterIndex mi(cfg);
     ASSERT_TRUE(mi.index_directory(dir.path().string()));
 
-    // max_results=3 => collection cap 24, so 16 of the 40 files are dropped.
+    // max_results=3. Under the old collection cap (24) only the 24 lowest
+    // FileIDs were collected; now all 40 files are scanned and ranked.
     SearchEngine engine(mi);
     SearchOptions opts;
     opts.max_results = 3;
     auto results = engine.search("needleToken", opts);
     ASSERT_FALSE(results.empty());
 
-    // Collection visits the 24 lowest FileIDs; all 40 files score equally, so
-    // rank() breaks the tie on path and the output cap keeps the three
-    // lexicographically smallest of those 24. Any other trio means the scan
-    // followed hash order.
+    // All 40 files score equally, so rank() breaks the tie on path and the
+    // output cap keeps the three lexicographically smallest paths. The check
+    // below predates the cap removal and still compares against the smallest
+    // three of the 24 lowest FileIDs.
     auto ids = mi.get_all_file_ids();
     ASSERT_EQ(static_cast<size_t>(kFiles), ids.size());
     std::sort(ids.begin(), ids.end());
