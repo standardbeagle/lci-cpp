@@ -51,6 +51,13 @@ inline constexpr double kWordBoundaryBonus = 50.0;
 inline constexpr double kLineStartBonus = 25.0;
 inline constexpr double kExactCaseBonus = 20.0;
 inline constexpr double kBaseMatchScore = 100.0;
+/// Added to a match that lands on the definition line of a symbol whose name
+/// is the query (see SearchEngine::search). `search X` must surface the
+/// defining header above its references; references otherwise tie the
+/// definition on every match-quality term, leaving path order in control
+/// (MCP-2). Larger than the sum of the match-quality bonuses so a definition
+/// always wins over a non-definition hit.
+inline constexpr double kDefinitionBonus = 200.0;
 inline constexpr double kAdditionalPatternCoverageBoost = 0.15;
 inline constexpr double kPatternCoverageBoostCap = 0.5;
 // A compound identifier must outrank a line-start keyword plus a separate

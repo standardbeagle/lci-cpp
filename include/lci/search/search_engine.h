@@ -41,6 +41,22 @@ struct SearchPatternMetadata {
     bool synonym{false};
 };
 
+/// A scored match before its SearchResult is materialized. `path` is a view
+/// into the query's pinned file snapshot, which outlives the whole search, so
+/// the engine never copies a path or match string for a row it will discard
+/// (Karpathy rule 2). Byte offsets let `match_text` and context be built only
+/// for the rows that survive global selection.
+struct CandidateRow {
+    FileID file_id{};
+    std::string_view path;
+    int line{};
+    int column{};
+    int match_start{};
+    int match_end{};
+    double score{};
+    bool from_synonym{false};
+};
+
 /// Maximum number of patterns expand_pattern_semantic may emit once synonyms
 /// are injected. Group sizes are ~3-5, so single-word queries stay well under;
 /// the cap only bites on multi-word queries (design §4). No silent unbounded
@@ -174,18 +190,20 @@ class SearchEngine {
     double score_result(const SearchResult& result,
                         std::string_view pattern) const;
 
-    /// Processes a single file for matches and produces results. `snap` is the
-    /// query's pinned file snapshot, used to resolve the path once (no per-match
-    /// re-fetch). At most `per_file_cap` rows are appended to `results` (the
-    /// ones that can survive the global top-`per_file_cap` selection); the
-    /// return value is the total number of matching rows found in the file,
-    /// including those not retained, so the caller can report the true count
-    /// and directory histogram. `per_file_cap <= 0` retains every match.
+    /// Processes a single file for matches. `snap` is the query's pinned file
+    /// snapshot, used to resolve the path once (no per-match re-fetch). At most
+    /// `per_file_cap` candidate rows (the ones that can survive the global
+    /// top-`per_file_cap` selection) are appended to `out`; the return value is
+    /// the total number of matching rows found in the file, including those not
+    /// retained, so the caller can report the true count and directory
+    /// histogram. `per_file_cap <= 0` retains every match. `path` is the
+    /// file's pinned path view, stored in each CandidateRow.
     int process_file(FileID file_id,
+                     std::string_view path,
                      std::string_view pattern,
                      const SearchOptions& options,
                      int per_file_cap,
-                     std::vector<SearchResult>& results,
+                     std::vector<CandidateRow>& out,
                      const FileSnapshot& snap) const;
 };
 
