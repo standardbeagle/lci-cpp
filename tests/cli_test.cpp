@@ -3388,6 +3388,86 @@ TEST(AlternationSeedTest, UnseededBranchMatchesRgSemantics) {
     fs::remove_all(root, ec);
 }
 
+// -- INC-4: `search --context-filter function|class` -------------------------
+//
+// Drives the built binary end to end (server + /search + CLI post-filter).
+// At HEAD every row carried block_type="lines", so the post-filter kept
+// nothing and `--context-filter function` returned 0 rows. The rows must
+// carry the innermost enclosing block kind for the filter to have anything
+// to match.
+
+TEST(SearchContextFilterTest, FunctionKeepsFunctionBodyDropsTopLevel) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        portable::executable_path().parent_path().parent_path() / "src" /
+        "lci";
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_ctxfilter_fn_");
+    fs::create_directories(root);
+    write_corpus_file(root, "w.cpp",
+                      "class Widget {\n"
+                      "public:\n"
+                      "  int compute() {\n"
+                      "    return MAGIC_TOKEN;\n"
+                      "  }\n"
+                      "};\n"
+                      "\n"
+                      "int free_fn() {\n"
+                      "  return MAGIC_TOKEN;\n"
+                      "}\n"
+                      "\n"
+                      "int g_top = MAGIC_TOKEN;\n");
+
+    // Baseline: no filter -> all three MAGIC_TOKEN hits.
+    std::string out;
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root, {lci_bin.string(), "search", "--json",
+                        "MAGIC_TOKEN"},
+        out));
+    auto base = nlohmann::json::parse(out);
+    EXPECT_EQ(base.value("count", 0), 3) << out;
+
+    // function keeps the method body (line 4) and the free function body
+    // (line 9) and drops the top-level line 12.
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "search", "--json", "--context-filter",
+         "function", "MAGIC_TOKEN"},
+        out));
+    auto fn = nlohmann::json::parse(out);
+    EXPECT_EQ(fn.value("count", 0), 2) << out;
+    for (const auto& row : fn["results"]) {
+        const auto& r = row.contains("result") ? row["result"] : row;
+        const std::string bt = r.at("context").value("block_type", "");
+        EXPECT_TRUE(bt == "function" || bt == "method")
+            << "function filter kept a non-function block_type: " << bt;
+    }
+
+    // class drops every hit: the class-body match is the method, not the
+    // class itself. This is the discrimination arm — a block_type that
+    // claimed "class" for a method body would wrongly keep it.
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "search", "--json", "--context-filter", "class",
+         "MAGIC_TOKEN"},
+        out));
+    auto cls = nlohmann::json::parse(out);
+    EXPECT_EQ(cls.value("count", 0), 0) << out;
+
+    // top-level keeps only the line outside any function/class.
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "search", "--json", "--context-filter",
+         "top-level", "MAGIC_TOKEN"},
+        out));
+    auto top = nlohmann::json::parse(out);
+    EXPECT_EQ(top.value("count", 0), 1) << out;
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
 // -- S12.5: real JSON output, honest --stats, guarded lookups, paged symbols --
 
 TEST(CommandsJsonTest, RefsJsonPrintsValidJsonAndExitsZero) {

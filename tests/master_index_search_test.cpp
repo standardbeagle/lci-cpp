@@ -1122,6 +1122,56 @@ TEST(MasterIndexSearchIntegrationTest, ManyMatchesInOneFileNotSilentlyCapped) {
 }
 
 TEST(MasterIndexSearchIntegrationTest,
+     RowsCarryEnclosingBlockTypeForContextFilter) {
+    // INC-4: every row used to carry block_type="lines"/empty, so the CLI
+    // `--context-filter function|class` post-filter (src/cli/rank_options.h)
+    // kept nothing. Each row's context must name the innermost enclosing
+    // symbol's kind so the filter has something to match on. Discrimination:
+    // a function-body match reports "function", a class-member match reports
+    // "method", and a top-level match reports neither (empty / "lines").
+    TempDir dir;
+    dir.write_file("w.cpp",
+        "class Widget {\n"
+        "public:\n"
+        "  int compute() {\n"
+        "    return MAGIC_TOKEN;\n"
+        "  }\n"
+        "};\n"
+        "\n"
+        "int free_fn() {\n"
+        "  return MAGIC_TOKEN;\n"
+        "}\n"
+        "\n"
+        "int g_top = MAGIC_TOKEN;\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchOptions opts;
+    opts.max_context_lines = 1;
+    auto results = mi.search_with_options("MAGIC_TOKEN", opts);
+    ASSERT_EQ(results.size(), 3u) << "expected three MAGIC_TOKEN hits";
+
+    // Innermost enclosing block per match line: 4 -> method compute,
+    // 9 -> function free_fn, 12 -> none (top-level).
+    auto type_at = [&](int line) {
+        for (const auto& r : results) {
+            if (r.line == line) return r.context.block_type;
+        }
+        return std::string("<no row at line>");
+    };
+    EXPECT_EQ(type_at(4), "method") << "class-member body must resolve to method";
+    EXPECT_EQ(type_at(9), "function") << "function body must resolve to function";
+
+    std::string top = type_at(12);
+    EXPECT_TRUE(top.empty() || top == "lines" || top == "context")
+        << "top-level line must not claim an enclosing function/class, got: "
+        << top;
+}
+
+TEST(MasterIndexSearchIntegrationTest,
      IncrementalTrigramStateDoesNotHideBulkFiles) {
     TempDir dir;
     dir.write_file("a.go", "package main\n// call handle_gadget now\n");
