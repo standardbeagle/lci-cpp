@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -299,6 +300,17 @@ class MasterIndex {
 
     /// The attribute set in force for this index (shipped ruleset + config).
     const PathAttrRegistry& attr_registry() const { return attr_registry_; }
+
+    /// Resolves the innermost non-variable symbol whose line span covers
+    /// `line` (column-agnostic; `column` only disambiguates a hit on the
+    /// symbol's own first/last line). Used to stamp `context.block_type` /
+    /// `context.block_name` on search rows so the CLI `--context-filter`
+    /// post-filter (src/cli/rank_options.h) has the enclosing block to
+    /// match. Returns nullopt when no symbol covers the line (top-level
+    /// code, unparseable files). Lock-free via the SymbolLocationIndex RCU
+    /// snapshot; O(log n + span) per call.
+    std::optional<Symbol> enclosing_symbol_at(FileID file_id, int line,
+                                              int column = 0) const;
 
     /// Returns the subset of `scopes` (root-relative file or directory-prefix
     /// tokens, the `lci grep/search <path>...` positional) that match NO

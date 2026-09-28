@@ -308,8 +308,19 @@ std::vector<SearchResult> MasterIndex::execute_search(
             r.column = column;
             r.match_text = sym->symbol.name;
             r.context = std::move(ctx);
-            r.context.block_name = sym->symbol.name;
-            r.context.block_type = "lines";
+            // Declaration hits are themselves definitions; the row's block
+            // is the symbol's own kind. Stamp the real type so
+            // `--context-filter function|class` can match it, falling back
+            // to the enclosing container then the "lines" sentinel.
+            if (auto enclosing = enclosing_symbol_at(
+                    sym->symbol.file_id, sym->symbol.line,
+                    sym->symbol.column)) {
+                r.context.block_type = std::string(to_string(enclosing->type));
+                r.context.block_name = enclosing->name;
+            } else {
+                r.context.block_type = "lines";
+                r.context.block_name = sym->symbol.name;
+            }
             results.push_back(std::move(r));
         }
         return results;
@@ -359,6 +370,13 @@ std::vector<SearchResult> MasterIndex::execute_search(
                 r.context =
                     extract_context(ref.file_id, ref.line,
                                     options.max_context_lines);
+                if (auto enclosing =
+                        enclosing_symbol_at(ref.file_id, ref.line,
+                                            ref.column)) {
+                    r.context.block_type =
+                        std::string(to_string(enclosing->type));
+                    r.context.block_name = enclosing->name;
+                }
                 results.push_back(std::move(r));
             }
         }
@@ -504,11 +522,46 @@ std::vector<SearchResult> MasterIndex::execute_search(
             // result ordering deterministic and matches the Go output.
             r.score = 855.5;
             r.context = extract_context(fid, line, options.max_context_lines);
+            // Stamp the enclosing block so the CLI `--context-filter`
+            // post-filter (rank_options.h) has a block_type to match. Empty
+            // (not the "lines" sentinel) on a top-level hit, which the
+            // filter's TopLevel bucket accepts either way.
+            if (auto enclosing = enclosing_symbol_at(fid, line, col)) {
+                r.context.block_type = std::string(to_string(enclosing->type));
+                r.context.block_name = enclosing->name;
+            }
             results.push_back(std::move(r));
         }
     }
 
     return results;
+}
+
+std::optional<Symbol> MasterIndex::enclosing_symbol_at(FileID file_id, int line,
+                                                       int column) const {
+    if (file_id == FileID{0} || line <= 0) return std::nullopt;
+
+    // Fast path: the RCU spatial index returns the most-specific
+    // (smallest-span) covering symbol in O(log n + span), lock-free. It is
+    // only trusted when the innermost symbol is a real CONTAINER; a
+    // Variable (local/parameter) is not a block, and the spatial index
+    // cannot skip past it to the enclosing container on its own.
+    if (auto sym = symbol_location_index_.find_symbol_at_position(
+            file_id, line, column)) {
+        if (sym->type != SymbolType::Variable) return sym;
+    }
+
+    // Slow path (variant-of-local hit): ReferenceTracker::Snapshot::
+    // get_symbol_at_line implements the innermost-non-variable rule (the
+    // MCP-1 fix), so a hit inside a local or parameter still resolves to
+    // its enclosing function/class. Linear in the file's symbol count, only
+    // reached when a local shadows the container at this line.
+    auto snap = ref_tracker_.pin();
+    auto handle = snap->get_symbol_at_line(file_id, line);
+    if (handle != nullptr && handle->symbol.type != SymbolType::Variable) {
+        return handle->symbol;
+    }
+    return std::nullopt;
 }
 
 SearchContext MasterIndex::extract_context(FileID file_id, int match_line,

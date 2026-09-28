@@ -869,6 +869,20 @@ std::vector<SearchResult> SearchEngine::search(
             r.context = context_extractor_.extract(
                 c.file_id, {}, c.line, options.max_context_lines, content);
         }
+        // Stamp the innermost enclosing symbol so `context.block_type` /
+        // `context.block_name` are populated. This is the search row
+        // builder for the served `/search`, MCP search and CLI `lci search`
+        // paths (the block list above is intentionally empty: block-aware
+        // line extraction is not wired). Without this every row carried the
+        // "lines" sentinel and the CLI `--context-filter function|class`
+        // post-filter (src/cli/rank_options.h) kept nothing (INC-4).
+        // Resolved per survivor, never per candidate; empty on a top-level
+        // hit, which the filter's TopLevel bucket accepts.
+        if (auto enclosing =
+                index_.enclosing_symbol_at(c.file_id, c.line, c.column)) {
+            r.context.block_type = std::string(to_string(enclosing->type));
+            r.context.block_name = enclosing->name;
+        }
         results.push_back(std::move(r));
     }
     // Final total order includes match_text as the last tie-break (rank()'s
