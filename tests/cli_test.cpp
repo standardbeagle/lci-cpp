@@ -2125,6 +2125,9 @@ TEST(RankOptionsBlockTypeMatch, TopLevelMatrix) {
     EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::TopLevel, ""));
     EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::TopLevel, "lines"));
     EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::TopLevel, "context"));
+    // A namespace/module container is still outside any function/class.
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::TopLevel, "namespace"));
+    EXPECT_TRUE(ro::block_type_matches(ro::ContextFilter::TopLevel, "module"));
     EXPECT_FALSE(ro::block_type_matches(ro::ContextFilter::TopLevel, "function"));
     EXPECT_FALSE(ro::block_type_matches(ro::ContextFilter::TopLevel, "class"));
 }

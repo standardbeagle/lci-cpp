@@ -344,9 +344,13 @@ inline bool block_type_matches(ContextFilter filter, std::string_view bt) {
             // "Top-level" means the result lives outside any enclosing
             // function/class/etc. The engine signals that with an empty
             // block_type or one of two sentinels ("lines" — synthesized
-            // by master_index_search.cpp:160 when no scope was resolved,
-            // "context" — engine_context.cpp:225 fallback).
-            return lower.empty() || lower == "lines" || lower == "context";
+            // when no scope was resolved, "context" — engine_context.cpp
+            // fallback). A hit resolved to a MODULE / NAMESPACE container
+            // is outside any function/class too (C++ `namespace lci { ... }`,
+            // Rust/TS `mod`), so those count as top-level rather than being
+            // dropped by every filter arm.
+            return lower.empty() || lower == "lines" || lower == "context" ||
+                   lower == "module" || lower == "namespace";
         case ContextFilter::None:
         case ContextFilter::Unknown:
         default:
