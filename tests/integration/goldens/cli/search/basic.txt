@@ -1,14 +1,14 @@
 Found 3 results in <MS> (MODE)
 
-b.py:1
+b.py:1 (in function add)
      1 | def add(a: int, b: int) -> int:
 
 
-c.cpp:1
+c.cpp:1 (in function add)
      1 | int add(int a, int b) { return a + b; }
 
 
-d.rs:1
+d.rs:1 (in function add)
      1 | pub fn add(a: i32, b: i32) -> i32 { a + b }
 
 

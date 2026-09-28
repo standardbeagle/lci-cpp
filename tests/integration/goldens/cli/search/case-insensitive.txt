@@ -1,18 +1,18 @@
 Found 4 results in <MS> (standard mode)
 
-b.py:1
+b.py:1 (in function add)
      1 | def add(a: int, b: int) -> int:
 
 
-c.cpp:1
+c.cpp:1 (in function add)
      1 | int add(int a, int b) { return a + b; }
 
 
-d.rs:1
+d.rs:1 (in function add)
      1 | pub fn add(a: i32, b: i32) -> i32 { a + b }
 
 
-a.go:3
+a.go:3 (in function Add)
      3 | func Add(a, b int) int { return a + b }
 
 

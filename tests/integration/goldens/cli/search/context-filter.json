@@ -1,0 +1,77 @@
+{
+  "count": 3,
+  "mode": "standard",
+  "query": "add",
+  "results": [
+    {
+      "result": {
+        "column": 4,
+        "context": {
+          "block_name": "add",
+          "block_type": "function",
+          "end_line": 1,
+          "is_complete": true,
+          "lines": [
+            "def add(a: int, b: int) -> int:"
+          ],
+          "match_count": 1,
+          "matched_lines": [
+            1
+          ],
+          "start_line": 1
+        },
+        "line": 1,
+        "match": "add",
+        "path": "b.py",
+        "score": 391.5
+      }
+    },
+    {
+      "result": {
+        "column": 4,
+        "context": {
+          "block_name": "add",
+          "block_type": "function",
+          "end_line": 1,
+          "is_complete": true,
+          "lines": [
+            "int add(int a, int b) { return a + b; }"
+          ],
+          "match_count": 1,
+          "matched_lines": [
+            1
+          ],
+          "start_line": 1
+        },
+        "line": 1,
+        "match": "add",
+        "path": "c.cpp",
+        "score": 391.5
+      }
+    },
+    {
+      "result": {
+        "column": 7,
+        "context": {
+          "block_name": "add",
+          "block_type": "function",
+          "end_line": 1,
+          "is_complete": true,
+          "lines": [
+            "pub fn add(a: i32, b: i32) -> i32 { a + b }"
+          ],
+          "match_count": 1,
+          "matched_lines": [
+            1
+          ],
+          "start_line": 1
+        },
+        "line": 1,
+        "match": "add",
+        "path": "d.rs",
+        "score": 391.5
+      }
+    }
+  ],
+  "time_ms": 1.022
+}
