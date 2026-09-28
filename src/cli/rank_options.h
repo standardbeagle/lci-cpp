@@ -53,18 +53,22 @@
 //                container — matches users' intuition of "inside a class
 //                body" regardless of language).
 //   top-level  : keep when block_type is empty, "lines", or "context"
-//                (the engine's "no enclosing scope resolved" sentinels).
+//                (the engine's "no enclosing scope resolved" sentinels),
+//                or "module" / "namespace" (containers that are still
+//                outside any function/class).
 //
 // Unknown context filters fall through to pass-through (warned on stderr).
 // Empty filter = no filtering at all.
 //
 // IMPORTANT — like `kind:`/`symbol:` directives in query_parser.h, the
 // context filter relies on the server populating `context.block_type` on
-// each row. The lci-cpp engine populates this field from
-// engine_context.cpp:145 / 188 / 225, but only when the search hit a file
-// with parseable symbols. Hits in unparseable files (e.g. plain text)
-// end up with block_type="lines" and are routed through the top-level
-// bucket, which is consistent with treating them as "outside any enclosing
+// each row. The lci-cpp engine stamps this field with the innermost
+// enclosing non-variable symbol's kind (MasterIndex::enclosing_symbol_at,
+// applied per row in SearchEngine::search and MasterIndex::execute_search).
+// Hits no symbol covers (top-level code, unparseable files such as plain
+// text) end up with an empty block_type, which the server's /search
+// serialises as "lines", and are routed through the top-level bucket,
+// which is consistent with treating them as "outside any enclosing
 // definition".
 
 #pragma once
@@ -328,8 +332,9 @@ inline nlohmann::json apply_rank(nlohmann::json results, RankStrategy strategy) 
 ///
 /// Block-type strings come from `to_string(SymbolType)` in
 /// include/lci/types.h: "function", "method", "class", "struct",
-/// "interface", "trait", "impl", "record", and the engine sentinels
-/// "lines" and "context" used when no enclosing scope was resolved.
+/// "interface", "trait", "impl", "record", "module", "namespace", and the
+/// engine sentinels "lines" and "context" used when no enclosing scope was
+/// resolved.
 inline bool block_type_matches(ContextFilter filter, std::string_view bt) {
     std::string lower = ascii_lower(bt);
     switch (filter) {

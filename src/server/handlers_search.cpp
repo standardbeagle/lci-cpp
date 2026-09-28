@@ -182,8 +182,9 @@ void IndexServer::handle_definition(const httplib::Request& req,
     }
 
     // Resolve each hit's REAL symbol kind and a verbatim signature line.
-    // search_definitions is a generic text-search path, so its
-    // context.block_type is the hardcoded literal "lines" and it carries no
+    // search_definitions is a generic text-search path: its
+    // context.block_type is the innermost covering symbol's kind (or the
+    // "lines" sentinel when none resolves) and it carries no
     // signature — forcing `lci def` consumers into a second file read just to
     // learn what kind of symbol was found and how it is declared. The symbol
     // table already holds the true SymbolType and the declaration line, so
