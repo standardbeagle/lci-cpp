@@ -29,6 +29,9 @@
 #include <thread>
 #include <vector>
 #include <cstdio>
+#ifndef _WIN32
+#include <unistd.h>  // geteuid
+#endif
 
 namespace lci {
 namespace {
@@ -1654,7 +1657,11 @@ TEST(FileScannerBudgetTest, ByteBudgetCutsBeforeOversizeTotal) {
 // read, so no operation=="load" error appears and the load failure is dropped
 // at the point it is first detected.
 TEST(PipelineLoadFailureTest, UnreadableFileSurfacedOnBatchLoadChannel) {
+#ifdef _WIN32
+    GTEST_SKIP() << "perms::none does not make a file unreadable on Windows";
+#else
     if (geteuid() == 0) GTEST_SKIP() << "running as root, chmod 000 not enforced";
+#endif
     TempDir dir;
     dir.write_file("good.go", "package main\nfunc main() {}\n");
     dir.write_file("bad.go", "package secret\nfunc Hide() {}\n");

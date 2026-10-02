@@ -71,6 +71,14 @@ TEST(SubprocessTest, SpawnDetachedMissingBinaryReturnsFalse) {
 }
 
 #if !defined(_WIN32)
+// The kernel's per-process fd table: /proc/self/fd on Linux, /dev/fd (fdescfs)
+// on macOS, which has no procfs.
+#if defined(__APPLE__)
+constexpr const char* kFdTableDir = "/dev/fd";
+#else
+constexpr const char* kFdTableDir = "/proc/self/fd";
+#endif
+
 TEST(SubprocessTest, ConcurrentRunCaptureLeaksNoFdsIntoOtherChild) {
     // Reference value: the KERNEL's fd table for the second child
     // (/proc/self/fd), not any output of run_capture logic. While a 2s
@@ -85,7 +93,7 @@ TEST(SubprocessTest, ConcurrentRunCaptureLeaksNoFdsIntoOtherChild) {
     auto count_fds = [] {
         std::string listing;
         EXPECT_TRUE(
-            subprocess::run_capture({"ls", "/proc/self/fd"}, "", listing));
+            subprocess::run_capture({"ls", kFdTableDir}, "", listing));
         int entries = 0;
         for (char c : listing) {
             if (c == '\n') ++entries;
