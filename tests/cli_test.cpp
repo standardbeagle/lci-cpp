@@ -32,6 +32,7 @@
 #include "../src/cli/rank_options.h"
 #include "../src/cli/symbol_filters.h"
 #include "../src/cli/tree_formatter.h"
+#include "lci_binary.h"
 #include "unique_temp.h"
 
 namespace lci {
@@ -540,8 +541,7 @@ TEST(CliSubcommandTest, NestedSubcommandAcceptsGlobalRootFlag) {
     // (build/<preset>/src/lci); the test binary lives in build/<preset>/tests.
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
 
     const auto root = lci::test::unique_temp_dir("lci_cli_subcmd_");
@@ -562,8 +562,7 @@ TEST(CliSubcommandTest, NestedSubcommandAcceptsGlobalRootFlag) {
 TEST(CliSubcommandTest, ArrowPatternParsesAsContent) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
 
     const auto root = lci::test::unique_temp_dir("lci_cli_arrow_");
@@ -600,8 +599,7 @@ TEST(CliSubcommandTest, ArrowPatternParsesAsContent) {
 TEST(CliSubcommandTest, QuotedExclusionStillParses) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
 
     const auto root = lci::test::unique_temp_dir("lci_cli_excl_");
@@ -632,8 +630,7 @@ TEST(CliSubcommandTest, UnknownOptionStillErrors) {
     // option is still a parse error, not silently swallowed as content.
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
 
     const auto root = lci::test::unique_temp_dir("lci_cli_badopt_");
@@ -3141,8 +3138,7 @@ void shutdown_lci_server(const std::filesystem::path& lci_bin,
 TEST(SearchMetaRegexTest, TextModePrintsTextNotJson) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_meta_text_");
     fs::create_directories(root);
@@ -3164,8 +3160,7 @@ TEST(SearchMetaRegexTest, TextModePrintsTextNotJson) {
 TEST(SearchMetaRegexTest, HonorsPathScopeAndExclude) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_meta_scope_");
     fs::create_directories(root);
@@ -3199,8 +3194,7 @@ TEST(SearchMetaRegexTest, HonorsPathScopeAndExclude) {
 TEST(SearchMetaRegexTest, HonorsMaxCount) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_meta_maxc_");
     fs::create_directories(root);
@@ -3227,8 +3221,7 @@ class SearchFlagEffectTest : public ::testing::Test {
     std::filesystem::path root;
 
     void SetUp() override {
-        lci_bin = portable::executable_path().parent_path().parent_path() /
-                  "src" / "lci";
+        lci_bin = lci::test::lci_binary_path();
         ASSERT_TRUE(std::filesystem::exists(lci_bin)) << lci_bin;
         root = lci::test::unique_temp_dir("lci_search_flags_");
         std::filesystem::create_directories(root);
@@ -3310,8 +3303,7 @@ TEST_F(SearchFlagEffectTest, MaxCountCapsPerFile) {
 TEST(SearchPagingTest, MatchBeyondRow500IsReturned) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_search_paging_");
     fs::create_directories(root);
@@ -3353,8 +3345,7 @@ TEST(AlternationSeedTest, UnseededBranchMatchesRgSemantics) {
     // both alpha.cpp:1 (foobar branch) and beta.cpp:1 (ab branch only).
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_alt_seed_");
     fs::create_directories(root);
@@ -3402,8 +3393,7 @@ TEST(AlternationSeedTest, UnseededBranchMatchesRgSemantics) {
 TEST(SearchContextFilterTest, FunctionKeepsFunctionBodyDropsTopLevel) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_ctxfilter_fn_");
     fs::create_directories(root);
@@ -3476,8 +3466,7 @@ TEST(SearchContextFilterTest, FunctionKeepsFunctionBodyDropsTopLevel) {
 TEST(CommandsJsonTest, RefsJsonPrintsValidJsonAndExitsZero) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_refs_json_");
     fs::create_directories(root);
@@ -3505,8 +3494,7 @@ TEST(CommandsJsonTest, RefsJsonPrintsValidJsonAndExitsZero) {
 TEST(CommandsJsonTest, BrowseStatsReportsStats) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_browse_stats_");
     fs::create_directories(root);
@@ -3546,8 +3534,7 @@ TEST(CommandsJsonTest, MissingDefinitionsKeyIsClearErrorNotException) {
 TEST(SymbolsPagingTest, FileGlobReturnsAllMatchesBeyondFirstServerPage) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_symbols_paging_");
     fs::create_directories(root);
@@ -3614,8 +3601,7 @@ void ensure_lci_server_indexed(const std::filesystem::path& lci_bin,
 TEST(CliDebugInfoTest, NeverPrintsFabricatedZerosAgainstPopulatedIndex) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_s9_debug_zeros_");
     fs::create_directories(root);
@@ -3638,8 +3624,7 @@ TEST(CliDebugInfoTest, NeverPrintsFabricatedZerosAgainstPopulatedIndex) {
 TEST(CliDebugInfoTest, NoServerExitsNonZeroWithServerNotRunning) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_s9_debug_nosrv_");
     fs::create_directories(root);
@@ -3657,8 +3642,7 @@ TEST(CliDebugInfoTest, NoServerExitsNonZeroWithServerNotRunning) {
 TEST(CliDebugValidateTest, NeverClaimsAllChecksPassedAgainstPopulatedIndex) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_s9_validate_srv_");
     fs::create_directories(root);
@@ -3683,8 +3667,7 @@ TEST(CliDebugValidateTest, NeverClaimsAllChecksPassedAgainstPopulatedIndex) {
 TEST(CliDebugExportTest, NoServerExitsNonZeroWithServerNotRunning) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_s9_export_nosrv_");
     fs::create_directories(root);
@@ -3707,8 +3690,7 @@ TEST(CliDebugExportTest, NoServerExitsNonZeroWithServerNotRunning) {
 TEST(CliStatusTest, NoServerPrintsNotRunningAndSpawnsNothing) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_s9_status_nosrv_");
     fs::create_directories(root);
@@ -3733,8 +3715,7 @@ TEST(CliStatusTest, NoServerPrintsNotRunningAndSpawnsNothing) {
 TEST(CliStatusTest, ThreadsAndRssMatchServerStatusJson) {
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" /
-        "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root = lci::test::unique_temp_dir("lci_s9_status_srv_");
     fs::create_directories(root);
@@ -3847,8 +3828,7 @@ class CliContextTest : public ::testing::Test {
     std::filesystem::path root;
 
     void SetUp() override {
-        lci_bin = portable::executable_path().parent_path().parent_path() /
-                  "src" / "lci";
+        lci_bin = lci::test::lci_binary_path();
         ASSERT_TRUE(std::filesystem::exists(lci_bin)) << lci_bin;
         root = lci::test::unique_temp_dir("lci_context_cli_");
         std::filesystem::create_directories(root);
@@ -4110,7 +4090,7 @@ TEST(CliContextDaemonTest, WrongRootDaemonExitsNonZeroWithDiagnostic) {
 #ifndef _WIN32
     namespace fs = std::filesystem;
     const auto lci_bin =
-        portable::executable_path().parent_path().parent_path() / "src" / "lci";
+        lci::test::lci_binary_path();
     ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
     const auto root_a = lci::test::unique_temp_dir("lci_ctx_daemon_a_");
     const auto root_b = lci::test::unique_temp_dir("lci_ctx_daemon_b_");

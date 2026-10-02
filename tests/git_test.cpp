@@ -465,12 +465,12 @@ TEST(GitFrequency, CommitHistoryParsesPipeInAuthorAndQuotedPath) {
     setenv("GIT_COMMITTER_DATE", "1768478400 +0000", 1);
     ASSERT_TRUE(lci::test::run_git(
         repo,
-        "-c user.email=a@b -c 'user.name=A|B' "
+        "-c user.email=a@b -c \"user.name=A|B\" "
         "-c commit.gpgsign=false commit -q -m msg1"));
     ASSERT_TRUE(lci::test::run_git(repo, "mv caf\xC3\xA9.go na\xC3\xAFve.go"));
     ASSERT_TRUE(lci::test::run_git(
         repo,
-        "-c user.email=a@b -c 'user.name=A|B' "
+        "-c user.email=a@b -c \"user.name=A|B\" "
         "-c commit.gpgsign=false commit -q -m msg2"));
     unsetenv("GIT_AUTHOR_DATE");
     unsetenv("GIT_COMMITTER_DATE");
