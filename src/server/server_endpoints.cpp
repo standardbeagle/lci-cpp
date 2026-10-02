@@ -81,7 +81,8 @@ double get_rss_mb() {
 // number of threads this process actually has running (HTTP worker pool,
 // watcher, indexer helpers) -- reporting it under a "Threads:" label is a
 // fabricated measurement (karpathy-principles rule 6). On Linux each thread
-// (including the main one) owns an entry under /proc/self/task/.
+// (including the main one) owns an entry under /proc/self/task/; macOS asks
+// the Mach task for its thread list.
 int live_thread_count() {
 #if defined(__linux__)
     std::error_code ec;
@@ -92,6 +93,20 @@ int live_thread_count() {
     }
     if (ec || count == 0) return -1;
     return count;
+#elif defined(__APPLE__)
+    // task_threads hands back a kernel-allocated port array; release the
+    // ports and the array or every /stats call leaks them.
+    thread_act_array_t threads = nullptr;
+    mach_msg_type_number_t count = 0;
+    if (task_threads(mach_task_self(), &threads, &count) != KERN_SUCCESS) {
+        return -1;
+    }
+    for (mach_msg_type_number_t i = 0; i < count; ++i) {
+        mach_port_deallocate(mach_task_self(), threads[i]);
+    }
+    vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threads),
+                  count * sizeof(thread_act_t));
+    return static_cast<int>(count);
 #else
     return -1;
 #endif
