@@ -274,7 +274,7 @@ if(NOT httplib_FOUND)
     FetchContent_Declare(httplib
     SYSTEM
         GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-        GIT_TAG v0.18.3
+        GIT_TAG v0.46.0
         GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(httplib)

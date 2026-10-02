@@ -1168,10 +1168,11 @@ void IndexServer::register_handlers() {
     // the whole initial index; the default pool (8 workers, unbounded queue)
     // mutes /ping and /shutdown under >=8 concurrent bridge calls.
     svr_.new_task_queue = [] {
-        return new httplib::ThreadPool(
-            std::max<size_t>(std::thread::hardware_concurrency(),
-                             kMinServerWorkerThreads),
-            kMaxQueuedRequests);
+        // base == max: a fixed pool. httplib >= 0.4x takes (base, max, queue)
+        // and throws when max < base, so the queue cap must be the third arg.
+        const size_t workers = std::max<size_t>(
+            std::thread::hardware_concurrency(), kMinServerWorkerThreads);
+        return new httplib::ThreadPool(workers, workers, kMaxQueuedRequests);
     };
 
     // /ping is excluded from activity stamping so liveness probes (client
