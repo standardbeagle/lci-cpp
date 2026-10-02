@@ -12,6 +12,7 @@
 #endif
 
 #include "helpers/test_git.h"
+#include "portable_env.h"
 
 #include <nlohmann/json.hpp>
 

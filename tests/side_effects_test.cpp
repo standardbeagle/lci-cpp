@@ -3,8 +3,10 @@
 #include <filesystem>
 #include <fstream>
 
+#ifndef _WIN32
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 #include <nlohmann/json.hpp>
 
@@ -452,6 +454,9 @@ TEST(SideEffectsHandlerTest, EmptyAnalyzerYieldsAnalysisUnavailable) {
 // handle_side_effects: capped modes must be deterministic
 // ---------------------------------------------------------------------------
 
+#ifndef _WIN32
+// POSIX fork() only: Windows has no fork, so the cross-process hash-salt
+// determinism check runs on the POSIX legs (same convention as git_test.cpp).
 // Runs one side_effects query in a fresh child process (fresh absl hash salt
 // -> fresh flat_hash_map iteration order) and returns the raw response text.
 static std::string run_impure_query_in_child() {
@@ -537,6 +542,7 @@ TEST(SideEffectsHandlerTest, ImpureModeDeterministicAcrossProcesses) {
     EXPECT_EQ(results[2]["file_path"].get<std::string>(), "file0.go");
     EXPECT_EQ(results[2]["line"].get<int>(), 18);
 }
+#endif  // !_WIN32
 
 // ---------------------------------------------------------------------------
 // handle_side_effects symbol mode: file_path disambiguation + symbol_id

@@ -24,8 +24,10 @@
 #include <limits>
 #include <new>
 
+#ifndef _WIN32
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 // =============================================================================
 // Scoped heap-allocation counter.
@@ -831,6 +833,9 @@ TEST_F(ExploreIndexTestFixture, BrowseFileSortByName) {
 // browse_file basename determinism
 // =============================================================================
 
+#ifndef _WIN32
+// POSIX fork() only: Windows has no fork, so the cross-process hash-salt
+// determinism check runs on the POSIX legs (same convention as git_test.cpp).
 // Runs browse_file for "util.go" against a two-candidate corpus in a fresh
 // child process (fresh absl hash salt -> fresh get_all_file_ids order) and
 // returns the raw response text. Returns empty on child failure.
@@ -909,6 +914,7 @@ TEST(BrowseFileDeterminismTest, AmbiguousBasenameResolvesSmallestPath) {
 
     std::filesystem::remove_all(dir);
 }
+#endif  // !_WIN32
 
 // A `file` filter carrying a wildcard must actually glob. Before this,
 // path_matches_glob only did equality / basename / suffix, so

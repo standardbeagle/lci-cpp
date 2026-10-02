@@ -29,7 +29,6 @@
 #include <thread>
 #include <vector>
 #include <cstdio>
-#include <unistd.h>
 
 namespace lci {
 namespace {
