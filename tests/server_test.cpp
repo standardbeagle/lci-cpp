@@ -223,6 +223,31 @@ TEST(SocketPathTest, RootSpellingsShareOneSocket) {
     std::filesystem::remove_all(base, ec);
 }
 
+#ifndef _WIN32
+// A socket keyed to the caller's TMPDIR let two callers of one root miss each
+// other's server, and a deep TMPDIR pushed the path past sun_path (2026-10-20:
+// three servers for one checkout, one that never listened). The socket must
+// not move with TMPDIR, and must fit sun_path however deep TMPDIR is.
+TEST(SocketPathTest, SocketIgnoresTmpdirAndFitsSunPath) {
+    auto base = lci::test::unique_temp_dir("lci_socket_tmpdir_");
+    const std::filesystem::path deep =
+        base / std::string(60, 'c') / std::string(60, 'd');
+    std::filesystem::create_directories(deep);
+    const char* old = std::getenv("TMPDIR");
+    const std::string saved = old != nullptr ? old : "";
+    const std::string before = get_socket_path_for_root("/project/a");
+    ::setenv("TMPDIR", deep.c_str(), 1);
+    const std::string during = get_socket_path_for_root("/project/a");
+    if (old != nullptr) ::setenv("TMPDIR", saved.c_str(), 1); else ::unsetenv("TMPDIR");
+    EXPECT_EQ(during, before);
+    EXPECT_EQ(during.rfind(deep.string(), 0), std::string::npos) << during;
+    EXPECT_LE(during.size(), 107u) << during;
+    EXPECT_EQ(std::filesystem::path(during).parent_path().string(), user_runtime_dir());
+    std::error_code ec;
+    std::filesystem::remove_all(base, ec);
+}
+#endif
+
 TEST(SocketPathTest, EmptyRootFallsBack) {
     auto path = get_socket_path_for_root("");
     EXPECT_EQ(path, get_socket_path());

@@ -28,6 +28,12 @@ class WatchPipeline;
 
 // -- Socket path helpers ------------------------------------------------------
 
+/// The one per-user directory (0700) holding every lci server socket and the
+/// instance registry: $XDG_RUNTIME_DIR/lci, else /tmp/lci-<uid>. Never derived
+/// from TMPDIR, so every caller of one root finds the same server whatever its
+/// environment, and the socket path always fits sun_path.
+std::string user_runtime_dir();
+
 /// Returns the default Unix socket path for the LCI server.
 std::string get_socket_path();
 

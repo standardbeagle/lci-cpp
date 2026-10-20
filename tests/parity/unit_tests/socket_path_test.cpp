@@ -17,15 +17,15 @@ namespace fs = std::filesystem;
 // second candidate from candidate_socket_paths() and update the
 // expectation counts here to 1.
 
-TEST(SocketPath, ReturnsTwoCandidatesWhileSunsetPending) {
+TEST(SocketPath, ReturnsThreeCandidatesWhileSunsetPending) {
     auto cands = candidate_socket_paths_for_test("/tmp/some/corpus");
-    EXPECT_EQ(cands.size(), 2u)
-        << "If this is 1, the Go reference has been upgraded — drop the "
-           "second candidate in tests/parity/runner/modes/http.cpp and "
-           "update this test to expect size==1.";
+    EXPECT_EQ(cands.size(), 3u)
+        << "Current C++ (runtime dir), legacy Go and pre-move C++ (temp dir). "
+           "When the Go reference upgrades, drop the second candidate in "
+           "tests/parity/runner/modes/http.cpp and update this count.";
 }
 
-TEST(SocketPath, FirstCandidateIsUidNamespacedNewFormat) {
+TEST(SocketPath, FirstCandidateIsInTheUserRuntimeDir) {
     auto cands = candidate_socket_paths_for_test("/tmp/some/corpus");
     ASSERT_GE(cands.size(), 1u);
     fs::path p(cands[0]);
@@ -33,7 +33,9 @@ TEST(SocketPath, FirstCandidateIsUidNamespacedNewFormat) {
     // Format: lci-<uid>-<8hex>.sock
     EXPECT_TRUE(name.starts_with("lci-")) << name;
     EXPECT_TRUE(name.ends_with(".sock")) << name;
-    EXPECT_EQ(p.parent_path(), fs::temp_directory_path());
+    EXPECT_NE(p.parent_path(), fs::temp_directory_path())
+        << "The current binary's socket must not follow TMPDIR: " << p;
+    EXPECT_EQ(p.parent_path().filename().string().rfind("lci", 0), 0u) << p;
 
     // Must contain the literal uid as a decimal-number segment.
     auto uid_str = std::to_string(static_cast<unsigned>(::getuid()));

@@ -144,6 +144,58 @@ uint32_t current_process_id() {
 
 }  // namespace
 
+#ifndef _WIN32
+namespace {
+// Longest runtime-dir prefix accepted: with "/lci/" and the longest socket name
+// ("lci-4294967295-ffffffff.sock", 28 chars) the path stays within sun_path's 107.
+constexpr std::size_t kMaxRuntimePrefix = 64;
+
+bool owned_private_dir(const std::filesystem::path& dir) {
+    struct stat st{};
+    return ::lstat(dir.c_str(), &st) == 0 && S_ISDIR(st.st_mode) &&
+           st.st_uid == ::getuid();
+}
+}  // namespace
+#endif
+
+std::string user_runtime_dir() {
+    namespace fs = std::filesystem;
+    fs::path dir;
+#ifndef _WIN32
+    // Sockets used to live under temp_directory_path(), i.e. the caller's
+    // TMPDIR. TMPDIR differs per caller (worktrack gives every run its own,
+    // gate scripts set their own), so two callers of one root missed each
+    // other's server and started a second one, and a deep TMPDIR pushed the
+    // socket past sun_path: on 2026-10-20 one checkout had three servers and
+    // a server that never listened voided agent turns fleet-wide. One fixed
+    // per-user place answers both: the kernel's runtime dir when it is short
+    // enough, else a fixed /tmp/lci-<uid> (not TMPDIR), checked to be ours.
+    const std::string uid = std::to_string(static_cast<unsigned>(::getuid()));
+    const char* xdg = std::getenv("XDG_RUNTIME_DIR");
+    if (xdg != nullptr && *xdg != '\0' && std::strlen(xdg) <= kMaxRuntimePrefix &&
+        owned_private_dir(xdg)) {
+        dir = fs::path(xdg) / "lci";
+    } else {
+        dir = fs::path("/tmp") / ("lci-" + uid);
+    }
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (!owned_private_dir(dir)) {
+        // Someone else owns (or symlinked) the fixed path: fall back to the
+        // caller's temp dir rather than trust it.
+        dir = fs::temp_directory_path() / ("lci-" + uid);
+        fs::create_directories(dir, ec);
+    }
+    ::chmod(dir.c_str(), 0700);
+#else
+    // %TEMP% is already per-user on Windows (sockets are TCP ports there).
+    dir = fs::temp_directory_path() / "lci-registry";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+#endif
+    return dir.string();
+}
+
 std::string get_socket_path() {
     const uint32_t uid = current_user_id();
 #ifdef _WIN32
@@ -155,12 +207,10 @@ std::string get_socket_path() {
     // Windows, so a localhost client hits IPv6 and gets connection-refused.
     return "127.0.0.1:" + std::to_string(port);
 #else
-    // Format: /<tmp>/lci-<uid>.sock — fits well under the 108-char
-    // sun_path limit even with long TMPDIR settings (uid is at most 10
-    // decimal digits for uint32, total fixed prefix is ~17 chars).
+    // Format: <user_runtime_dir>/lci-<uid>.sock, e.g. /run/user/1000/lci/lci-1000.sock.
     char buf[64];
     std::snprintf(buf, sizeof(buf), "lci-%u.sock", uid);
-    return (std::filesystem::temp_directory_path() / buf).string();
+    return (std::filesystem::path(user_runtime_dir()) / buf).string();
 #endif
 }
 
@@ -193,13 +243,12 @@ std::string get_socket_path_for_root(const std::string& root) {
     // rationale.
     return "127.0.0.1:" + std::to_string(port);
 #else
-    // Format: /<tmp>/lci-<uid>-<hash>.sock — e.g. /tmp/lci-1000-deadbeef.sock
-    // Maximum length with /tmp prefix is /tmp/lci-4294967295-ffffffff.sock = 33
-    // chars, well under the 108-byte sun_path limit. Even an unusually long
-    // TMPDIR like /var/folders/abc/T/ leaves ~80 chars of headroom.
+    // Format: <user_runtime_dir>/lci-<uid>-<hash>.sock, e.g.
+    // /run/user/1000/lci/lci-1000-deadbeef.sock. user_runtime_dir() bounds its
+    // prefix, so the path fits sun_path whatever the caller's TMPDIR is.
     char buf[64];
     std::snprintf(buf, sizeof(buf), "lci-%u-%08x.sock", uid, hash);
-    return (std::filesystem::temp_directory_path() / buf).string();
+    return (std::filesystem::path(user_runtime_dir()) / buf).string();
 #endif
 }
 
@@ -328,7 +377,7 @@ bool unix_socket_alive(const std::string& path) {
 }
 
 /// Removes this user's dead lci socket files (and their sidecar locks)
-/// from the temp dir. Killed one-shot MCP processes leak one socket each;
+/// from user_runtime_dir(). Killed one-shot MCP processes leak one socket each;
 /// dozens were observed accumulated. A file is dead only when nothing
 /// answers a connect AND its sidecar lock is free (a starting server holds
 /// the lock before it binds).
@@ -338,7 +387,7 @@ void reap_stale_sockets(const std::string& own_sock) {
     std::snprintf(prefix, sizeof(prefix), "lci-%u-", current_user_id());
     std::error_code ec;
     for (const auto& entry :
-         fs::directory_iterator(fs::temp_directory_path(), ec)) {
+         fs::directory_iterator(fs::path(user_runtime_dir()), ec)) {
         const std::string name = entry.path().filename().string();
         if (name.rfind(prefix, 0) != 0) continue;
         if (name.size() < 5 || name.substr(name.size() - 5) != ".sock")

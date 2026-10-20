@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <signal.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <thread>
@@ -46,6 +47,22 @@ uint32_t hash_corpus(const std::string& abs_corpus) {
 //   drop the second candidate, restore a single compute_socket_path()
 //   helper, and delete this comment. Behaviour locked by
 //   tests/parity/unit_tests/socket_path_test.cpp.
+// Mirrors lci::user_runtime_dir() (src/server/server.cpp): the runner drives
+// the binaries as black boxes and does not link lci_lib, so the rule is
+// restated here and pinned by SocketPath.FirstCandidateIsInTheUserRuntimeDir.
+// $XDG_RUNTIME_DIR/lci when that prefix is at most 64 bytes and ours, else a
+// fixed /tmp/lci-<uid>; never the caller's TMPDIR.
+fs::path user_runtime_dir() {
+    const auto uid = std::to_string(static_cast<unsigned>(::getuid()));
+    const char* xdg = std::getenv("XDG_RUNTIME_DIR");
+    struct stat st{};
+    if (xdg != nullptr && *xdg != '\0' && std::strlen(xdg) <= 64 &&
+        ::lstat(xdg, &st) == 0 && S_ISDIR(st.st_mode) && st.st_uid == ::getuid()) {
+        return fs::path(xdg) / "lci";
+    }
+    return fs::path("/tmp") / ("lci-" + uid);
+}
+
 std::vector<std::string> candidate_socket_paths(const std::string& abs_corpus) {
     uint32_t hash = hash_corpus(abs_corpus);
     const auto uid = static_cast<uint32_t>(::getuid());
@@ -54,8 +71,12 @@ std::vector<std::string> candidate_socket_paths(const std::string& abs_corpus) {
     char buf_old[64];
     std::snprintf(buf_old, sizeof(buf_old), "lci-server-%08x.sock", hash);
     return {
-        (fs::temp_directory_path() / buf_new).string(),
+        // Current C++ binary: the per-user runtime dir.
+        (user_runtime_dir() / buf_new).string(),
+        // Legacy Go reference: the temp dir.
         (fs::temp_directory_path() / buf_old).string(),
+        // C++ binaries before the runtime-dir move: the temp dir.
+        (fs::temp_directory_path() / buf_new).string(),
     };
 }
 

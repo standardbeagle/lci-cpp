@@ -50,31 +50,10 @@ long long idle_seconds(const ServerInstance& inst) {
 // -- Instance registry directory ------------------------------------------------
 
 std::string instance_registry_dir() {
-    namespace fs = std::filesystem;
-    fs::path dir;
-#ifndef _WIN32
-    // Prefer the kernel-managed per-user runtime dir; fall back to a
-    // uid-suffixed private dir under temp. Either way the directory is
-    // 0700: registry entries drive shutdown/eviction, so they must not be
-    // forgeable by other local users (the old location — the shared system
-    // temp dir itself — allowed exactly that).
-    if (const char* xdg = std::getenv("XDG_RUNTIME_DIR");
-        xdg != nullptr && *xdg != '\0') {
-        dir = fs::path(xdg) / "lci";
-    } else {
-        dir = fs::temp_directory_path() /
-              ("lci-registry-" + std::to_string(::getuid()));
-    }
-#else
-    // %TEMP% is already per-user on Windows.
-    dir = fs::temp_directory_path() / "lci-registry";
-#endif
-    std::error_code ec;
-    fs::create_directories(dir, ec);
-#ifndef _WIN32
-    ::chmod(dir.c_str(), 0700);
-#endif
-    return dir.string();
+    // Registry entries drive shutdown/eviction, so they must not be forgeable
+    // by other local users: they share the server sockets' private per-user
+    // directory (see user_runtime_dir()).
+    return user_runtime_dir();
 }
 
 // -- ensure_server_running ----------------------------------------------------
