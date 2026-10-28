@@ -4370,6 +4370,68 @@ TEST_F(CliMcpToolsTest, EmptyToolsValueOrNameIsRefused) {
     }
 }
 
+// `info` describes the session, not the binary: its overview lists only the
+// served tools, and help for a tool the session does not serve answers the
+// same unknown-tool error a call to it would.
+std::vector<nlohmann::json> info_requests() {
+    auto info_call = [](int id, nlohmann::json arguments) {
+        return mcp_request(id, "tools/call",
+                           {{"name", "info"}, {"arguments", std::move(arguments)}});
+    };
+    return {
+        mcp_request(1, "initialize", {{"protocolVersion", "2025-06-18"}}),
+        {{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}},
+        info_call(2, nlohmann::json::object()),
+        info_call(3, {{"tool", "browse_file"}}),
+        info_call(4, {{"tool", "files"}}),  // historic alias of find_files
+        info_call(5, {{"tool", "search"}}),
+        info_call(6, {{"tool", "version"}}),
+    };
+}
+
+void expect_info_describes_only_info_and_search(const McpSession& session) {
+    ASSERT_EQ(session.exit_code, 0) << session.stderr_text;
+    auto by_id = frames_by_id(session);
+
+    ASSERT_TRUE(by_id.count(2)) << session.stderr_text;
+    ASSERT_TRUE(by_id[2].contains("result")) << by_id[2].dump();
+    auto overview = nlohmann::json::parse(
+        by_id[2]["result"]["content"][0]["text"].get<std::string>());
+    std::vector<std::string> listed;
+    for (const auto& entry : overview["available_tools"]) {
+        const auto text = entry.get<std::string>();
+        listed.push_back(text.substr(0, text.find(' ')));
+    }
+    EXPECT_EQ(listed, (std::vector<std::string>{"search", "info"}))
+        << overview.dump();
+
+    for (int refused : {3, 4}) {
+        ASSERT_TRUE(by_id.count(refused)) << session.stderr_text;
+        ASSERT_TRUE(by_id[refused].contains("error")) << by_id[refused].dump();
+        EXPECT_EQ(by_id[refused]["error"]["code"].get<int>(), -32602);
+        EXPECT_NE(by_id[refused]["error"]["message"].get<std::string>().find(
+                      "--tools"),
+                  std::string::npos)
+            << by_id[refused].dump();
+    }
+
+    for (int served : {5, 6}) {
+        ASSERT_TRUE(by_id.count(served)) << session.stderr_text;
+        ASSERT_TRUE(by_id[served].contains("result")) << by_id[served].dump();
+        EXPECT_FALSE(by_id[served]["result"].value("isError", false));
+    }
+}
+
+TEST_F(CliMcpToolsTest, InfoDescribesOnlyServedToolsInProcess) {
+    expect_info_describes_only_info_and_search(
+        run_session(in_process_args("search,info"), info_requests()));
+}
+
+TEST_F(CliMcpToolsTest, InfoDescribesOnlyServedToolsOverTheBridge) {
+    expect_info_describes_only_info_and_search(
+        run_session(bridge_args("search,info"), info_requests()));
+}
+
 TEST_F(CliMcpToolsTest, WithoutToolsFlagEveryToolIsServed) {
     auto session = run_session(
         {"mcp", "--include", "*.cpp", "-r", root.string()},
