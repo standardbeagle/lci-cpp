@@ -45,6 +45,16 @@ class ToolAllowlist {
     /// session does serve.
     nlohmann::json refused_call_error(const std::string& name) const;
 
+    /// The error a tools/call with these `params` earns in this session, or
+    /// null: a tool outside the allowlist, or `info` asked to describe one
+    /// (help for a tool the session refuses would invite a refused call).
+    nlohmann::json call_refusal(const nlohmann::json& params) const;
+
+    /// Narrows a tools/call response to the session: the `info` overview
+    /// lists only the tools served. Every other response is left as is.
+    void narrow_call_response(const std::string& tool_name,
+                              nlohmann::json& response) const;
+
     /// Bridge side, request: when `request` is a tools/call (with an id)
     /// naming a tool outside the allowlist, the response frame to answer it
     /// with locally; otherwise "" and the frame is forwarded.
@@ -54,6 +64,10 @@ class ToolAllowlist {
     /// tools/list response frame, keeping the server's field order. A frame
     /// that is not a tools/list result is returned unchanged.
     std::string filter_tools_list_frame(const std::string& response) const;
+
+    /// Bridge side, response: narrow_call_response on a tools/call frame.
+    std::string narrow_call_response_frame(const std::string& tool_name,
+                                           const std::string& response) const;
 
   private:
     explicit ToolAllowlist(std::vector<std::string> names)

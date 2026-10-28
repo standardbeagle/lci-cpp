@@ -1,6 +1,7 @@
 #include <lci/mcp/tool_allowlist.h>
 
 #include <algorithm>
+#include <cctype>
 
 #include <lci/mcp/server.h>
 
@@ -16,6 +17,17 @@ std::string_view trim(std::string_view s) {
     const auto last = s.find_last_not_of(kSpace);
     return s.substr(first, last - first + 1);
 }
+
+// The registered tool an info call or overview entry names: lower-cased, with
+// the historic "files" short name mapped to find_files (as handle_info does).
+std::string info_tool_name(std::string_view name) {
+    std::string lowered(name);
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return lowered == "files" ? "find_files" : lowered;
+}
+
+constexpr std::string_view kInfoTool = "info";
 
 std::string join(const std::vector<std::string>& names) {
     std::string out;
@@ -82,6 +94,62 @@ nlohmann::json ToolAllowlist::refused_call_error(
                             " (lci mcp --tools)"}};
 }
 
+nlohmann::json ToolAllowlist::call_refusal(
+    const nlohmann::json& params) const {
+    // A missing or mistyped name or argument is the server's malformed-
+    // request error to give, not a refusal.
+    if (!params.is_object()) return nullptr;
+    const auto name = params.find("name");
+    if (name == params.end() || !name->is_string()) return nullptr;
+    const auto& tool = name->get_ref<const std::string&>();
+    if (!allows(tool)) return refused_call_error(tool);
+    if (tool != kInfoTool) return nullptr;
+
+    const auto arguments = params.find("arguments");
+    if (arguments == params.end() || !arguments->is_object()) return nullptr;
+    const auto subject = arguments->find("tool");
+    if (subject == arguments->end() || !subject->is_string()) return nullptr;
+    const auto asked =
+        info_tool_name(subject->get_ref<const std::string&>());
+    // "" is the overview and "version" is server info; neither names a tool.
+    if (asked.empty() || asked == "version" || allows(asked)) return nullptr;
+    return refused_call_error(subject->get<std::string>());
+}
+
+void ToolAllowlist::narrow_call_response(const std::string& tool_name,
+                                         nlohmann::json& response) const {
+    if (tool_name != kInfoTool) return;
+    // Only the overview carries available_tools; help for one tool and
+    // version info pass through untouched.
+    if (!response.contains("result") || !response["result"].is_object()) {
+        return;
+    }
+    auto& result = response["result"];
+    if (!result.contains("content") || !result["content"].is_array() ||
+        result["content"].empty()) {
+        return;
+    }
+    auto& item = result["content"][0];
+    if (!item.contains("text") || !item["text"].is_string()) return;
+    auto overview = nlohmann::json::parse(item["text"].get<std::string>(),
+                                          nullptr, /*allow_exceptions=*/false);
+    if (!overview.is_object() || !overview.contains("available_tools") ||
+        !overview["available_tools"].is_array()) {
+        return;
+    }
+    nlohmann::json kept = nlohmann::json::array();
+    for (auto& entry : overview["available_tools"]) {
+        if (!entry.is_string()) continue;
+        const auto& line = entry.get_ref<const std::string&>();
+        // Entries read "<name> - ..." or "info [tool] - ...".
+        if (allows(info_tool_name(line.substr(0, line.find(' '))))) {
+            kept.push_back(std::move(entry));
+        }
+    }
+    overview["available_tools"] = std::move(kept);
+    item["text"] = dump_json_lossy(overview);
+}
+
 std::string ToolAllowlist::refused_call_frame(
     const nlohmann::json& request) const {
     // Notifications get no answer either way (dispatch_wire drops them), so
@@ -90,16 +158,22 @@ std::string ToolAllowlist::refused_call_frame(
     const auto method = request.find("method");
     if (method == request.end() || *method != "tools/call") return {};
     const auto params = request.find("params");
-    if (params == request.end() || !params->is_object()) return {};
-    const auto name = params->find("name");
-    // A missing or mistyped name is the server's malformed-request error to
-    // give, not a refusal.
-    if (name == params->end() || !name->is_string()) return {};
-    const auto& tool = name->get_ref<const std::string&>();
-    if (allows(tool)) return {};
+    if (params == request.end()) return {};
+    auto refusal = call_refusal(*params);
+    if (refusal.is_null()) return {};
     return dump_json_lossy({{"jsonrpc", "2.0"},
                             {"id", request["id"]},
-                            {"error", refused_call_error(tool)}});
+                            {"error", std::move(refusal)}});
+}
+
+std::string ToolAllowlist::narrow_call_response_frame(
+    const std::string& tool_name, const std::string& response) const {
+    if (tool_name != kInfoTool) return response;
+    auto frame = nlohmann::json::parse(response, nullptr,
+                                       /*allow_exceptions=*/false);
+    if (!frame.is_object()) return response;
+    narrow_call_response(tool_name, frame);
+    return dump_json_lossy(frame);
 }
 
 std::string ToolAllowlist::filter_tools_list_frame(

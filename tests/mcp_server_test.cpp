@@ -1208,6 +1208,89 @@ TEST_F(McpStdioTest, StdioToolAllowlistRefusesCallsBeforeTheGate) {
     EXPECT_EQ(gate_calls.load(), 1) << "only the allowed call reaches the gate";
 }
 
+TEST(ToolAllowlist, CallRefusalCoversInfoAboutUnservedTools) {
+    auto allowlist = parse_allowlist_or_die("info,search");
+    auto info_about = [](nlohmann::json tool) {
+        return nlohmann::json{{"name", "info"},
+                              {"arguments", {{"tool", std::move(tool)}}}};
+    };
+    EXPECT_TRUE(allowlist.call_refusal({{"name", "search"}}).is_null());
+    EXPECT_EQ(allowlist.call_refusal({{"name", "callers"}})["code"], -32602);
+
+    EXPECT_TRUE(allowlist.call_refusal(info_about("search")).is_null());
+    EXPECT_TRUE(allowlist.call_refusal(info_about("SEARCH")).is_null());
+    EXPECT_TRUE(allowlist.call_refusal(info_about("version")).is_null());
+    EXPECT_TRUE(allowlist.call_refusal(info_about("")).is_null());
+    EXPECT_TRUE(
+        allowlist.call_refusal({{"name", "info"}, {"arguments", {}}}).is_null());
+    // A mistyped argument is the handler's error to give, not a refusal.
+    EXPECT_TRUE(allowlist.call_refusal(info_about(42)).is_null());
+
+    EXPECT_EQ(allowlist.call_refusal(info_about("browse_file"))["code"],
+              -32602);
+    // "files" is info's historic short name for find_files.
+    EXPECT_EQ(allowlist.call_refusal(info_about("files"))["code"], -32602);
+    EXPECT_TRUE(parse_allowlist_or_die("info,find_files")
+                    .call_refusal(info_about("files"))
+                    .is_null());
+}
+
+TEST(ToolAllowlist, NarrowCallResponseFiltersOnlyTheInfoOverview) {
+    auto allowlist = parse_allowlist_or_die("info,find_files");
+    const nlohmann::json overview = {
+        {"available_tools",
+         {"search - s", "files - f", "browse_file - b", "info [tool] - i"}},
+        {"server", "x"}};
+    nlohmann::json response = {
+        {"result", {{"content", {{{"type", "text"},
+                                  {"text", overview.dump()}}}}}}};
+
+    auto untouched = response;
+    allowlist.narrow_call_response("search", untouched);
+    EXPECT_EQ(untouched, response) << "only info responses are narrowed";
+
+    allowlist.narrow_call_response("info", response);
+    auto narrowed = nlohmann::json::parse(
+        response["result"]["content"][0]["text"].get<std::string>());
+    EXPECT_EQ(narrowed["available_tools"],
+              (nlohmann::json{"files - f", "info [tool] - i"}));
+    EXPECT_EQ(narrowed["server"], "x");
+
+    // Per-tool help carries no available_tools and passes through.
+    nlohmann::json help = {
+        {"result", {{"content", {{{"type", "text"},
+                                  {"text", R"({"name":"search"})"}}}}}}};
+    auto help_before = help;
+    allowlist.narrow_call_response("info", help);
+    EXPECT_EQ(help, help_before);
+}
+
+TEST_F(McpStdioTest, StdioToolAllowlistNarrowsInfo) {
+    server_->set_stdio_tool_allowlist(parse_allowlist_or_die("info,search"));
+    auto responses = exchange({
+        make_request("tools/call", 2,
+                     {{"name", "info"}, {"arguments", nlohmann::json::object()}}),
+        make_request("tools/call", 3,
+                     {{"name", "info"},
+                      {"arguments", {{"tool", "browse_file"}}}}),
+    });
+    std::map<int, nlohmann::json> by_id;
+    for (const auto& r : responses) by_id[r["id"].get<int>()] = r;
+    ASSERT_EQ(by_id.size(), 2u);
+
+    ASSERT_TRUE(by_id[2].contains("result")) << by_id[2].dump();
+    auto overview = nlohmann::json::parse(
+        by_id[2]["result"]["content"][0]["text"].get<std::string>());
+    std::vector<std::string> listed;
+    for (const auto& entry : overview["available_tools"]) {
+        const auto text = entry.get<std::string>();
+        listed.push_back(text.substr(0, text.find(' ')));
+    }
+    EXPECT_EQ(listed, (std::vector<std::string>{"search", "info"}));
+
+    EXPECT_EQ(by_id[3]["error"]["code"].get<int>(), -32602) << by_id[3].dump();
+}
+
 // dispatch_wire answers OTHER sessions bridged through this process's /mcp
 // endpoint; the host's own --tools must not narrow them.
 TEST_F(McpStdioTest, StdioToolAllowlistLeavesDispatchWireUnfiltered) {

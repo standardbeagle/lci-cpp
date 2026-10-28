@@ -160,8 +160,9 @@ class McpServer {
     void set_readiness_gate(std::function<bool(std::string& error)> gate);
 
     /// Narrows the stdio session (run()) to the allowlisted tools: tools/list
-    /// emits only them, and a tools/call outside them answers -32602 before
-    /// the readiness gate. dispatch_wire stays unfiltered: it answers OTHER
+    /// emits only them, a tools/call outside them (or `info` about one)
+    /// answers -32602 before the readiness gate, and the `info` overview
+    /// lists only them. dispatch_wire stays unfiltered: it answers OTHER
     /// sessions bridged through this process's POST /mcp endpoint, and each
     /// of those narrows itself on its side of the bridge. Call before run().
     void set_stdio_tool_allowlist(ToolAllowlist allowlist);

@@ -222,9 +222,12 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
         // Only the stdio session reaches this branch (dispatch_wire peels
         // tools/call off before calling handle_request), so the stdio
         // allowlist applies here and nowhere on the bridge path.
-        if (stdio_allowlist_ && !stdio_allowlist_->allows(tool_name)) {
-            response["error"] = stdio_allowlist_->refused_call_error(tool_name);
-            return response;
+        if (stdio_allowlist_) {
+            if (auto refusal = stdio_allowlist_->call_refusal(params);
+                !refusal.is_null()) {
+                response["error"] = std::move(refusal);
+                return response;
+            }
         }
 
         auto it = std::find_if(
@@ -703,8 +706,14 @@ void McpServer::drain_calls() {
             queue_.pop_front();
         }
 
-        write_message(
-            execute_tool_call(*call.tool, call.arguments, call.id));
+        auto response = execute_tool_call(*call.tool, call.arguments, call.id);
+        // Only the stdio session queues calls here (dispatch_wire executes
+        // inline), so the stdio allowlist narrows what it reads back.
+        if (stdio_allowlist_) {
+            stdio_allowlist_->narrow_call_response(call.tool->definition.name,
+                                                   response);
+        }
+        write_message(response);
     }
 }
 
