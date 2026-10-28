@@ -103,6 +103,12 @@ Full CLI reference: `lci --help` or `lci <command> --help`.
 emits its report in LCF (LCI Compact Format), a token-dense, agent-oriented
 layout; the other tools return structured JSON.
 
+`lci mcp --tools search,callers,info` serves only the named tools: `tools/list`
+carries only their schemas, and a call to any other tool is refused with the
+unknown-tool error. Names are comma-separated, whitespace around each is
+trimmed, and an unknown name, an empty value or an empty name fails at startup
+with the list of available tools. Without `--tools`, every tool is served.
+
 `code_insight` is the session-startup workhorse: repository map, health
 dashboard, entry points, complexity/coupling/cohesion statistics, module
 and feature breakdowns, naming vocabulary, and git change/hotspot

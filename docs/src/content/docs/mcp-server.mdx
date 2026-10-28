@@ -29,6 +29,32 @@ for example in a Claude Code / Claude Desktop-style config:
 }
 ```
 
+## Serving a subset of tools
+
+```sh
+lci mcp --tools search,callers,inspect_symbol,list_symbols,find_files
+```
+
+Every `tools/list` a client reads puts every schema it lists into the model's
+context, on every request. `--tools` narrows the session to the named tools:
+
+- `tools/list` lists only them, in the usual order and shape.
+- A `tools/call` naming any other tool gets JSON-RPC error `-32602` (the
+  unknown-tool code) with a message naming the tools the session serves.
+- Names are comma-separated; whitespace around each is trimmed; duplicates are
+  ignored.
+- An unknown name fails at startup: `lci mcp` exits non-zero and prints the
+  unknown names and every available tool on stderr. An empty value
+  (`--tools ""`) or an empty name (`search,,info`, a trailing comma) fails the
+  same way. To serve every tool, leave `--tools` out.
+
+The allowlist belongs to the session. When `lci mcp` bridges to the shared
+per-root index server, the filter runs in the bridging process and the names
+are checked against the tools that server actually serves; the server, and
+any other session sharing it, is unaffected. When `lci mcp` hosts the index
+itself, its own stdio session is narrowed and the sessions that bridge to it
+keep their own `--tools`.
+
 ## Tool index
 
 | Tool | Output | Purpose |

@@ -82,10 +82,13 @@ transparently start or reuse this server.
 
 ```sh
 lci mcp
+lci mcp --tools search,callers,info   # serve only these tools
 ```
 
 Starts the Model Context Protocol server over stdio, for AI assistant
-integration. See [MCP Server](/lci-cpp/mcp-server/).
+integration. `--tools` narrows the session to a comma-separated list of tools
+and fails at startup on an unknown or empty name. See
+[MCP Server](/lci-cpp/mcp-server/#serving-a-subset-of-tools).
 
 ## Self-update
 
