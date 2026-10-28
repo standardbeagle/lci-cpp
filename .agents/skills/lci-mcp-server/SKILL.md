@@ -17,6 +17,7 @@ Individual tool semantics live in the sibling skills listed at the end.
 |---|---|---|
 | CLI `lci mcp` | `src/cli/mcp.cpp:86` (`run_mcp`) | bridge-first: reuses the per-root index server via POST /mcp; falls back to in-process index when `--config`, `--include`, `--exclude` or `LCI_ERROR_REPORT` is set (`mcp.cpp:99-115`) |
 | stdio bridge loop | `src/cli/mcp.cpp:26` (`run_mcp_bridge`) | forwards each stdin line to `Client::mcp_dispatch`; 204 = notification, 200 = frame, else synthesizes -32603 |
+| Session allowlist `lci mcp --tools a,b` | `include/lci/mcp/tool_allowlist.h` (`ToolAllowlist`), `src/cli/mcp.cpp` (`run_mcp`, `run_mcp_bridge`), `McpServer::set_stdio_tool_allowlist` | narrows tools/list and refuses other tools/call with -32602 before the readiness gate; unknown/empty names exit 1 at startup. Bridge mode filters client-side and checks names against the server's own tools/list; in-process mode narrows only the stdio session, never `dispatch_wire` (peers bridged to this host keep their own `--tools`) |
 | stdio transport | `src/mcp/server.cpp:109` (`read_message`), `:133` (`write_message`), `:697` (`run`) | newline-delimited JSON-RPC; unparseable lines dropped to stderr, never fatal |
 | JSON-RPC methods | `src/mcp/server.cpp:146` (`handle_request`) | `initialize`, `tools/list`, `tools/call`, `ping`; anything else -32601; array/scalar frame -32600 (no batch) |
 | protocolVersion negotiation | `include/lci/mcp/server.h:29-31`, `src/mcp/server.cpp:246` (`handle_initialize`) | supports `2024-11-05`, `2025-03-26`, `2025-06-18`; echoes requested version if supported, else newest |
@@ -76,7 +77,7 @@ Entry to core to storage:
 | `--config <path>`, `--include`, `--exclude` | `.lci.kdl` | `GlobalFlags` | any override disables the bridge and builds a local index |
 | User defaults file | `$XDG_CONFIG_HOME/lci/config.kdl` or `~/.config/lci/config.kdl` | `src/config/config.cpp:641` | layered under the project file; this host has `error_report "capture"` there, which is why probes emit `error report captured` |
 
-No config key controls the tool set, protocol versions, pagination caps (`normalize_page` defaults 50 / cap 500), or the 16 MiB /mcp body cap; those are compile-time.
+No config key controls the tool set (the per-session `lci mcp --tools` flag narrows it), protocol versions, pagination caps (`normalize_page` defaults 50 / cap 500), or the 16 MiB /mcp body cap; those are compile-time.
 
 ## Invariants and traps
 
