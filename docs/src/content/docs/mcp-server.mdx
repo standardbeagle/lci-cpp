@@ -41,6 +41,9 @@ context, on every request. `--tools` narrows the session to the named tools:
 - `tools/list` lists only them, in the usual order and shape.
 - A `tools/call` naming any other tool gets JSON-RPC error `-32602` (the
   unknown-tool code) with a message naming the tools the session serves.
+- `info` describes the session: its overview lists only the served tools, and
+  `info <tool>` for a tool the session does not serve gets the same `-32602`
+  error. `info version` and help for served tools answer as usual.
 - Names are comma-separated; whitespace around each is trimmed; duplicates are
   ignored.
 - An unknown name fails at startup: `lci mcp` exits non-zero and prints the

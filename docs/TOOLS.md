@@ -26,8 +26,9 @@ implemented.
 - **Determinism**: all list output is sorted with total-order tiebreakers
   (no hash-iteration order in user-visible output).
 - **Narrowed sessions**: `lci mcp --tools a,b,c` lists and serves only the
-  named tools; a call to any other tool gets `-32602` naming the tools the
-  session serves, and an unknown or empty name fails at startup. See
+  named tools; a call to any other tool (or `info` about one) gets `-32602`
+  naming the tools the session serves, the `info` overview lists only the
+  served tools, and an unknown or empty name fails at startup. See
   `docs/src/content/docs/mcp-server.mdx` ("Serving a subset of tools").
 
 
