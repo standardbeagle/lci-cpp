@@ -89,6 +89,7 @@ int run_mcp_bridge(Client& client, const mcp::ToolAllowlist* allowlist) {
     while (std::getline(std::cin, line)) {
         if (line.empty()) continue;
         bool is_tools_list = false;
+        std::string called_tool;
         if (allowlist) {
             auto request = nlohmann::json::parse(line, nullptr,
                                                  /*allow_exceptions=*/false);
@@ -100,14 +101,24 @@ int run_mcp_bridge(Client& client, const mcp::ToolAllowlist* allowlist) {
             }
             is_tools_list = request.is_object() && request.contains("method") &&
                             request["method"] == "tools/list";
+            if (request.is_object() && request.contains("method") &&
+                request["method"] == "tools/call" &&
+                request.contains("params") && request["params"].is_object() &&
+                request["params"].contains("name") &&
+                request["params"]["name"].is_string()) {
+                called_tool = request["params"]["name"].get<std::string>();
+            }
         }
         std::string out, err;
         int st = client.mcp_dispatch(line, out, err);
         if (st == 204) continue;  // notification: no response frame
         if (st == 200) {
-            std::cout << (is_tools_list ? allowlist->filter_tools_list_frame(out)
-                                        : out)
-                      << '\n';
+            if (is_tools_list) {
+                out = allowlist->filter_tools_list_frame(out);
+            } else if (!called_tool.empty()) {
+                out = allowlist->narrow_call_response_frame(called_tool, out);
+            }
+            std::cout << out << '\n';
             std::cout.flush();
             continue;
         }
