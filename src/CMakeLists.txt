@@ -80,6 +80,7 @@ add_library(lci_lib STATIC
     mcp/server.cpp
     mcp/runtime.cpp
     mcp/response.cpp
+    mcp/tool_allowlist.cpp
     mcp/validation.cpp
     mcp/handlers_core.cpp
     mcp/handlers_analysis.cpp

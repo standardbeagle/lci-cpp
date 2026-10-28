@@ -8,6 +8,7 @@
 #include <lci/mcp/handlers_index.h>
 #include <lci/mcp/server.h>
 #include <lci/mcp/time_format.h>
+#include <lci/mcp/tool_allowlist.h>
 
 #include "portable_env.h"
 
@@ -19,9 +20,12 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <stdexcept>
 #include <thread>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace lci {
 namespace mcp {
@@ -1074,6 +1078,149 @@ TEST_F(McpStdioTest, All15ToolNamesPresent) {
     for (size_t i = 0; i < expected.size(); ++i) {
         EXPECT_EQ(tools[i]["name"], expected[i]);
     }
+}
+
+// -- Session tool allowlist (lci mcp --tools) ---------------------------------
+
+// Throws on refusal; gtest reports the escaped exception as the failure.
+ToolAllowlist parse_allowlist_or_die(std::string_view spec) {
+    std::string error;
+    auto allowlist = ToolAllowlist::parse(spec, error);
+    if (!allowlist) throw std::runtime_error(error);
+    return *allowlist;
+}
+
+TEST(ToolAllowlist, ParseTrimsSortsAndDeduplicates) {
+    auto allowlist = parse_allowlist_or_die(" search ,\tcallers,info,search ");
+    EXPECT_EQ(allowlist.names(),
+              (std::vector<std::string>{"callers", "info", "search"}));
+    EXPECT_TRUE(allowlist.allows("search"));
+    EXPECT_FALSE(allowlist.allows("browse_file"));
+    EXPECT_FALSE(allowlist.allows(" search"));
+}
+
+TEST(ToolAllowlist, EmptyValueOrEmptyNameIsRefused) {
+    for (std::string_view spec : {"", "  ", ",", "search,,info", "search,",
+                                  ",search", "search, ,info"}) {
+        std::string error;
+        EXPECT_FALSE(ToolAllowlist::parse(spec, error).has_value())
+            << "spec '" << spec << "'";
+        EXPECT_NE(error.find("--tools"), std::string::npos) << error;
+    }
+}
+
+TEST(ToolAllowlist, UnknownToolsErrorNamesTheUnknownAndTheAvailable) {
+    auto allowlist = parse_allowlist_or_die("search,nope,bogus");
+    const std::vector<std::string> available{"search", "info", "callers"};
+    const auto error = allowlist.unknown_tools_error(available);
+    EXPECT_NE(error.find("bogus, nope"), std::string::npos) << error;
+    EXPECT_NE(error.find("callers, info, search"), std::string::npos) << error;
+    EXPECT_TRUE(parse_allowlist_or_die("info,search")
+                    .unknown_tools_error(available)
+                    .empty());
+}
+
+TEST(ToolAllowlist, RefusedCallFrameAnswersOnlyCallsOutsideIt) {
+    auto allowlist = parse_allowlist_or_die("search,info");
+
+    auto refused = allowlist.refused_call_frame(make_request(
+        "tools/call", 7, {{"name", "browse_file"}, {"arguments", {}}}));
+    ASSERT_FALSE(refused.empty());
+    auto frame = nlohmann::json::parse(refused);
+    EXPECT_EQ(frame["id"], 7);
+    EXPECT_EQ(frame["error"]["code"].get<int>(), -32602);
+    EXPECT_NE(frame["error"]["message"].get<std::string>().find(
+                  "\"browse_file\""),
+              std::string::npos);
+
+    // Forwarded: an allowed call, a non-call, a notification (no id), and a
+    // malformed name (the server's error to give).
+    EXPECT_TRUE(allowlist
+                    .refused_call_frame(make_request(
+                        "tools/call", 8, {{"name", "search"}}))
+                    .empty());
+    EXPECT_TRUE(
+        allowlist.refused_call_frame(make_request("tools/list", 9)).empty());
+    EXPECT_TRUE(allowlist
+                    .refused_call_frame({{"jsonrpc", "2.0"},
+                                         {"method", "tools/call"},
+                                         {"params", {{"name", "browse_file"}}}})
+                    .empty());
+    EXPECT_TRUE(allowlist
+                    .refused_call_frame(
+                        make_request("tools/call", 10, {{"name", 42}}))
+                    .empty());
+}
+
+TEST(ToolAllowlist, FilterToolsListFrameKeepsTheServersFieldOrder) {
+    auto allowlist = parse_allowlist_or_die("search");
+    const std::string response =
+        R"({"jsonrpc":"2.0","id":2,"result":{"tools":[)"
+        R"({"description":"b","inputSchema":{"type":"object","properties":{}},"name":"browse_file"},)"
+        R"({"description":"s","inputSchema":{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]},"name":"search"}]}})";
+    EXPECT_EQ(
+        allowlist.filter_tools_list_frame(response),
+        R"({"jsonrpc":"2.0","id":2,"result":{"tools":[)"
+        R"({"description":"s","inputSchema":{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]},"name":"search"}]}})");
+
+    // Not a tools/list result: untouched.
+    const std::string pong = R"({"jsonrpc":"2.0","id":3,"result":{}})";
+    EXPECT_EQ(allowlist.filter_tools_list_frame(pong), pong);
+}
+
+TEST_F(McpStdioTest, StdioToolAllowlistNarrowsToolsList) {
+    server_->set_stdio_tool_allowlist(parse_allowlist_or_die("search,info"));
+    auto responses = exchange({make_request("tools/list", 2)});
+    ASSERT_EQ(responses.size(), 1u);
+    std::vector<std::string> names;
+    for (const auto& t : responses[0]["result"]["tools"]) {
+        names.push_back(t["name"].get<std::string>());
+        EXPECT_TRUE(t.contains("inputSchema"));
+    }
+    EXPECT_EQ(names, (std::vector<std::string>{"info", "search"}));
+}
+
+TEST_F(McpStdioTest, StdioToolAllowlistRefusesCallsBeforeTheGate) {
+    std::atomic<int> gate_calls{0};
+    server_->set_readiness_gate([&](std::string&) {
+        ++gate_calls;
+        return true;
+    });
+    server_->set_stdio_tool_allowlist(parse_allowlist_or_die("info"));
+    auto responses = exchange({
+        make_request("tools/call", 2,
+                     {{"name", "browse_file"},
+                      {"arguments", nlohmann::json::object()}}),
+        make_request("tools/call", 3,
+                     {{"name", "info"}, {"arguments", nlohmann::json::object()}}),
+    });
+    // The refusal is answered by the transport, the call by the worker, so
+    // match frames by id.
+    std::map<int, nlohmann::json> by_id;
+    for (const auto& r : responses) by_id[r["id"].get<int>()] = r;
+    ASSERT_EQ(by_id.size(), 2u);
+    EXPECT_EQ(by_id[2]["error"]["code"].get<int>(), -32602);
+    EXPECT_NE(by_id[2]["error"]["message"].get<std::string>().find(
+                  "serves only info"),
+              std::string::npos)
+        << by_id[2].dump();
+    EXPECT_TRUE(by_id[3].contains("result")) << by_id[3].dump();
+    EXPECT_EQ(gate_calls.load(), 1) << "only the allowed call reaches the gate";
+}
+
+// dispatch_wire answers OTHER sessions bridged through this process's /mcp
+// endpoint; the host's own --tools must not narrow them.
+TEST_F(McpStdioTest, StdioToolAllowlistLeavesDispatchWireUnfiltered) {
+    server_->set_stdio_tool_allowlist(parse_allowlist_or_die("search"));
+    auto listed = nlohmann::json::parse(
+        server_->dispatch_wire(make_request("tools/list", 2).dump()));
+    EXPECT_EQ(listed["result"]["tools"].size(), server_->tool_count());
+
+    auto called = nlohmann::json::parse(server_->dispatch_wire(
+        make_request("tools/call", 3,
+                     {{"name", "info"}, {"arguments", nlohmann::json::object()}})
+            .dump()));
+    EXPECT_TRUE(called.contains("result")) << called.dump();
 }
 
 }  // namespace
