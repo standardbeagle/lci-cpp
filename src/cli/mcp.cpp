@@ -3,6 +3,7 @@
 #include <lci/mcp/handlers_analysis.h>
 #include <lci/mcp/runtime.h>
 #include <lci/mcp/server.h>
+#include <lci/mcp/tool_allowlist.h>
 #include <lci/search/search_engine.h>
 #include <lci/server/client.h>
 #include <lci/server/server.h>
@@ -10,20 +11,57 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace lci {
 namespace cli {
 
 namespace {
 
+/// Reads the names the index server will serve, for checking --tools against
+/// the server that answers rather than this binary's own catalogue (a server
+/// left running by an older binary can serve a different set). Returns
+/// false with `error` filled when the list cannot be read.
+bool read_bridged_tool_names(Client& client, std::vector<std::string>& names,
+                             std::string& error) {
+    std::string resp, err;
+    int status = client.mcp_dispatch(
+        R"({"jsonrpc":"2.0","id":"lci-bridge-tools","method":"tools/list"})",
+        resp, err);
+    if (status != 200) {
+        error = status < 0 ? err : "HTTP " + std::to_string(status);
+        return false;
+    }
+    auto frame = nlohmann::json::parse(resp, nullptr,
+                                       /*allow_exceptions=*/false);
+    if (!frame.is_object() || !frame.contains("result") ||
+        !frame["result"].is_object() || !frame["result"].contains("tools") ||
+        !frame["result"]["tools"].is_array()) {
+        error = "tools/list answered without a tools array";
+        return false;
+    }
+    for (const auto& tool : frame["result"]["tools"]) {
+        if (tool.contains("name") && tool["name"].is_string()) {
+            names.push_back(tool["name"].get<std::string>());
+        }
+    }
+    return true;
+}
+
 /// Bridges this process's stdio MCP client to a running index server's
 /// POST /mcp endpoint: no local index, no re-index — the server's warmed
 /// index answers every call. Returns the process exit code, or -1 when
 /// the server does not host MCP (stale binary) and the caller should run
 /// the legacy in-process path.
-int run_mcp_bridge(Client& client) {
+///
+/// A non-null `allowlist` narrows the session on THIS side of the bridge:
+/// the server is shared by every bridged session, so it cannot hold one
+/// session's allowlist, and filtering here also holds against an older
+/// server that knows nothing of --tools.
+int run_mcp_bridge(Client& client, const mcp::ToolAllowlist* allowlist) {
     // Probe hosting support with a ping frame before committing.
     std::string probe_resp, probe_err;
     int status = client.mcp_dispatch(
@@ -31,14 +69,45 @@ int run_mcp_bridge(Client& client) {
         probe_resp, probe_err);
     if (status != 200) return -1;
 
+    if (allowlist) {
+        std::vector<std::string> served;
+        std::string error;
+        if (!read_bridged_tool_names(client, served, error)) {
+            std::cerr << "Error: could not read the index server's tools to "
+                         "check --tools: "
+                      << error << "\n";
+            return 1;
+        }
+        if (std::string unknown = allowlist->unknown_tools_error(served);
+            !unknown.empty()) {
+            std::cerr << "Error: " << unknown << "\n";
+            return 1;
+        }
+    }
+
     std::string line;
     while (std::getline(std::cin, line)) {
         if (line.empty()) continue;
+        bool is_tools_list = false;
+        if (allowlist) {
+            auto request = nlohmann::json::parse(line, nullptr,
+                                                 /*allow_exceptions=*/false);
+            if (std::string refused = allowlist->refused_call_frame(request);
+                !refused.empty()) {
+                std::cout << refused << '\n';
+                std::cout.flush();
+                continue;
+            }
+            is_tools_list = request.is_object() && request.contains("method") &&
+                            request["method"] == "tools/list";
+        }
         std::string out, err;
         int st = client.mcp_dispatch(line, out, err);
         if (st == 204) continue;  // notification: no response frame
         if (st == 200) {
-            std::cout << out << '\n';
+            std::cout << (is_tools_list ? allowlist->filter_tools_list_frame(out)
+                                        : out)
+                      << '\n';
             std::cout.flush();
             continue;
         }
@@ -83,7 +152,21 @@ int run_mcp_bridge(Client& client) {
 // iso_timestamp_now, etc.) were deleted alongside. See MODULE_MAP.md
 // "Decision: tools/list emit-order parity".
 
-int run_mcp(const GlobalFlags& flags) {
+int run_mcp(const GlobalFlags& flags, const McpOptions& options) {
+    // --tools is checked for shape before anything starts; its names are
+    // checked against whichever server will actually answer (below).
+    std::optional<mcp::ToolAllowlist> allowlist;
+    if (options.tools) {
+        std::string error;
+        allowlist = mcp::ToolAllowlist::parse(*options.tools, error);
+        if (!allowlist) {
+            std::cerr << "Error: " << error << "\n";
+            return 1;
+        }
+    }
+    const mcp::ToolAllowlist* allowlist_ptr =
+        allowlist ? &*allowlist : nullptr;
+
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";
@@ -103,7 +186,7 @@ int run_mcp(const GlobalFlags& flags) {
     if (!has_local_overrides) {
         std::string ensure_err;
         if (auto client = ensure_server_running(cfg, ensure_err)) {
-            int code = run_mcp_bridge(*client);
+            int code = run_mcp_bridge(*client, allowlist_ptr);
             if (code >= 0) return code;
             std::cerr << "Warning: index server does not host MCP (older "
                          "binary?); falling back to an in-process index\n";
@@ -148,6 +231,20 @@ int run_mcp(const GlobalFlags& flags) {
     mcp::McpServer mcp_server(cfg, runtime_index, &search_engine);
     mcp::register_all_handlers(mcp_server, &runtime_index, &search_engine,
                                &runtime);
+    if (allowlist) {
+        std::vector<std::string> registered;
+        registered.reserve(mcp_server.tool_count());
+        for (size_t i = 0; i < mcp_server.tool_count(); ++i) {
+            registered.push_back(mcp_server.tool_at(i).name);
+        }
+        // Refused before the shared server starts or the index is built.
+        if (std::string unknown = allowlist->unknown_tools_error(registered);
+            !unknown.empty()) {
+            std::cerr << "Error: " << unknown << "\n";
+            return 1;
+        }
+        mcp_server.set_stdio_tool_allowlist(*allowlist);
+    }
 
     // Serialises every handler behind the warmup: no handler observes the
     // index while the warmup thread is still writing it, and after the wait

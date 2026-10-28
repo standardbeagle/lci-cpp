@@ -80,6 +80,10 @@ void McpServer::set_readiness_gate(
     readiness_gate_ = std::move(gate);
 }
 
+void McpServer::set_stdio_tool_allowlist(ToolAllowlist allowlist) {
+    stdio_allowlist_ = std::move(allowlist);
+}
+
 size_t McpServer::tool_count() const { return registered_tools_.size(); }
 
 const ToolDefinition& McpServer::tool_at(size_t index) const {
@@ -195,7 +199,9 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
         // built by tools_list_wire (shared with dispatch_wire) and written
         // directly, returning null to skip the default write_message path.
         std::lock_guard lock(write_mu_);
-        std::cout << tools_list_wire(id) << '\n';
+        std::cout << tools_list_wire(
+                         id, stdio_allowlist_ ? &*stdio_allowlist_ : nullptr)
+                  << '\n';
         std::cout.flush();
         return nullptr;
     } else if (method == "tools/call") {
@@ -210,6 +216,14 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
             response["error"] = {{"code", -32602},
                                  {"message", "invalid params: arguments must "
                                              "be an object"}};
+            return response;
+        }
+
+        // Only the stdio session reaches this branch (dispatch_wire peels
+        // tools/call off before calling handle_request), so the stdio
+        // allowlist applies here and nowhere on the bridge path.
+        if (stdio_allowlist_ && !stdio_allowlist_->allows(tool_name)) {
+            response["error"] = stdio_allowlist_->refused_call_error(tool_name);
             return response;
         }
 
@@ -479,7 +493,8 @@ nlohmann::json McpServer::build_input_schema(const ToolDefinition& def) {
     return nlohmann::json::parse(build_input_schema_ordered(def).dump());
 }
 
-std::string McpServer::tools_list_wire(const nlohmann::json& id) const {
+std::string McpServer::tools_list_wire(const nlohmann::json& id,
+                                       const ToolAllowlist* allowlist) const {
     // Standard nlohmann::json alphabetises on dump, so the entire envelope
     // is ordered_json and serialised here (field order locked by
     // mcp_server_test, matching Go's jsonschema-go emit).
@@ -497,6 +512,7 @@ std::string McpServer::tools_list_wire(const nlohmann::json& id) const {
     std::vector<const RegisteredTool*> snapshot;
     snapshot.reserve(registered_tools_.size());
     for (const auto& reg : registered_tools_) {
+        if (allowlist && !allowlist->allows(reg.definition.name)) continue;
         snapshot.push_back(&reg);
     }
     std::sort(snapshot.begin(), snapshot.end(),
@@ -590,7 +606,7 @@ std::string McpServer::dispatch_wire(const std::string& line) {
     }
 
     if (method == "tools/list") {
-        return tools_list_wire(id);
+        return tools_list_wire(id, /*allowlist=*/nullptr);
     }
     if (method == "tools/call") {
         // The params peel runs outside the catch below, so a type-confused

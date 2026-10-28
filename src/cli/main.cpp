@@ -473,7 +473,17 @@ int main(int argc, char* argv[]) {
     auto* mcp_cmd = app.add_subcommand(
         "mcp", "Start MCP (Model Context Protocol) server with stdio transport");
 
-    mcp_cmd->callback([&]() { std::exit(run_mcp(gflags)); });
+    std::string mcp_tools;
+    auto* mcp_tools_opt = mcp_cmd->add_option(
+        "--tools", mcp_tools,
+        "Comma-separated tools to serve (e.g. search,callers,info); the "
+        "session lists and calls only these. Omit to serve every tool");
+
+    mcp_cmd->callback([&]() {
+        McpOptions options;
+        if (mcp_tools_opt->count() > 0) options.tools = mcp_tools;
+        std::exit(run_mcp(gflags, options));
+    });
 
     // -- Update subcommand ----------------------------------------------------
     auto* update_cmd = app.add_subcommand(
@@ -1029,7 +1039,7 @@ int main(int argc, char* argv[]) {
             }
 
             if (is_mcp_mode()) {
-                std::exit(run_mcp(gflags));
+                std::exit(run_mcp(gflags, McpOptions{}));
             }
         }
     });

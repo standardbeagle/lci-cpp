@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -14,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include <lci/config.h>
+#include <lci/mcp/tool_allowlist.h>
 
 namespace lci {
 
@@ -157,6 +159,13 @@ class McpServer {
     /// message instead of reaching a handler holding a half-built index.
     void set_readiness_gate(std::function<bool(std::string& error)> gate);
 
+    /// Narrows the stdio session (run()) to the allowlisted tools: tools/list
+    /// emits only them, and a tools/call outside them answers -32602 before
+    /// the readiness gate. dispatch_wire stays unfiltered: it answers OTHER
+    /// sessions bridged through this process's POST /mcp endpoint, and each
+    /// of those narrows itself on its side of the bridge. Call before run().
+    void set_stdio_tool_allowlist(ToolAllowlist allowlist);
+
     /// Returns the number of registered tools.
     size_t tool_count() const;
 
@@ -246,12 +255,15 @@ class McpServer {
     SearchEngine* search_engine_{};
 
     std::vector<RegisteredTool> registered_tools_;
+    std::optional<ToolAllowlist> stdio_allowlist_;
     std::function<bool(std::string& error)> readiness_gate_;
     std::atomic<bool> running_{false};
 
     /// Builds the ordered tools/list wire envelope (field order locked by
-    /// mcp_server_test; shared by the stdio path and dispatch_wire).
-    std::string tools_list_wire(const nlohmann::json& id) const;
+    /// mcp_server_test; shared by the stdio path and dispatch_wire). A
+    /// non-null `allowlist` emits only the tools it allows.
+    std::string tools_list_wire(const nlohmann::json& id,
+                                const ToolAllowlist* allowlist) const;
 
     /// Runs the gate + handler for one resolved call and returns the full
     /// response envelope. concurrent_ok tools hold tool_mu_ shared (read

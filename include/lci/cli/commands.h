@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <cstdint>
+#include <optional>
 
 #include <lci/config.h>
 #include <lci/server/client.h>
@@ -195,8 +196,16 @@ std::string instance_registry_dir();
 /// when there were none), non-zero if any survived.
 int run_shutdown_all(bool force);
 
+/// mcp subcommand options.
+struct McpOptions {
+    /// `--tools a,b,c`: the session lists and calls only these tools. nullopt
+    /// (flag absent) serves every tool; an empty value or an unknown name
+    /// fails at startup.
+    std::optional<std::string> tools;
+};
+
 /// MCP server subcommand. Returns 0 on success, non-zero on error.
-int run_mcp(const GlobalFlags& flags);
+int run_mcp(const GlobalFlags& flags, const McpOptions& options);
 
 /// def subcommand: find symbol definition. Returns 0 on success, non-zero on error.
 int run_def(const GlobalFlags& flags, const std::string& symbol);
