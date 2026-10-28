@@ -7,7 +7,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <map>
 #include <set>
+#include <sstream>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -4123,6 +4126,211 @@ TEST(CliContextDaemonTest, WrongRootDaemonExitsNonZeroWithDiagnostic) {
     GTEST_SKIP() << "merged stderr capture is POSIX-only";
 #endif
 }
+
+// -- lci mcp --tools: a session sees and calls only the tools it names -------
+// A client that grants a turn three tools still paid for all of them on every
+// request: tools/list carried every schema, and the Claude CLI cannot narrow
+// MCP tools by allowlist. These drive the built binary down both serving
+// paths — in-process (--include forces it) and the bridge to the per-root
+// index server — because the filter is applied separately on each.
+
+#ifndef _WIN32
+struct McpSession {
+    int exit_code{-1};
+    std::vector<nlohmann::json> frames;  // stdout, one JSON-RPC frame a line
+    std::string stderr_text;
+};
+
+class CliMcpToolsTest : public ::testing::Test {
+  protected:
+    std::filesystem::path lci_bin;
+    std::filesystem::path root;
+    std::filesystem::path io_dir;  // stdin/stderr files, outside the root
+
+    void SetUp() override {
+        lci_bin = lci::test::lci_binary_path();
+        ASSERT_TRUE(std::filesystem::exists(lci_bin)) << lci_bin;
+        root = lci::test::unique_temp_dir("lci_mcp_tools_");
+        io_dir = lci::test::unique_temp_dir("lci_mcp_tools_io_");
+        std::filesystem::create_directories(io_dir);
+        write_corpus_file(root, "a.cpp",
+                          "int alpha() { return 1; }\n"
+                          "int beta() { return alpha(); }\n");
+    }
+
+    void TearDown() override {
+        shutdown_lci_server(lci_bin, root);
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+        std::filesystem::remove_all(io_dir, ec);
+    }
+
+    std::vector<std::string> in_process_args(const std::string& tools) const {
+        return {"mcp", "--tools", tools, "--include", "*.cpp", "-r",
+                root.string()};
+    }
+
+    std::vector<std::string> bridge_args(const std::string& tools) const {
+        return {"mcp", "--tools", tools, "-r", root.string()};
+    }
+
+    // Pipes `requests` to `lci <args>` and collects its stdout frames, stderr
+    // and exit code. XDG_CONFIG_HOME points away from this host's user config,
+    // whose error_report "capture" default would add stderr and files.
+    McpSession run_session(const std::vector<std::string>& args,
+                           const std::vector<nlohmann::json>& requests) {
+        const auto stdin_path = io_dir / "stdin.jsonl";
+        const auto stderr_path = io_dir / "stderr.txt";
+        {
+            std::ofstream in(stdin_path);
+            for (const auto& r : requests) in << r.dump() << '\n';
+        }
+        std::string command =
+            "XDG_CONFIG_HOME=/nonexistent/lci-test-xdg " +
+            shell_quote(lci_bin.string());
+        for (const auto& a : args) command += " " + shell_quote(a);
+        command += " < " + shell_quote(stdin_path.string()) + " 2> " +
+                   shell_quote(stderr_path.string());
+
+        McpSession session;
+        FILE* pipe = ::popen(command.c_str(), "r");
+        if (!pipe) return session;
+        std::string out;
+        std::array<char, 4096> buffer{};
+        size_t n = 0;
+        while ((n = std::fread(buffer.data(), 1, buffer.size(), pipe)) > 0) {
+            out.append(buffer.data(), n);
+        }
+        const int status = ::pclose(pipe);
+        if (status != -1 && WIFEXITED(status)) {
+            session.exit_code = WEXITSTATUS(status);
+        }
+        std::istringstream lines(out);
+        for (std::string line; std::getline(lines, line);) {
+            if (!line.empty()) {
+                session.frames.push_back(nlohmann::json::parse(line));
+            }
+        }
+        std::ifstream err(stderr_path);
+        session.stderr_text.assign(std::istreambuf_iterator<char>(err), {});
+        return session;
+    }
+};
+
+nlohmann::json mcp_request(int id, const std::string& method,
+                           nlohmann::json params = nlohmann::json::object()) {
+    return {{"jsonrpc", "2.0"}, {"id", id}, {"method", method},
+            {"params", std::move(params)}};
+}
+
+// initialize, tools/list (id 2), a call outside the allowlist (id 3) and a
+// call inside it (id 4).
+std::vector<nlohmann::json> narrowing_requests() {
+    return {
+        mcp_request(1, "initialize", {{"protocolVersion", "2025-06-18"}}),
+        {{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}},
+        mcp_request(2, "tools/list"),
+        mcp_request(3, "tools/call",
+                    {{"name", "browse_file"},
+                     {"arguments", nlohmann::json::object()}}),
+        mcp_request(4, "tools/call",
+                    {{"name", "info"}, {"arguments", nlohmann::json::object()}}),
+    };
+}
+
+// Tool calls answer from a worker thread, so frames are matched by id.
+std::map<int, nlohmann::json> frames_by_id(const McpSession& session) {
+    std::map<int, nlohmann::json> by_id;
+    for (const auto& f : session.frames) {
+        if (f.contains("id") && f["id"].is_number_integer()) {
+            by_id[f["id"].get<int>()] = f;
+        }
+    }
+    return by_id;
+}
+
+void expect_session_serves_only_info_and_search(const McpSession& session) {
+    ASSERT_EQ(session.exit_code, 0) << session.stderr_text;
+    auto by_id = frames_by_id(session);
+
+    ASSERT_TRUE(by_id.count(2)) << session.stderr_text;
+    std::vector<std::string> listed;
+    for (const auto& t : by_id[2]["result"]["tools"]) {
+        listed.push_back(t["name"].get<std::string>());
+        EXPECT_TRUE(t.contains("inputSchema")) << t.dump();
+    }
+    EXPECT_EQ(listed, (std::vector<std::string>{"info", "search"}));
+
+    ASSERT_TRUE(by_id.count(3)) << session.stderr_text;
+    ASSERT_TRUE(by_id[3].contains("error")) << by_id[3].dump();
+    EXPECT_EQ(by_id[3]["error"]["code"].get<int>(), -32602);
+    const auto message = by_id[3]["error"]["message"].get<std::string>();
+    EXPECT_NE(message.find("browse_file"), std::string::npos) << message;
+    EXPECT_NE(message.find("--tools"), std::string::npos) << message;
+
+    ASSERT_TRUE(by_id.count(4)) << session.stderr_text;
+    ASSERT_TRUE(by_id[4].contains("result")) << by_id[4].dump();
+    EXPECT_FALSE(by_id[4]["result"].value("isError", false));
+}
+
+void expect_unknown_tool_refused_at_startup(const McpSession& session) {
+    EXPECT_NE(session.exit_code, 0);
+    EXPECT_TRUE(session.frames.empty()) << "a refused --tools must not serve";
+    // Names the offender and lists what does exist, so the caller can fix it.
+    EXPECT_NE(session.stderr_text.find("nope"), std::string::npos)
+        << session.stderr_text;
+    EXPECT_NE(session.stderr_text.find("callers"), std::string::npos)
+        << session.stderr_text;
+}
+
+TEST_F(CliMcpToolsTest, NarrowsListAndCallsInProcess) {
+    expect_session_serves_only_info_and_search(
+        run_session(in_process_args(" search , info "), narrowing_requests()));
+}
+
+TEST_F(CliMcpToolsTest, NarrowsListAndCallsOverTheBridge) {
+    expect_session_serves_only_info_and_search(
+        run_session(bridge_args("search,info"), narrowing_requests()));
+}
+
+TEST_F(CliMcpToolsTest, UnknownToolNameFailsAtStartupInProcess) {
+    expect_unknown_tool_refused_at_startup(
+        run_session(in_process_args("search,nope"), narrowing_requests()));
+}
+
+TEST_F(CliMcpToolsTest, UnknownToolNameFailsAtStartupOverTheBridge) {
+    expect_unknown_tool_refused_at_startup(
+        run_session(bridge_args("search,nope"), narrowing_requests()));
+}
+
+// An empty allowlist would serve nothing; "every tool" is spelled by leaving
+// --tools out. Both an empty value and an empty name inside a list refuse.
+TEST_F(CliMcpToolsTest, EmptyToolsValueOrNameIsRefused) {
+    for (const std::string spec : {"", " ", "search,,info", "search,"}) {
+        auto session = run_session(in_process_args(spec), narrowing_requests());
+        EXPECT_NE(session.exit_code, 0) << "spec '" << spec << "'";
+        EXPECT_TRUE(session.frames.empty()) << "spec '" << spec << "'";
+        EXPECT_NE(session.stderr_text.find("--tools"), std::string::npos)
+            << "spec '" << spec << "': " << session.stderr_text;
+    }
+}
+
+TEST_F(CliMcpToolsTest, WithoutToolsFlagEveryToolIsServed) {
+    auto session = run_session(
+        {"mcp", "--include", "*.cpp", "-r", root.string()},
+        {mcp_request(2, "tools/list")});
+    ASSERT_EQ(session.exit_code, 0) << session.stderr_text;
+    auto by_id = frames_by_id(session);
+    ASSERT_TRUE(by_id.count(2)) << session.stderr_text;
+    std::set<std::string> listed;
+    for (const auto& t : by_id[2]["result"]["tools"]) {
+        listed.insert(t["name"].get<std::string>());
+    }
+    EXPECT_TRUE(listed.count("browse_file"));
+    EXPECT_TRUE(listed.count("callers"));
+    EXPECT_TRUE(listed.count("search"));
+}
+#endif  // _WIN32
 
 }  // namespace
 }  // namespace cli
