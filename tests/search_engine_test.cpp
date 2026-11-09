@@ -43,7 +43,9 @@ class TempDir {
                     const std::string& content) {
         auto full = path_ / rel_path;
         std::filesystem::create_directories(full.parent_path());
-        std::ofstream f(full);
+        // Binary, so a test's line endings are the bytes it states on every
+        // platform rather than CRLF on Windows only.
+        std::ofstream f(full, std::ios::binary);
         f << content;
     }
 
@@ -1021,6 +1023,36 @@ TEST(SearchEngineRegexValidation, AnchorsMatchAtEveryLine) {
     EXPECT_TRUE(stats.error.empty()) << stats.error;
     ASSERT_EQ(ends.size(), 1u);
     EXPECT_EQ(ends[0].line, 3);
+}
+
+// A CRLF file's lines end in \r\n, and RE2 takes only \n as a line end, so a
+// whole-file pass let `$` fail on every CRLF line. Windows checkouts are CRLF
+// by default.
+TEST(SearchEngineRegexValidation, AnchorsMatchAtEveryLineOfCrlfFile) {
+    TempDir dir;
+    dir.write_file("a.go",
+                   "package main\r\nfunc Alpha() {}\r\nvar Beta = 1\r\n"
+                   "var Gamma = 2\r\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.use_regex = true;
+
+    SearchStats stats;
+    const auto ends = engine.search("= 1$", opts, &stats);
+    EXPECT_TRUE(stats.error.empty()) << stats.error;
+    ASSERT_EQ(ends.size(), 1u);
+    EXPECT_EQ(ends[0].line, 3);
+
+    const auto whole = engine.search("^func Alpha\\(\\) \\{\\}$", opts, &stats);
+    EXPECT_TRUE(stats.error.empty()) << stats.error;
+    ASSERT_EQ(whole.size(), 1u);
+    EXPECT_EQ(whole[0].line, 2);
 }
 
 // Criterion 5: a whole-word, exact-case hit must outrank a substring hit of

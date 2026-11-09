@@ -1126,9 +1126,8 @@ std::vector<SearchMatch> find_content_matches(
             RE2::Options ro(RE2::Quiet);
             ro.set_log_errors(false);
             ro.set_case_sensitive(!options.case_insensitive);
-            // Whole-file input, so `(?m)` is what makes `^` and `$` mean a line,
-            // as they do in `lci search -E`. `$` still stops short of a CRLF
-            // file's \r here: RE2 knows only \n as a line end.
+            // `(?m)` makes `^` and `$` mean a line in a whole-file pass, as
+            // they do in `lci search -E`.
             std::string multiline = "(?m)";
             multiline.append(pattern);
             cached_re = std::make_unique<RE2>(multiline, ro);
@@ -1139,30 +1138,53 @@ std::vector<SearchMatch> find_content_matches(
             // error surfaced upstream by validation. No silent fallback.
             return matches;
         }
-        re2::StringPiece input(content.data(), content.size());
-        re2::StringPiece m;
-        size_t cursor = 0;
-        while (cursor <= content.size() &&
-               cached_re->Match(input, cursor, content.size(),
-                                RE2::UNANCHORED, &m, 1)) {
-            int start = static_cast<int>(m.data() - content.data());
-            int end = start + static_cast<int>(m.size());
-            if (end <= start) {
-                // Zero-width match — advance one byte to avoid infinite loop.
-                cursor = static_cast<size_t>(start) + 1;
-                continue;
-            }
-            if (options.word_boundary) {
-                if (!is_word_boundary(content, start) ||
-                    !is_word_boundary(content, end)) {
-                    cursor = static_cast<size_t>(start) + 1;
+        // Collects every match inside `text`, a span of `content`; offsets
+        // stay relative to `content`.
+        const auto collect = [&](std::string_view text) {
+            re2::StringPiece input(text.data(), text.size());
+            re2::StringPiece m;
+            size_t cursor = 0;
+            while (cursor <= text.size() &&
+                   cached_re->Match(input, cursor, text.size(),
+                                    RE2::UNANCHORED, &m, 1)) {
+                int start = static_cast<int>(m.data() - content.data());
+                int end = start + static_cast<int>(m.size());
+                const size_t local = static_cast<size_t>(m.data() - text.data());
+                if (end <= start) {
+                    // Zero-width match — advance one byte to avoid infinite loop.
+                    cursor = local + 1;
                     continue;
                 }
+                if (options.word_boundary) {
+                    if (!is_word_boundary(content, start) ||
+                        !is_word_boundary(content, end)) {
+                        cursor = local + 1;
+                        continue;
+                    }
+                }
+                bool exact = is_word_boundary(content, start) &&
+                             is_word_boundary(content, end);
+                matches.push_back({start, end, exact});
+                cursor = local + m.size();
             }
-            bool exact = is_word_boundary(content, start) &&
-                         is_word_boundary(content, end);
-            matches.push_back({start, end, exact});
-            cursor = static_cast<size_t>(end);
+        };
+        if (content.find('\r') == std::string_view::npos) {
+            collect(content);
+        } else {
+            // RE2 knows only \n as a line end, so in a whole-file pass `$`
+            // stops short of a CRLF line's \r. Such files are matched a line
+            // at a time with the ending stripped, the rule `lci search -E`
+            // applies (grep_filters::without_line_ending).
+            size_t line_start = 0;
+            while (line_start < content.size()) {
+                size_t nl = content.find('\n', line_start);
+                size_t line_end = nl == std::string_view::npos ? content.size() : nl;
+                size_t text_end = line_end;
+                if (text_end > line_start && content[text_end - 1] == '\r') --text_end;
+                collect(content.substr(line_start, text_end - line_start));
+                if (nl == std::string_view::npos) break;
+                line_start = nl + 1;
+            }
         }
 
         int cap = options.max_count_per_file > 0
