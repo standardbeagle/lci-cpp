@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <atomic>
 #include <cctype>
 #include <cerrno>
 #include <chrono>
@@ -182,7 +183,10 @@ CapturedOutput run_mcp(const std::string& binary_path,
     }
 
     // Drain stderr concurrently while reading the tool-call response.
+    // The pipe may never reach EOF (a daemon the child spawned can inherit the
+    // write end), so the reader stops on an empty pipe once the child is reaped.
     std::string stderr_buf;
+    std::atomic<bool> child_reaped{false};
     std::thread err_reader([&] {
         char buf[4096];
         while (true) {
@@ -190,6 +194,7 @@ CapturedOutput run_mcp(const std::string& binary_path,
             if (n > 0) stderr_buf.append(buf, static_cast<size_t>(n));
             else if (n == 0) break;
             else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                if (child_reaped.load(std::memory_order_acquire)) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
             } else break;
         }
@@ -219,9 +224,11 @@ CapturedOutput run_mcp(const std::string& binary_path,
     }
     guard.release();  // reaped explicitly
 
-    // Signal EOF to err_reader by closing read end after child has exited.
-    close(err_pipe[0]);
+    // Join before closing: closing the fd while the reader is inside read() is
+    // a race, and the number could already belong to another fd.
+    child_reaped.store(true, std::memory_order_release);
     err_reader.join();
+    close(err_pipe[0]);
     close(out_pipe[0]);
 
     CapturedOutput cap;
