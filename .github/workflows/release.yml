@@ -154,6 +154,7 @@ jobs:
       # platform-correct address (tests/helpers/test_socket.h) and report_to_json
       # path normalization is now separator-independent (git/serialize.cpp).
       - name: Test (unit suite)
+        timeout-minutes: 20
         run: |
           & build/release/tests/Release/lci_tests.exe
           if ($LASTEXITCODE -ne 0) { throw "lci_tests failed ($LASTEXITCODE)" }
@@ -175,6 +176,17 @@ jobs:
           name: lci-windows-amd64
           path: build/release/lci-*.tar.gz
           retention-days: 2
+
+      # A daemon a test left running holds its lci.exe open, which would fail
+      # the removal below. Only lci.exe from this workspace's build tree is
+      # stopped: the host may run other copies.
+      - name: Stop this build's daemons
+        if: always()
+        run: |
+          $tree = [IO.Path]::GetFullPath('build/release') + '\'
+          Get-Process lci -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and $_.Path.StartsWith($tree, [StringComparison]::OrdinalIgnoreCase) } |
+            Stop-Process -Force
 
       - name: Reclaim build space
         if: always()
