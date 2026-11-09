@@ -415,7 +415,7 @@ TEST(MasterIndexTest, IndexDirectoryKeepsFilesWithIdsAbovePostLoadFailures) {
 
     // ELF magic passes the extension filter (.go is not a binary extension)
     // and is only rejected once the content is loaded and inspected.
-    const std::string elf_magic("\x7f\x45\x4c\x46 not really go", 20);
+    const std::string elf_magic("\x7f\x45\x4c\x46 not really go");
 
     constexpr int kPairs = 12;
     std::vector<std::string> text_files;
