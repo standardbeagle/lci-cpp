@@ -13,6 +13,28 @@
 
 #include <gtest/gtest.h>
 
+// GCC defines __SANITIZE_*__; clang reports the same through __has_feature.
+#if defined(__SANITIZE_THREAD__)
+#define LCI_TEST_BUILD_HAS_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define LCI_TEST_BUILD_HAS_TSAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#define LCI_TEST_BUILD_HAS_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define LCI_TEST_BUILD_HAS_ASAN 1
+#endif
+#endif
+#ifndef LCI_TEST_BUILD_HAS_TSAN
+#define LCI_TEST_BUILD_HAS_TSAN 0
+#endif
+#ifndef LCI_TEST_BUILD_HAS_ASAN
+#define LCI_TEST_BUILD_HAS_ASAN 0
+#endif
+
 namespace lci {
 namespace testing {
 
@@ -45,7 +67,7 @@ struct PerformanceScaler {
                           is_ci(detect_ci()) {}
 
     [[nodiscard]] double scale_duration(double base) const {
-        double scaled = base;
+        double scaled = base * instrumentation_slowdown();
         if (is_ci) {
             scaled *= 1.5;
         }
@@ -63,6 +85,20 @@ struct PerformanceScaler {
     }
 
   private:
+    // A sanitizer build instruments every memory access, so an absolute budget
+    // written for an optimized build measures the instrumentation. Scaled by
+    // the slowdown each tool's documentation states rather than skipped: an
+    // algorithmic regression still overshoots it.
+    static constexpr double instrumentation_slowdown() {
+#if LCI_TEST_BUILD_HAS_TSAN
+        return 10.0;
+#elif LCI_TEST_BUILD_HAS_ASAN
+        return 3.0;
+#else
+        return 1.0;
+#endif
+    }
+
     static bool detect_ci() {
         for (const char* var : {"CI", "CONTINUOUS_INTEGRATION",
                                 "GITHUB_ACTIONS", "GITLAB_CI",
