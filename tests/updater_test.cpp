@@ -41,13 +41,12 @@ TEST(UpdaterAssetSelect, LinuxArm64Unsupported) {
     EXPECT_FALSE(a.has_value());
 }
 
-TEST(UpdaterAssetSelect, MacosX86PicksUniversalDarwin) {
+TEST(UpdaterAssetSelect, MacosX86HasNoArtifact) {
     auto a = select_asset(sample_assets(), Platform{Os::Macos, Arch::X86_64});
-    ASSERT_TRUE(a.has_value());
-    EXPECT_EQ(a->name, "lci-0.5.0-Darwin.tar.gz");
+    EXPECT_FALSE(a.has_value());
 }
 
-TEST(UpdaterAssetSelect, MacosArm64ServedByUniversalDarwin) {
+TEST(UpdaterAssetSelect, MacosArm64PicksDarwin) {
     auto a = select_asset(sample_assets(), Platform{Os::Macos, Arch::Arm64});
     ASSERT_TRUE(a.has_value());
     EXPECT_EQ(a->name, "lci-0.5.0-Darwin.tar.gz");

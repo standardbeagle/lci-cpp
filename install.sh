@@ -30,7 +30,10 @@ case "$os" in
         pattern="Linux.tar.gz"
         ;;
     Darwin)
-        # Universal binary serves both Intel and Apple Silicon.
+        case "$arch" in
+            arm64 | aarch64) ;;
+            *) err "unsupported architecture for macOS: $arch (only Apple Silicon has a release artifact; build from source)";;
+        esac
         pattern="Darwin.tar.gz"
         ;;
     *)

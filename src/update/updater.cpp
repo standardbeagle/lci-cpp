@@ -360,7 +360,8 @@ std::optional<Asset> select_asset(const std::vector<Asset>& assets,
                 return ends_with(n, "Linux.tar.gz");
             });
         case Os::Macos:
-            // Universal binary serves both x86_64 and arm64.
+            // The Darwin artifact is arm64 only; on Intel it would not start.
+            if (p.arch != Arch::Arm64) return std::nullopt;
             return pick([](const std::string& n) {
                 return ends_with(n, "Darwin.tar.gz");
             });
@@ -438,7 +439,8 @@ std::string expected_hash_for(const std::string& sums_text,
 int run_update(const UpdateConfig& cfg) {
     Platform plat = detect_platform();
     if (plat.os == Os::Unsupported || plat.arch == Arch::Other ||
-        (plat.os == Os::Linux && plat.arch != Arch::X86_64)) {
+        (plat.os == Os::Linux && plat.arch != Arch::X86_64) ||
+        (plat.os == Os::Macos && plat.arch != Arch::Arm64)) {
         std::cerr << "Error: self-update is not available for this platform "
                      "(no matching release artifact).\n"
                      "Build from source: "
