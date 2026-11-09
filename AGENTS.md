@@ -3,6 +3,21 @@
 lci (Lightning Code Index): C++ code-intelligence engine. CLI + HTTP-over-Unix-socket + MCP server over
 one in-memory trigram and symbol index, served by a per-root daemon. Rules live in `.claude/rules/`.
 
+## Exposure
+
+Every listener is local to one machine, and none of them may be widened without Andy's decision.
+
+- `lci server`, and the index server embedded in `lci mcp`, on Linux and macOS: a Unix socket, mode
+  `0600` in a `0700` per-user directory. Reachable by the owning user only.
+- The same server on Windows: `loopback`, TCP on `127.0.0.1`. It has no authentication, so any local
+  account can query the index and call `/shutdown`. This is a known gap, not an accepted design.
+- `lci mcp` itself speaks over stdio and opens no other listener.
+
+Caps, set in `IndexServer::register_handlers` and `include/lci/server/server.h`: 16 MiB request body,
+30 s socket read and write timeouts, 64 requests per keep-alive connection, a fixed pool of
+`max(hardware threads, 64)` workers, and 32 queued requests, past which connections are closed.
+Tests: `ServerCaps*` in `tests/server_test.cpp`.
+
 ## Navigate with the product
 
 This repo builds lci. Use it for code navigation before grep:

@@ -18,11 +18,30 @@ a client; you can also reach it directly.
 </Aside>
 
 - **Linux / macOS**: a Unix domain socket at
-  `<tmp>/lci-<uid>.sock` (no project root given) or
-  `<tmp>/lci-<uid>-<hash>.sock` (hash of the absolute project root).
+  `<runtime>/lci-<uid>.sock` (no project root given) or
+  `<runtime>/lci-<uid>-<hash>.sock` (hash of the absolute project root).
+  `<runtime>` is `$XDG_RUNTIME_DIR/lci` when that is usable, else
+  `/tmp/lci-<uid>`. The directory is `0700` and the socket `0600`, so only
+  the owning user can connect.
 - **Windows**: no Unix sockets, so the server binds a loopback TCP port —
   `127.0.0.1:<port>` — derived deterministically from the user id (and
   project-root hash, when set) so repeated runs land on the same port.
+
+<Aside type="caution">
+  The Windows port has no authentication. Any process on the machine, under
+  any user account, can query the index and call `/shutdown`. It is not
+  reachable from other machines.
+</Aside>
+
+## Limits
+
+| Limit | Value | Past it |
+|-------|-------|---------|
+| Request body | 16 MiB | `413` |
+| Socket read and write stall | 30 s per operation | connection closed; a slow handler still answers |
+| Requests per keep-alive connection | 64 | connection closed; clients reconnect |
+| Worker threads | at least 64 (more on larger machines) | requests wait in the queue |
+| Requests waiting for a worker | 32 | connection closed |
 
 ## Endpoints
 
@@ -61,10 +80,11 @@ searching text.
 
 ## Talking to it directly
 
-Over a Unix socket, with `curl`'s `--unix-socket` flag:
+Over a Unix socket, with `curl`'s `--unix-socket` flag. The socket's file name hashes
+the project root, so list `<runtime>` to find it:
 
 ```sh
-curl --unix-socket /tmp/lci-$(id -u).sock \
+curl --unix-socket "$XDG_RUNTIME_DIR/lci/lci-$(id -u)-<hash>.sock" \
   -X POST http://localhost/search \
   -H 'Content-Type: application/json' \
   -d '{"pattern": "myFunction"}'

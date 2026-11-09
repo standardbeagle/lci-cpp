@@ -316,7 +316,8 @@ struct StatsResponse {
 inline constexpr size_t kMaxQueuedRequests = 32;
 inline constexpr size_t kMinServerWorkerThreads = 2 * kMaxQueuedRequests;
 
-/// HTTP server on a Unix domain socket providing 15 REST endpoints.
+/// HTTP server on a Unix domain socket (loopback TCP on Windows). Routes are
+/// registered in register_handlers and documented in http-socket-api.mdx.
 ///
 /// Wraps a MasterIndex and optional SearchEngine, exposing index queries
 /// and lifecycle management over HTTP/JSON.
