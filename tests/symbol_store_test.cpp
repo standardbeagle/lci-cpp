@@ -646,20 +646,27 @@ TEST(SymbolLocationIndexTest, BenchmarkPositionLookup) {
 // name bucket for every re-set, so one pass costs sum(bucket sizes):
 // 10x symbols sharing the same handful of names cost ~100x, quadratic on
 // the serial integrator thread. Pin: per-symbol re-set cost must not grow
-// with bucket size (ratio of per-symbol cost at 1x vs 10x symbols, the
-// same contention-robust shape as BenchmarkLookup above).
+// with bucket size. Both stores hold the same symbol count and only the name
+// bucket differs. Comparing two sizes instead measures the CPU cache, which
+// alone moves the per-symbol cost 3.7x between 2,000 and 20,000 symbols on a
+// correct build (clang, 2026-10-20).
 // ---------------------------------------------------------------------------
-TEST(SymbolStoreTest, SetUpdateCostPerSymbolScalesWithCountNotBucket) {
-    auto build = [](int n) {
-        static const char* kNames[] = {"render", "get", "set", "init",
-                                       "constructor"};
-        SymbolStore store(n);
-        for (int i = 0; i < n; ++i) {
+TEST(SymbolStoreTest, SetUpdateCostPerSymbolIndependentOfNameBucketSize) {
+    constexpr int kSymbolCount = 20000;
+    constexpr int kSharedNameCount = 5;
+    auto build = [](bool shared_names) {
+        static const char* kNames[kSharedNameCount] = {
+            "render", "get", "set", "init", "constructor"};
+        SymbolStore store(kSymbolCount);
+        for (int i = 0; i < kSymbolCount; ++i) {
             // One file per symbol so the file bucket stays size 1 and the
             // measured dimension is the shared-name bucket.
+            const std::string name =
+                shared_names ? kNames[i % kSharedNameCount]
+                             : "unique_" + std::to_string(i);
             store.set(static_cast<SymbolID>(i + 1),
                       make_symbol(static_cast<SymbolID>(i + 1),
-                                  kNames[i % 5], SymbolType::Function,
+                                  name, SymbolType::Function,
                                   static_cast<FileID>(i + 1), i + 1, 0,
                                   i + 2, 0));
         }
@@ -684,35 +691,35 @@ TEST(SymbolStoreTest, SetUpdateCostPerSymbolScalesWithCountNotBucket) {
         v.assign(all.begin(), all.end());
         return v;
     };
-    auto best_per_symbol = [&](int n) {
-        SymbolStore store = build(n);
+    auto best_per_symbol = [&](bool shared_names) {
+        SymbolStore store = build(shared_names);
         auto snap = take_snapshot(store);
         (void)reset_pass(store, snap);  // warmup
         long long best = std::numeric_limits<long long>::max();
         for (int rep = 0; rep < 5; ++rep) {
             best = std::min(best, reset_pass(store, snap));
         }
-        EXPECT_EQ(store.stats().total_symbols, n);
+        EXPECT_EQ(store.stats().total_symbols, kSymbolCount);
         EXPECT_EQ(static_cast<int>(store.get_symbols_by_name("render").size()),
-                  n / 5);
+                  shared_names ? kSymbolCount / kSharedNameCount : 0);
         return best;
     };
 
-    long long per_sym_1x = best_per_symbol(2000);
-    long long per_sym_10x = best_per_symbol(20000);
-    // per_sym_1x is reset_pass's total divided by snapshot.size()=2000 -- a
+    long long unique_ns = best_per_symbol(false);
+    long long shared_ns = best_per_symbol(true);
+    // unique_ns is reset_pass's total divided by snapshot.size() -- a
     // per-symbol AVERAGE. Each store.set() hashes once, so the whole pass is
-    // far above 2000ns and the average cannot round to zero; the clamp never
-    // becomes a fabricated denominator.
-    double ratio = static_cast<double>(per_sym_10x) /
-                   static_cast<double>(std::max<long long>(per_sym_1x, 1));
-    std::printf("[ SetUpdateScaling ] 1x=%lldns/sym 10x=%lldns/sym ratio=%.2f\n",
-                per_sym_1x, per_sym_10x, ratio);
+    // far above the symbol count and the average cannot round to zero; the
+    // clamp never becomes a fabricated denominator.
+    double ratio = static_cast<double>(shared_ns) /
+                   static_cast<double>(std::max<long long>(unique_ns, 1));
+    std::printf("[ SetUpdateScaling ] unique=%lldns/sym shared=%lldns/sym ratio=%.2f\n",
+                unique_ns, shared_ns, ratio);
     std::fflush(stdout);
     EXPECT_LT(ratio, 3.0)
         << "re-set cost per symbol grew with the shared-name bucket "
-           "(quadratic apply_enrichment suspected): 1x="
-        << per_sym_1x << "ns 10x=" << per_sym_10x << "ns";
+           "(quadratic apply_enrichment suspected): unique="
+        << unique_ns << "ns shared=" << shared_ns << "ns";
 }
 
 TEST(SymbolLocationIndexTest, SyntheticFallbackIdReservesHighBit) {
