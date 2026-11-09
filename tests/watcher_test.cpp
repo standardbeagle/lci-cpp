@@ -8,6 +8,7 @@
 
 #include "unique_temp.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -569,22 +570,20 @@ TEST(FileWatcherTest, DetectsFileDelete) {
 
     fs::remove(tmp.path() / "to_delete.rs");
 
+    // Wait for the removal itself, not the first event: FSEvents also replays
+    // the creation of a file made just before the watch started.
+    bool found_delete = false;
     {
         std::unique_lock lock(mu);
-        cv.wait_for(lock, std::chrono::seconds{2},
-                    [&] { return !events.empty(); });
+        found_delete = cv.wait_for(lock, std::chrono::seconds{10}, [&] {
+            return std::any_of(events.begin(), events.end(), [](const auto& e) {
+                return e.second == FileEventType::Remove &&
+                       e.first.find("to_delete.rs") != std::string::npos;
+            });
+        });
     }
 
     watcher.stop();
-
-    ASSERT_FALSE(events.empty());
-    bool found_delete = false;
-    for (const auto& [path, type] : events) {
-        if (type == FileEventType::Remove &&
-            path.find("to_delete.rs") != std::string::npos) {
-            found_delete = true;
-        }
-    }
     EXPECT_TRUE(found_delete);
 }
 
