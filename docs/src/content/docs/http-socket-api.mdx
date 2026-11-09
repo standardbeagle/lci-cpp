@@ -21,8 +21,11 @@ a client; you can also reach it directly.
   `<runtime>/lci-<uid>.sock` (no project root given) or
   `<runtime>/lci-<uid>-<hash>.sock` (hash of the absolute project root).
   `<runtime>` is `$XDG_RUNTIME_DIR/lci` when that is usable, else
-  `/tmp/lci-<uid>`. The directory is `0700` and the socket `0600`, so only
-  the owning user can connect.
+  `/tmp/lci-<uid>`, else `$TMPDIR/lci-<uid>`. A candidate is used only when
+  it is a real directory (not a symlink) owned by the user; when none is,
+  lci exits with an error instead of starting. The directory is `0700`
+  (verified after `chmod`) and the socket `0600`, so only the owning user
+  can connect.
 - **Windows**: no Unix sockets, so the server binds a loopback TCP port —
   `127.0.0.1:<port>` — derived deterministically from the user id (and
   project-root hash, when set) so repeated runs land on the same port.

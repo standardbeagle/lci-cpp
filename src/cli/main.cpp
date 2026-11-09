@@ -1144,6 +1144,12 @@ int main(int argc, char* argv[]) {
     } catch (const CLI::ParseError& e) {
         int rc = app.exit(e);
         return rc == 0 ? 0 : 1;
+    } catch (const std::exception& e) {
+        // Subcommand callbacks run inside parse(). A fail-fast throw from
+        // one (e.g. no private runtime directory) is a reported error with
+        // exit 1, not std::terminate's abort and core dump.
+        std::cerr << "Error: " << e.what() << '\n';
+        return 1;
     }
 
     // cpu_guard / mem_guard destruct on return, flushing the profile.

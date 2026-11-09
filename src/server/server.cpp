@@ -8,6 +8,7 @@
 #include <ctime>
 #include <filesystem>
 #include <functional>
+#include <stdexcept>
 #include <thread>
 
 #if defined(__GLIBC__)
@@ -177,11 +178,28 @@ std::string select_user_runtime_dir(const char* xdg_runtime_dir,
     fs::create_directories(dir, ec);
     if (!owned_private_dir(dir)) {
         // Someone else owns (or symlinked) the fixed path: fall back to the
-        // caller's temp dir rather than trust it.
+        // caller's temp dir rather than trust it. The fallback gets the same
+        // check — it used to be returned unverified, so a symlink planted at
+        // <temp>/lci-<uid> put the sockets and registry in a dir another
+        // user controls.
+        const fs::path rejected = dir;
         dir = temp_base / ("lci-" + uid);
         fs::create_directories(dir, ec);
+        if (!owned_private_dir(dir)) {
+            throw std::runtime_error(
+                "no private runtime directory: " + rejected.string() +
+                " and " + dir.string() +
+                " are each missing, a symlink, or owned by another user");
+        }
     }
-    ::chmod(dir.c_str(), 0700);
+    // Mode is part of the contract (owner-only sockets): an unchecked chmod
+    // left a pre-existing 0777 dir world-writable.
+    struct stat st{};
+    if (::chmod(dir.c_str(), 0700) != 0 || ::lstat(dir.c_str(), &st) != 0 ||
+        (st.st_mode & 0777) != 0700) {
+        throw std::runtime_error("cannot make runtime directory " +
+                                 dir.string() + " owner-only (0700)");
+    }
     return dir.string();
 }
 #endif
