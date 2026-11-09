@@ -405,9 +405,11 @@ class MasterIndex {
     /// snapshot store goes through here so no publish path can forget one.
     void publish_snapshot(std::shared_ptr<FileSnapshot> snap);
 
+    /// Literal search over `file_snap`'s searchable files, in ascending
+    /// FileID order, stopping once options.max_results rows are collected.
     std::vector<SearchResult> execute_search(
         const std::string& pattern,
-        const std::vector<FileID>& candidates,
+        const std::shared_ptr<const FileSnapshot>& file_snap,
         const SearchOptions& options) const;
     SearchContext extract_context(FileID file_id, int match_line,
                                   int max_context_lines) const;

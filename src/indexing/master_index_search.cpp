@@ -86,10 +86,13 @@ std::vector<SearchResult> MasterIndex::search_with_options(
     err = validate_search_components();
     if (!err.empty()) return {};
 
-    auto candidates = searchable_file_ids();
-    if (candidates.empty()) return {};
+    // Pin once: the candidate list and every id->path lookup in the scan
+    // read the same generation, and the sorted id vector is used in place
+    // instead of copied.
+    auto file_snap = load_snapshot();
+    if (file_snap->searchable_ids.empty()) return {};
 
-    auto results = execute_search(pattern, candidates, opts);
+    auto results = execute_search(pattern, file_snap, opts);
     search_count_.fetch_add(1, std::memory_order_relaxed);
     return results;
 }
@@ -242,7 +245,7 @@ std::string MasterIndex::validate_search_components() const {
 
 std::vector<SearchResult> MasterIndex::execute_search(
     const std::string& pattern,
-    const std::vector<FileID>& candidates,
+    const std::shared_ptr<const FileSnapshot>& file_snap,
     const SearchOptions& options) const {
 
     // execute_search is fully lock-free. Each index it reads serves a stable,
@@ -258,10 +261,10 @@ std::vector<SearchResult> MasterIndex::execute_search(
     // No lock is taken here (the IndexLockManager has since been retired).
     auto refs_snap = ref_tracker_.pin();
 
-    // Pin the file snapshot once for the whole query so id_to_path resolves to
-    // a string_view into reverse_file_map with no per-result atomic load or
-    // string copy (path is copied into SearchResult::path exactly once).
-    auto file_snap = load_snapshot();
+    // The caller pinned the file snapshot for the whole query, so id_to_path
+    // resolves to a string_view into reverse_file_map with no per-result
+    // atomic load or string copy (path is copied into SearchResult::path
+    // exactly once).
 
     if (options.declaration_only) {
         auto symbols = refs_snap->find_symbols_by_name(pattern);
@@ -392,56 +395,52 @@ std::vector<SearchResult> MasterIndex::execute_search(
     // verify scan. The former layering treated any non-empty index result
     // as a narrowing, so residue candidate sets suppressed the scan-all
     // fallback and those pattern classes returned empty with no error.
+    //
+    // Every filter here is evaluated LAZILY, per file, in ascending FileID
+    // order, and the walk stops once max_results rows are collected. Skipping
+    // a filter never changes the output (a file is skipped only when it
+    // provably holds no match, and the exact scan decides everything else),
+    // so the work a filter costs is the only thing at stake:
+    //   - the trigram bloom probe and the path-scope test are cheap per file;
+    //     running them over every searchable file up front cost ~95 ns per
+    //     file even when the first file filled the result cap
+    //     (BM_SearchMediumIndex: 200 files, answered by file 0);
+    //   - the postings narrowing is a one-time build (hash sets over every
+    //     matching posting list, plus a full vocabulary pass for an edge run)
+    //     that only pays for itself by pruning bloom false positives. It is
+    //     built on the first FRUITLESS scan — the first moment it could have
+    //     saved work — so a query answered by its first candidates never
+    //     pays for it, and any other query pays at most one extra file scan.
+    // searchable_ids is sorted at snapshot publish; scan order is FileID
+    // order, deterministic across runs.
     auto trigram_narrowing =
         trigram_index_.narrow(pattern, options.case_insensitive);
-    auto postings_narrowing = postings_index_.narrow(pattern);
+    std::optional<PostingsIndex::Narrowing> postings_narrowing;
+    std::string_view scope_root = config().project.root;
 
-    std::vector<FileID> filtered;
-    filtered.reserve(candidates.size());
-    for (FileID fid : candidates) {
+    std::vector<SearchResult> results;
+
+    for (FileID fid : file_snap->searchable_ids) {
+        if (static_cast<int>(results.size()) >= options.max_results) break;
+
+        // Path-scope filter (CLI trailing-path args): root-relative match,
+        // exact file or directory prefix, OR across all path_scopes entries.
+        // Applied before any scan so out-of-scope files never spend the
+        // max_results cap.
+        if (!options.path_scopes.empty() &&
+            !rel_in_any_scope(
+                relative_to_root(id_to_path(*file_snap, fid), scope_root),
+                options.path_scopes)) {
+            continue;
+        }
         if (trigram_narrowing.certifies_absent(fid)) continue;
-        if (postings_narrowing.informative &&
-            !postings_narrowing.possible.contains(fid)) {
+        if (postings_narrowing && postings_narrowing->informative &&
+            !postings_narrowing->possible.contains(fid)) {
             // Postings cover every indexed file: a file with no postings
             // entry and no PARTIAL mark has no >=3-char token run at all,
             // so it cannot contain any of the pattern's usable runs.
             continue;
         }
-        filtered.push_back(fid);
-    }
-
-    // Path-scope filter (CLI trailing-path args). Applied INDEX-SIDE, before
-    // scoring/truncation, so a scoped query never loses in-scope hits to the
-    // max_results cap being spent on out-of-scope files. Root-relative match:
-    // exact file or directory prefix, OR across all path_scopes entries.
-    if (!options.path_scopes.empty()) {
-        std::string_view root = config().project.root;
-        filtered.erase(
-            std::remove_if(filtered.begin(), filtered.end(),
-                           [&](FileID fid) {
-                               std::string_view rel = relative_to_root(
-                                   id_to_path(*file_snap, fid), root);
-                               return !rel_in_any_scope(rel,
-                                                        options.path_scopes);
-                           }),
-            filtered.end());
-    }
-
-    // Trigram and postings indexes return file IDs in hash-table order,
-    // which is non-deterministic across runs. Sort ascending so the
-    // search path emits stable, reproducible results across runs. Note
-    // that Go's reference iterates the same indexes in *its* hash-map
-    // order, which differs file-for-file (Go's file_id assignment for
-    // the corpus does not match C++'s scanner-priority order). Ordering
-    // parity therefore needs descriptor-level handling — we keep the
-    // C++ output deterministic here and let the descriptor decide
-    // whether to mask file_id / path.
-    std::sort(filtered.begin(), filtered.end());
-
-    std::vector<SearchResult> results;
-
-    for (FileID fid : filtered) {
-        if (static_cast<int>(results.size()) >= options.max_results) break;
 
         // General text search: scan file content for pattern matches.
         // Pin the FileContent shared_ptr for the whole scan: get_content /
@@ -486,7 +485,12 @@ std::vector<SearchResult> MasterIndex::execute_search(
                 options.max_results - static_cast<int>(results.size());
         }
         auto matches = find_content_matches(content_sv, pattern, scan_options);
-        if (matches.empty()) continue;
+        if (matches.empty()) {
+            if (!postings_narrowing) {
+                postings_narrowing = postings_index_.narrow(pattern);
+            }
+            continue;
+        }
 
         // Line numbers resolve via binary search over the precomputed
         // line-start offsets (line_offsets, set above: pinned fc's offsets
