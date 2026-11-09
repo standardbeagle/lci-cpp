@@ -6,9 +6,13 @@
 #include <lci/server/client.h>
 #include <lci/server/server.h>
 
+#include <httplib.h>
+
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -409,11 +413,60 @@ TEST(ClientGitAnalyzeConnectionTest, GitAnalyzeConnectionFailure) {
 
 // -- Timeout tests ------------------------------------------------------------
 
-TEST_F(ClientTest, SetTimeout) {
-    client_->set_timeout(std::chrono::milliseconds{100});
+TEST_F(ClientTest, TimeoutLongEnoughLetsRequestSucceed) {
+    client_->set_timeout(std::chrono::seconds{30});
     std::string err;
     auto resp = client_->ping(err);
     ASSERT_TRUE(resp.has_value()) << err;
+}
+
+// A real short deadline against a live server only measures machine load, so
+// the short side runs against a server that accepts and then never answers.
+TEST(ClientTimeoutTest, ShortTimeoutFailsAgainstServerThatNeverAnswers) {
+    const std::string address = test::next_test_server_address();
+    httplib::Server stalled;
+    std::mutex release_mu;
+    std::condition_variable release_cv;
+    bool released = false;
+    stalled.Post("/ping", [&](const httplib::Request&, httplib::Response&) {
+        std::unique_lock lock(release_mu);
+        release_cv.wait(lock, [&] { return released; });
+    });
+#ifdef _WIN32
+    const auto colon = address.rfind(':');
+    ASSERT_TRUE(stalled.bind_to_port(address.substr(0, colon),
+                                     std::stoi(address.substr(colon + 1))));
+#else
+    stalled.set_address_family(AF_UNIX);
+    ASSERT_TRUE(stalled.bind_to_port(address, 80));
+#endif
+    std::thread server_thread([&] { stalled.listen_after_bind(); });
+    stalled.wait_until_ready();
+
+    Client client(address);
+    client.set_timeout(std::chrono::milliseconds{100});
+    std::string err;
+    const auto start = std::chrono::steady_clock::now();
+    const auto resp = client.ping(err);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    {
+        std::lock_guard lock(release_mu);
+        released = true;
+    }
+    release_cv.notify_all();
+    stalled.stop();
+    server_thread.join();
+#ifndef _WIN32
+    std::error_code ec;
+    std::filesystem::remove(address, ec);
+#endif
+
+    EXPECT_FALSE(resp.has_value());
+    EXPECT_FALSE(err.empty());
+    // Well under the client's 30 s default, which is what an ignored
+    // set_timeout would wait; generous so a loaded box cannot fail it.
+    EXPECT_LT(elapsed, std::chrono::seconds{10});
 }
 
 // -- GetSymbol tests ----------------------------------------------------------
