@@ -393,6 +393,74 @@ TEST_F(ContextHandlerFixture, SaveRejectsPathEscapingProjectRoot) {
                                          "escape.json"));
 }
 
+#ifndef _WIN32
+// The save used to write `<to_file>.tmp` with a plain ofstream, which follows
+// a symlink planted at that predictable name: any file the server user can
+// write, inside or outside the root, was overwritten with manifest JSON.
+TEST_F(ContextHandlerFixture, SaveNeverWritesThroughAPlantedTempSymlink) {
+    namespace fs = std::filesystem;
+    auto outside = temp_dir_.parent_path() /
+                   (temp_dir_.filename().string() + "_victim.txt");
+    write_file(outside, "VICTIM");
+    fs::create_symlink(outside, temp_dir_ / "planted.json.tmp");
+
+    nlohmann::json params = {
+        {"operation", "save"},
+        {"to_file", "planted.json"},
+        {"refs", {{{"f", "main.go"}, {"s", "main"}}}}};
+    auto r = handle_context(params, *indexer_, temp_dir_.string());
+    EXPECT_FALSE(r.is_error) << r.text;
+
+    std::ifstream in(outside, std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, "VICTIM") << "save wrote through the planted symlink";
+    EXPECT_FALSE(fs::is_symlink(temp_dir_ / "planted.json"));
+    std::error_code ec;
+    fs::remove(outside, ec);
+}
+#endif
+
+// A manifest save is a write tool confined to the root, but the root holds
+// source and git state. Overwriting a file that is not a manifest, or any
+// path under `.git`, turns a context save into arbitrary in-root file
+// replacement (e.g. `.git/config` gains attacker-chosen JSON, or main.go is
+// destroyed). Both must be refused with the target left byte-identical.
+TEST_F(ContextHandlerFixture, SaveRefusesToReplaceANonManifestFile) {
+    namespace fs = std::filesystem;
+    std::ifstream before_in(temp_dir_ / "main.go", std::ios::binary);
+    std::string before((std::istreambuf_iterator<char>(before_in)),
+                       std::istreambuf_iterator<char>());
+    ASSERT_FALSE(before.empty());
+
+    nlohmann::json params = {
+        {"operation", "save"},
+        {"to_file", "main.go"},
+        {"refs", {{{"f", "main.go"}, {"s", "main"}}}}};
+    auto r = handle_context(params, *indexer_, temp_dir_.string());
+    EXPECT_TRUE(r.is_error) << r.text;
+
+    std::ifstream after_in(temp_dir_ / "main.go", std::ios::binary);
+    std::string after((std::istreambuf_iterator<char>(after_in)),
+                      std::istreambuf_iterator<char>());
+    EXPECT_EQ(after, before);
+}
+
+TEST_F(ContextHandlerFixture, SaveRefusesPathsUnderGitDirectory) {
+    namespace fs = std::filesystem;
+    for (const std::string& target :
+         {std::string(".git/config"), std::string(".git/hooks/pre-commit"),
+          std::string("sub/.git/new.json")}) {
+        nlohmann::json params = {
+            {"operation", "save"},
+            {"to_file", target},
+            {"refs", {{{"f", "main.go"}, {"s", "main"}}}}};
+        auto r = handle_context(params, *indexer_, temp_dir_.string());
+        EXPECT_TRUE(r.is_error) << target << ": " << r.text;
+        EXPECT_FALSE(fs::exists(temp_dir_ / target)) << target;
+    }
+}
+
 TEST_F(ContextHandlerFixture, LoadRejectsPathEscapingProjectRoot) {
     nlohmann::json params = {{"operation", "load"},
                              {"from_file", "../outside_manifest.json"}};
