@@ -1494,6 +1494,102 @@ TEST(SearchFlagInvertMatch, CoversFilesWithNoMatchAtAll) {
            "rg -v output; scoping invert to the candidate set drops it";
 }
 
+// The per-file bound used to truncate RAW byte occurrences to the output
+// cap before line dedup, the comment filter and quality ranking ran. Two hits
+// on one line spent two slots of the budget, so a dense file could contribute
+// fewer rows than the cap, its best row (a line-start definition past the
+// cap) was never considered, and the reported total counted only the
+// truncated prefix.
+std::vector<int> result_lines(const std::vector<SearchResult>& results) {
+    std::vector<int> lines;
+    for (const auto& r : results) lines.push_back(r.line);
+    std::sort(lines.begin(), lines.end());
+    return lines;
+}
+
+TEST(SearchPerFileCap, BestRowPastTheRawOccurrenceCapIsKept) {
+    TempDir dir;
+    dir.write_file("dense.go",
+        "package main\n"                 // 1
+        "func a() { use(token, token) }\n"  // 2
+        "func b() { use(token, token) }\n"  // 3
+        "func c() { use(token, token) }\n"  // 4
+        "token := 1\n");                 // 5: line start, ranks first
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.max_results = 2;
+    SearchStats stats;
+    auto results = engine.search("token", opts, &stats);
+    ASSERT_EQ(results.size(), 2u);
+    EXPECT_EQ(results.front().line, 5)
+        << "the line-start hit outranks every mid-line hit";
+    EXPECT_EQ(stats.total_found, 4) << "four matching lines";
+}
+
+TEST(SearchPerFileCap, ExcludedCommentLinesDoNotSpendTheBudget) {
+    TempDir dir;
+    dir.write_file("commented.go",
+        "package main\n"     // 1
+        "// token here\n"    // 2
+        "// token again\n"   // 3
+        "var token = 1\n");  // 4: the only code hit
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.max_results = 2;
+    opts.exclude_comments = true;
+    auto results = engine.search("token", opts);
+    EXPECT_EQ(result_lines(results), (std::vector<int>{4}));
+}
+
+TEST(SearchPerFileCap, MaxCountPerFileCountsLinesNotOccurrences) {
+    TempDir dir;
+    dir.write_file("twice.go",
+        "package main\n"            // 1
+        "var x = token + token\n"   // 2
+        "var y = token + token\n"   // 3
+        "var z = token + token\n");  // 4
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.max_count_per_file = 2;  // grep -m 2: two matching LINES
+    auto results = engine.search("token", opts);
+    EXPECT_EQ(result_lines(results), (std::vector<int>{2, 3}));
+}
+
+TEST(SearchFlagInvertMatch, MatchingLinesPastTheCapAreNotReported) {
+    TempDir dir;
+    dir.write_file("inv.go",
+        "var token = 1\n"   // 1 match
+        "var token = 2\n"   // 2 match
+        "var token = 3\n"   // 3 match
+        "var other = 4\n");  // 4 the only non-matching line
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.invert_match = true;
+    opts.max_results = 2;
+    auto results = engine.search("token", opts);
+    EXPECT_EQ(result_lines(results), (std::vector<int>{4}));
+}
+
 // Criterion 4, end-to-end pin of the PRODUCTION path.
 //
 // SearchCoordinatorTest.UniquePathsCollapsesNonAdjacentDuplicates pins the
