@@ -32,22 +32,6 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
     `%LOCALAPPDATA%\Programs\lci` on Windows). Override with `LCI_PREFIX`;
     pin a version with `LCI_VERSION=0.10.1`.
   </TabItem>
-  <TabItem label="npm">
-    ```sh
-    npm install -g @standardbeagle/lci
-    lci --version
-    ```
-
-    Downloads the prebuilt binary for your platform — no compiler required.
-  </TabItem>
-  <TabItem label="uv / pip">
-    ```sh
-    uv tool install lci-cli      # or: pipx install lci-cli
-    lci --version
-    ```
-
-    Downloads the prebuilt binary for your platform — no compiler required.
-  </TabItem>
   <TabItem label="Release artifact">
     ```sh
     # Linux: tarball or Debian package
@@ -72,9 +56,7 @@ lci update --check    # report current vs latest without installing
 lci update --version 0.10.1   # install a specific release
 ```
 
-`lci update` works regardless of how lci was installed. Package-manager
-users can also run `npm update -g @standardbeagle/lci` or `uv tool upgrade
-lci-cli`.
+`lci update` works regardless of how lci was installed.
 
 ## Building from source
 
