@@ -504,7 +504,12 @@ TEST(FileWatcherTest, EventUnderResolvedRootIsDispatchedUnderConfiguredRoot) {
     real_root.write_file("kept.go", "package main\n");
     const fs::path link_root =
         test::unique_temp_dir("lci_watcher_symlinked_root_");
-    fs::create_directory_symlink(real_root.path(), link_root);
+    std::error_code symlink_ec;
+    fs::create_directory_symlink(real_root.path(), link_root, symlink_ec);
+    if (symlink_ec) {
+        // Windows needs a privilege or developer mode to create one.
+        GTEST_SKIP() << "symlinks unavailable: " << symlink_ec.message();
+    }
 
     Config cfg = make_default_config();
     cfg.project.root = link_root.string();
