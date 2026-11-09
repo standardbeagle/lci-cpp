@@ -83,6 +83,10 @@ add_executable(lci_tests
     index_performance_test.cpp
     json_schema_smoketest.cpp
 )
+if(MSVC)
+    # Same narrow code page as the shipped lci.exe (see src/CMakeLists.txt).
+    target_sources(lci_tests PRIVATE "${CMAKE_SOURCE_DIR}/cmake/utf8-code-page.manifest")
+endif()
 target_include_directories(lci_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_BINARY_DIR}/generated"

@@ -239,6 +239,12 @@ endif()
 add_executable(lci
     cli/main.cpp
 )
+if(MSVC)
+    # Every path and argument in this program is UTF-8 narrow text, and
+    # subprocess.cpp already widens as UTF-8. Without this, std::filesystem reads
+    # the same bytes in the ANSI code page and non-ASCII file names go wrong.
+    target_sources(lci PRIVATE "${CMAKE_SOURCE_DIR}/cmake/utf8-code-page.manifest")
+endif()
 if(LCI_TCMALLOC_LIB)
     # Last on the final executable so its malloc/free win symbol resolution.
     target_link_libraries(lci PRIVATE "${LCI_TCMALLOC_LIB}")
