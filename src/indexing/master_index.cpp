@@ -546,6 +546,13 @@ bool MasterIndex::index_file(const std::string& path_arg) {
     const std::string path = generic_path(path_arg);
     if (path.empty()) return false;
     if (!std::filesystem::exists(path)) return false;
+    // Same admission rule as the bulk scanner: a watch event for a symlink
+    // (or a path under a symlinked directory) must not index what it points
+    // at when the scan would have refused it.
+    if (!path_admissible_for_index(path, config_.project.root,
+                                   config_.index.follow_symlinks)) {
+        return false;
+    }
     // Attribute gate, path-only: an attribute that does not activate Index
     // keeps its files out of the index entirely, so they cost nothing to hold
     // and appear nowhere. Content heuristics cannot run here — there is no
@@ -593,6 +600,10 @@ bool MasterIndex::update_file(const std::string& path_arg,
     const std::string path = generic_path(path_arg);
     if (path.empty() || content.empty()) return false;
     if (!std::filesystem::exists(path)) return false;
+    if (!path_admissible_for_index(path, config_.project.root,
+                                   config_.index.follow_symlinks)) {
+        return false;
+    }
 
     if (static_cast<int64_t>(content.size()) > config_.index.max_file_size) {
         return false;

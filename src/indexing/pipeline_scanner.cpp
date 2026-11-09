@@ -134,6 +134,29 @@ ScanResult FileScanner::scan(bool apply_budget) {
     return result;
 }
 
+bool path_admissible_for_index(const std::filesystem::path& path,
+                               const std::filesystem::path& root,
+                               bool follow_symlinks) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path canonical_root = fs::canonical(root, ec);
+    if (ec) return false;
+    const fs::path resolved = fs::canonical(path, ec);
+    if (ec) return false;
+
+    const auto rel = resolved.lexically_relative(canonical_root);
+    if (rel.empty() || *rel.begin() == "..") return false;
+    if (follow_symlinks) return true;
+
+    // Unfollowed: the path must resolve to exactly its own spelling under the
+    // root. Any symlinked component, file or directory, changes the result.
+    const fs::path spelled =
+        fs::absolute(path, ec).lexically_normal().lexically_relative(
+            fs::absolute(root, ec).lexically_normal());
+    if (ec) return false;
+    return (canonical_root / spelled).lexically_normal() == resolved;
+}
+
 void FileScanner::walk_directory(
     const std::filesystem::path& dir,
     const std::string& rel_prefix,
@@ -155,6 +178,18 @@ void FileScanner::walk_directory(
         if (name.empty()) continue;
         std::string rel_path =
             rel_prefix.empty() ? name : rel_prefix + '/' + name;
+
+        // Symlinks, file or directory: refused outright unless followed, and
+        // a followed one must still land under the root. is_directory and
+        // is_regular_file both follow the link, so this gate must come first.
+        if (entry.is_symlink(ec) || ec) {
+            if (ec) continue;
+            if (!config_.index.follow_symlinks) continue;
+            if (!path_admissible_for_index(entry.path(), config_.project.root,
+                                           true)) {
+                continue;
+            }
+        }
 
         if (entry.is_directory(ec)) {
             if (ec) continue;
@@ -178,11 +213,6 @@ void FileScanner::walk_directory(
                 continue;
 
             if (should_exclude(rel_path)) continue;
-
-            // Handle symlinks to directories
-            if (entry.is_symlink(ec) && !ec) {
-                if (!config_.index.follow_symlinks) continue;
-            }
 
             walk_directory(entry.path(), rel_path, visited_inodes, out);
             continue;

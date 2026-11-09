@@ -482,6 +482,7 @@ TEST(MasterIndexTest, IndexSingleFile) {
     dir.write_file("single.go", "package main\nfunc single() {}\n");
 
     Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
 
     std::string file_path = (dir.path() / "single.go").string();
@@ -496,6 +497,38 @@ TEST(MasterIndexTest, IndexFileEmptyPath) {
     EXPECT_FALSE(mi.index_file(""));
 }
 
+#ifndef _WIN32
+// The incremental write paths (fed by the watcher) admit files by the same
+// rule as the bulk scan: a symlink whose target lies outside the root, or any
+// symlink while follow_symlinks is off, never puts its target's bytes in the
+// index.
+TEST(MasterIndexTest, IncrementalWritesRefuseSymlinksTheScanWouldRefuse) {
+    TempDir outside;
+    outside.write_file("creds.txt", "SECRET_TOKEN\n");
+    TempDir dir;
+    dir.write_file("inside.go", "package main\n");
+    std::filesystem::create_symlink(outside.path() / "creds.txt",
+                                    dir.path() / "notes.txt");
+    std::filesystem::create_symlink(dir.path() / "inside.go",
+                                    dir.path() / "alias.go");
+
+    for (bool follow : {false, true}) {
+        Config cfg = make_default_config();
+        cfg.project.root = dir.path().string();
+        cfg.index.follow_symlinks = follow;
+        MasterIndex mi(cfg);
+        const auto notes = (dir.path() / "notes.txt").string();
+        EXPECT_FALSE(mi.index_file(notes)) << "follow=" << follow;
+        EXPECT_FALSE(mi.update_file(notes, "SECRET_TOKEN\n"))
+            << "follow=" << follow;
+        EXPECT_FALSE(mi.index_file((outside.path() / "creds.txt").string()))
+            << "out-of-root path, follow=" << follow;
+        EXPECT_EQ(mi.index_file((dir.path() / "alias.go").string()), follow);
+        EXPECT_TRUE(mi.index_file((dir.path() / "inside.go").string()));
+    }
+}
+#endif
+
 TEST(MasterIndexTest, IndexFileNonexistent) {
     Config cfg = make_default_config();
     MasterIndex mi(cfg);
@@ -507,6 +540,7 @@ TEST(MasterIndexTest, UpdateFile) {
     dir.write_file("updatable.go", "package main\nvar x = 1\n");
 
     Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
 
     std::string file_path = (dir.path() / "updatable.go").string();
@@ -543,6 +577,7 @@ TEST(MasterIndexTest, RemoveFile) {
     dir.write_file("removable.go", "package main\nfunc rm() {}\n");
 
     Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
 
     std::string file_path = (dir.path() / "removable.go").string();
@@ -592,6 +627,7 @@ TEST(MasterIndexTest, ConcurrentReadsWhileUpdating) {
     dir.write_file("base.go", "package main\nfunc base() {}\n");
 
     Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
 
     std::string file_path = (dir.path() / "base.go").string();

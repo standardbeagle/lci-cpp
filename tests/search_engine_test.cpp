@@ -254,10 +254,11 @@ TEST(SearchCoordinatorTest, RankBreaksTiesByPath) {
 // -- Context extractor tests --------------------------------------------------
 
 TEST(ContextExtractorTest, ExtractLineContext) {
+    TempDir dir;
     Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
 
-    TempDir dir;
     dir.write_file("ctx.go",
         "package main\n"
         "\n"
@@ -285,10 +286,11 @@ TEST(ContextExtractorTest, ExtractLineContext) {
 // return num_lines + 1 lines (including the default 50 and the 100 that
 // extract_block_context falls back to).
 TEST(ContextExtractorTest, WindowHoldsExactlyNumLines) {
+    TempDir dir;
     Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
 
-    TempDir dir;
     std::string body;
     for (int i = 1; i <= 40; ++i) {
         body += "line" + std::to_string(i) + "\n";
@@ -316,10 +318,11 @@ TEST(ContextExtractorTest, WindowHoldsExactlyNumLines) {
 // (start + 100). Pins that it still cannot run past the end of the file for a
 // match on a long function's last statement.
 TEST(ContextExtractorTest, LongFunctionWindowStaysInsideTheFile) {
+    TempDir dir;
     Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
 
-    TempDir dir;
     std::string body = "func big() {\n";
     for (int i = 1; i <= 150; ++i) {
         body += "    step" + std::to_string(i) + "()\n";

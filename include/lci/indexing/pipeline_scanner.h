@@ -29,6 +29,17 @@ struct ScanResult {
     std::string error;
 };
 
+/// True when `path` may enter the index: it exists, it resolves to a location
+/// under the canonical `root`, and — unless `follow_symlinks` — no component
+/// below `root` is a symlink. Without this a committed symlink such as
+/// `notes.txt -> ~/.ssh/id_rsa` put the target's bytes behind search and MCP.
+/// One realpath per call: the bulk scanner calls it only for symlink entries
+/// (everything else under a non-symlink directory is inside by construction);
+/// the incremental write paths call it once per file.
+bool path_admissible_for_index(const std::filesystem::path& path,
+                               const std::filesystem::path& root,
+                               bool follow_symlinks);
+
 class FileScanner {
   public:
     explicit FileScanner(const Config& config);

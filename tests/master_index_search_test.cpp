@@ -374,6 +374,7 @@ TEST(MasterIndexSearchIntegrationTest, FindCandidateFiles) {
     dir.write_file("a.go", "package main\nfunc doStuff() {}\n");
 
     Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
 
     // Use single-file indexing which populates trigrams directly.
@@ -834,6 +835,7 @@ TEST(MasterIndexSearchIntegrationTest, SearchAfterSingleFileIndex) {
         "package main\nfunc singleSearch() { return }\n");
 
     Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
 
     std::string file_path = (dir.path() / "single.go").string();
@@ -854,6 +856,7 @@ TEST(MasterIndexSearchIntegrationTest, SearchAfterFileUpdate) {
     dir.write_file("updated.go", "package main\nvar original = 1\n");
 
     Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
 
     std::string file_path = (dir.path() / "updated.go").string();
@@ -877,6 +880,7 @@ TEST(MasterIndexSearchIntegrationTest, SearchAfterFileRemoval) {
     dir.write_file("removable.go", "package main\nfunc removable() {}\n");
 
     Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
     MasterIndex mi(cfg);
 
     std::string file_path = (dir.path() / "removable.go").string();
