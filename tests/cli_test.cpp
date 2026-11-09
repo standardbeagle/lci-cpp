@@ -3777,11 +3777,20 @@ TEST(CliStatusTest, ThreadsAndRssMatchServerStatusJson) {
         << text_out;
     const auto threads_pos = text_out.find("Threads:");
     ASSERT_NE(threads_pos, std::string::npos) << text_out;
-    const int text_threads = std::atoi(text_out.c_str() + threads_pos + 8);
     const auto rss_pos = text_out.find("RSS:");
     ASSERT_NE(rss_pos, std::string::npos) << text_out;
     const double text_rss_mb = std::atof(text_out.c_str() + rss_pos + 4);
 
+#ifdef _WIN32
+    // live_thread_count() has no cheap reading on Windows, and a made-up number
+    // would be worse than saying so: both sides must report it as absent.
+    EXPECT_EQ(server_threads, -1);
+    EXPECT_EQ(text_out.compare(text_out.find_first_not_of(" ", threads_pos + 8),
+                               11, "unavailable"),
+              0)
+        << text_out;
+#else
+    const int text_threads = std::atoi(text_out.c_str() + threads_pos + 8);
     // The server is live, so a sanitizer's background thread or a worker can
     // appear between the two reads: compare within a small tolerance, as RSS
     // does below. The floor is what keeps this discriminating: the server runs
@@ -3794,6 +3803,7 @@ TEST(CliStatusTest, ThreadsAndRssMatchServerStatusJson) {
         << "text Threads: read the CLI's own /proc/self instead of the "
            "server's /stats\ntext: "
         << text_out;
+#endif
     // Text prints RSS with %.1f and the live server's RSS can drift between
     // the in-process query and the CLI run; the tolerance covers display
     // rounding plus drift, while remaining far tighter than the CLI-vs-server
