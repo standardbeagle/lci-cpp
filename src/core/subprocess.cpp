@@ -7,6 +7,8 @@
 
 #include <windows.h>
 
+#include <vector>
+
 namespace lci {
 namespace subprocess {
 namespace {
@@ -72,14 +74,41 @@ HANDLE spawn(const std::vector<std::string>& argv, const std::string& cwd,
                                   OPEN_EXISTING, 0, nullptr);
     if (null_dev == INVALID_HANDLE_VALUE) return nullptr;
 
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = null_dev;
-    si.hStdOutput = out_write != nullptr ? out_write : null_dev;
-    si.hStdError = null_dev;
+    // bInheritHandles alone passes EVERY inheritable handle of this process to
+    // the child, and this process's own stdout is inheritable when its parent
+    // captured it through a pipe. A daemon autostarted by `lci search` then held
+    // that pipe's write end open, so whoever captured `lci search` never saw EOF
+    // until the daemon's idle exit. Name exactly the child's stdio handles.
+    HANDLE inherited[2] = {null_dev, out_write};
+    const DWORD inherited_count = out_write != nullptr ? 2 : 1;
+    SIZE_T attribute_list_size = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &attribute_list_size);
+    std::vector<char> attribute_list_storage(attribute_list_size);
+    auto* attribute_list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(
+        attribute_list_storage.data());
+    if (!InitializeProcThreadAttributeList(attribute_list, 1, 0,
+                                           &attribute_list_size)) {
+        CloseHandle(null_dev);
+        return nullptr;
+    }
+    if (!UpdateProcThreadAttribute(attribute_list, 0,
+                                   PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
+                                   inherited_count * sizeof(HANDLE), nullptr,
+                                   nullptr)) {
+        DeleteProcThreadAttributeList(attribute_list);
+        CloseHandle(null_dev);
+        return nullptr;
+    }
 
-    DWORD flags = CREATE_NO_WINDOW;
+    STARTUPINFOEXW si{};
+    si.StartupInfo.cb = sizeof(si);
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    si.StartupInfo.hStdInput = null_dev;
+    si.StartupInfo.hStdOutput = out_write != nullptr ? out_write : null_dev;
+    si.StartupInfo.hStdError = null_dev;
+    si.lpAttributeList = attribute_list;
+
+    DWORD flags = CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT;
     if (detached) {
         // A daemon launched from a job-object host (CI runners, some
         // IDEs) must outlive the job, not be killed when it tears down.
@@ -89,7 +118,8 @@ HANDLE spawn(const std::vector<std::string>& argv, const std::string& cwd,
     PROCESS_INFORMATION pi{};
     BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr,
                              /*bInheritHandles=*/TRUE, flags, nullptr,
-                             wcwd.empty() ? nullptr : wcwd.c_str(), &si, &pi);
+                             wcwd.empty() ? nullptr : wcwd.c_str(),
+                             &si.StartupInfo, &pi);
     // CreateProcess contract: CREATE_BREAKAWAY_FROM_JOB fails with
     // ERROR_ACCESS_DENIED when the caller runs inside a job object that does
     // not grant JOB_OBJECT_LIMIT_BREAKAWAY_OK. CI runners and some IDEs put the
@@ -102,9 +132,11 @@ HANDLE spawn(const std::vector<std::string>& argv, const std::string& cwd,
         flags &= ~CREATE_BREAKAWAY_FROM_JOB;
         ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr,
                             /*bInheritHandles=*/TRUE, flags, nullptr,
-                            wcwd.empty() ? nullptr : wcwd.c_str(), &si, &pi);
+                            wcwd.empty() ? nullptr : wcwd.c_str(),
+                            &si.StartupInfo, &pi);
     }
-    if (null_dev != INVALID_HANDLE_VALUE) CloseHandle(null_dev);
+    DeleteProcThreadAttributeList(attribute_list);
+    CloseHandle(null_dev);
     if (!ok) return nullptr;
     CloseHandle(pi.hThread);
     return pi.hProcess;
@@ -122,11 +154,9 @@ bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
     sa.bInheritHandle = TRUE;
     HANDLE rd = nullptr, wr = nullptr;
     if (!CreatePipe(&rd, &wr, &sa, 0)) return false;
-    // Inheritance is per-handle on Windows: only the write end is the
-    // child's stdout, so only it keeps HANDLE_FLAG_INHERIT. The read end
-    // is explicitly cleared — with bInheritHandles=TRUE below, every
-    // inheritable handle in this process (including OTHER run_capture
-    // pipes) would otherwise leak into this child.
+    // spawn() names the handles a child inherits, so the read end cannot reach
+    // the child anyway. Cleared regardless: a concurrent CreateProcess elsewhere
+    // in this process that does not name its handles would inherit it.
     SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
 
     HANDLE proc = spawn(argv, cwd, wr, /*detached=*/false);
