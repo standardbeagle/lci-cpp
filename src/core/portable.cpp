@@ -12,10 +12,12 @@
 #include <unistd.h>
 #endif
 
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <cstdlib>
 #include <cstring>
+#include <locale>
 #include <stdexcept>
 #include <version>
 
@@ -28,6 +30,22 @@ int process_id() {
 #else
     return static_cast<int>(::getpid());
 #endif
+}
+
+void prime_ctype_narrow_cache() {
+    static const bool primed = [] {
+        std::array<char, 256> every_char{};
+        for (size_t i = 0; i < every_char.size(); ++i) {
+            every_char[i] = static_cast<char>(i);
+        }
+        std::array<char, 256> narrowed{};
+        // The range overload is the one that fills the whole cache in one go.
+        std::use_facet<std::ctype<char>>(std::locale())
+            .narrow(every_char.data(), every_char.data() + every_char.size(),
+                    '\0', narrowed.data());
+        return true;
+    }();
+    (void)primed;
 }
 
 std::filesystem::path executable_path() {

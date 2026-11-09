@@ -14,6 +14,7 @@
 #include <malloc.h>
 #endif
 
+#include <lci/core/portable.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/core/text.h>
 #include <lci/pagination.h>
@@ -283,14 +284,18 @@ std::string language_from_extension(const std::string& path) {
 IndexServer::IndexServer(const Config& config)
     : config_(config),
       owned_indexer_(std::make_unique<MasterIndex>(config)),
-      indexer_(owned_indexer_.get()) {}
+      indexer_(owned_indexer_.get()) {
+    portable::prime_ctype_narrow_cache();
+}
 
 IndexServer::IndexServer(const Config& config,
                          MasterIndex& indexer,
                          SearchEngine* search_engine)
     : config_(config),
       indexer_(&indexer),
-      search_engine_(search_engine) {}
+      search_engine_(search_engine) {
+    portable::prime_ctype_narrow_cache();
+}
 
 IndexServer::~IndexServer() {
     shutdown();

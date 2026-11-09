@@ -1,4 +1,5 @@
 #include <lci/server/client.h>
+#include <lci/core/portable.h>
 
 #include <algorithm>
 #include <cctype>
@@ -31,9 +32,13 @@ bool valid_tcp_address(const std::string& addr) {
 }  // namespace
 #endif
 
-Client::Client() : socket_path_(get_socket_path()) {}
+Client::Client() : socket_path_(get_socket_path()) {
+    portable::prime_ctype_narrow_cache();
+}
 
-Client::Client(const std::string& socket_path) : socket_path_(socket_path) {}
+Client::Client(const std::string& socket_path) : socket_path_(socket_path) {
+    portable::prime_ctype_narrow_cache();
+}
 
 bool Client::is_server_running() {
     std::string err;

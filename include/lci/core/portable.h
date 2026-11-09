@@ -29,6 +29,13 @@ inline bool localtime_local(std::time_t t, std::tm& out) {
 /// Current process id (getpid / _getpid).
 int process_id();
 
+/// Fills libstdc++'s lazily written ctype<char> narrow cache on this thread.
+/// std::regex construction calls ctype<char>::narrow(char, char), which stores
+/// into that shared cache without synchronization, and httplib builds a
+/// std::regex per response line, so concurrent HTTP requests race on it.
+/// Call before any such thread starts. Idempotent and thread-safe.
+void prime_ctype_narrow_cache();
+
 /// Absolute path of the running executable. Throws std::runtime_error on
 /// failure (fail fast — no caller has a sane fallback).
 std::filesystem::path executable_path();
