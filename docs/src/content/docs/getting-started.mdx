@@ -30,19 +30,19 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
     Both detect your OS/arch, download the matching release binary, and
     install it (`/usr/local/bin` or `~/.local/bin` on Unix;
     `%LOCALAPPDATA%\Programs\lci` on Windows). Override with `LCI_PREFIX`;
-    pin a version with `LCI_VERSION=0.10.1`.
+    pin a version with `LCI_VERSION=<version>`.
   </TabItem>
   <TabItem label="Release artifact">
     ```sh
     # Linux: tarball or Debian package
-    curl -fLO https://github.com/standardbeagle/lci-cpp/releases/download/v0.10.1/lci-0.10.1-Linux.tar.gz
-    tar -xzf lci-0.10.1-Linux.tar.gz
-    sudo install lci-0.10.1-Linux/bin/lci /usr/local/bin/
+    curl -fLO https://github.com/standardbeagle/lci-cpp/releases/download/v<version>/lci-<version>-Linux.tar.gz
+    tar -xzf lci-<version>-Linux.tar.gz
+    sudo install lci-<version>-Linux/bin/lci /usr/local/bin/
 
     # or
-    sudo dpkg -i lci-0.10.1-Linux.deb
+    sudo dpkg -i lci-<version>-Linux.deb
 
-    lci --version   # 0.10.1
+    lci --version
     lci search "myFunction"
     ```
   </TabItem>
@@ -53,7 +53,7 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 ```sh
 lci update            # self-update to the latest release
 lci update --check    # report current vs latest without installing
-lci update --version 0.10.1   # install a specific release
+lci update --version <version>   # install a specific release
 ```
 
 `lci update` works regardless of how lci was installed.
@@ -74,8 +74,8 @@ Install and package the build:
 ```sh
 cd build/release
 sudo cmake --install .
-cpack -G TGZ    # produces lci-0.10.1-Linux.tar.gz
-cpack -G DEB    # produces lci-0.10.1-Linux.deb
+cpack -G TGZ    # produces lci-<version>-Linux.tar.gz
+cpack -G DEB    # produces lci-<version>-Linux.deb
 ```
 
 The CPack output contains only `bin/lci`. Tree-sitter grammars are statically

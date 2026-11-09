@@ -5,7 +5,7 @@ to cut the context an AI assistant has to read compared with grep. Tree-sitter
 parsing across 13 languages. An MCP server for AI assistants, plus CLI, HTTP,
 and Unix-socket interfaces.
 
-Version tracks the `VERSION` field of `project(lci ...)` in [`CMakeLists.txt`](CMakeLists.txt) (currently `0.10.1`); check `lci --version` for what you have installed.
+Versions come from `v*` git tags, and [Releases](https://github.com/standardbeagle/lci-cpp/releases) lists what has shipped; check `lci --version` for what you have installed.
 
 ## Quick start
 
@@ -29,14 +29,14 @@ irm https://raw.githubusercontent.com/standardbeagle/lci-cpp/main/install.ps1 | 
 
 Both detect your OS/arch, download the matching release binary, and install
 it (`/usr/local/bin` or `~/.local/bin` on Unix; `%LOCALAPPDATA%\Programs\lci`
-on Windows). Override with `LCI_PREFIX`; pin a version with `LCI_VERSION=0.10.1`.
+on Windows). Override with `LCI_PREFIX`; pin a version with `LCI_VERSION=<version>`.
 
 ### Updating
 
 ```sh
 lci update            # self-update to the latest release
 lci update --check    # report current vs latest without installing
-lci update --version 0.10.1   # install a specific release
+lci update --version <version>   # install a specific release
 ```
 
 `lci update` works regardless of how lci was installed.
@@ -45,14 +45,14 @@ lci update --version 0.10.1   # install a specific release
 
 ```sh
 # Linux: tarball or Debian package
-curl -fLO https://github.com/standardbeagle/lci-cpp/releases/download/v0.10.1/lci-0.10.1-Linux.tar.gz
-tar -xzf lci-0.10.1-Linux.tar.gz
-sudo install lci-0.10.1-Linux/bin/lci /usr/local/bin/
+curl -fLO https://github.com/standardbeagle/lci-cpp/releases/download/v<version>/lci-<version>-Linux.tar.gz
+tar -xzf lci-<version>-Linux.tar.gz
+sudo install lci-<version>-Linux/bin/lci /usr/local/bin/
 
 # or
-sudo dpkg -i lci-0.10.1-Linux.deb
+sudo dpkg -i lci-<version>-Linux.deb
 
-lci --version   # 0.10.1
+lci --version
 lci search "myFunction"
 ```
 
@@ -68,8 +68,8 @@ cmake --build build/release --parallel
 # Install + package
 cd build/release
 sudo cmake --install .
-cpack -G TGZ    # produces lci-0.10.1-Linux.tar.gz
-cpack -G DEB    # produces lci-0.10.1-Linux.deb
+cpack -G TGZ    # produces lci-<version>-Linux.tar.gz
+cpack -G DEB    # produces lci-<version>-Linux.deb
 ```
 
 The CPack output contains only `bin/lci`. Tree-sitter grammars are statically

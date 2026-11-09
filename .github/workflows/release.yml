@@ -84,6 +84,12 @@ jobs:
       - name: Test (unit suite)
         run: ./build/release/tests/lci_tests
 
+      - name: Binary reports the tag's version
+        run: |
+          reported="$(./build/release/src/lci --version)"
+          echo "$reported"
+          [ "${reported##* }" = "${GITHUB_REF_NAME#v}" ]
+
       - name: Package
         run: |
           cd build/release
@@ -161,6 +167,17 @@ jobs:
           & build/release/tests/Release/lci_tests.exe
           if ($LASTEXITCODE -ne 0) { throw "lci_tests failed ($LASTEXITCODE)" }
 
+      - name: Binary reports the tag's version
+        run: |
+          $exe = Get-ChildItem -Path build/release -Recurse -Filter lci.exe |
+                 Where-Object { $_.FullName -notmatch 'CMakeFiles' } |
+                 Select-Object -First 1
+          if (-not $exe) { throw "lci.exe not found under build/release" }
+          $reported = & $exe.FullName --version
+          Write-Output $reported
+          $expected = $env:GITHUB_REF_NAME -replace '^v',''
+          if (($reported -split ' ')[-1] -ne $expected) { throw "reported '$reported', tag is $expected" }
+
       # Use CMake's cpack explicitly. Chocolatey ships its own cpack.exe
       # (a NuGet packer) that shadows CMake's on the runner PATH; a bare
       # `cpack` resolves to it and fails with "not found or not a .nuspec
@@ -237,6 +254,12 @@ jobs:
       # dispatch queue on teardown).
       - name: Test (unit suite)
         run: ./build/release/tests/lci_tests
+
+      - name: Binary reports the tag's version
+        run: |
+          reported="$(./build/release/src/lci --version)"
+          echo "$reported"
+          [ "${reported##* }" = "${GITHUB_REF_NAME#v}" ]
 
       - name: Package
         run: |

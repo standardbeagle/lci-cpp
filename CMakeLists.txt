@@ -13,9 +13,27 @@ if(NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
     endif()
 endif()
 
-# The release version is the pushed v* tag: release CI and the fleet deploy pass
-# -DLCI_VERSION=<x.y.z> from it. The literal is what an untagged local build reports.
-set(LCI_VERSION "0.10.1" CACHE STRING "lci version; release builds pass the v* tag's")
+# The version has one source, the v* git tag: release CI and the fleet deploy pass
+# -DLCI_VERSION=<x.y.z> from the pushed tag, and any other build reads the newest tag
+# reachable from HEAD. A tree with no tags in reach (shallow CI checkout, source
+# tarball) reports 0.0.0 rather than a number that describes some other commit.
+if(NOT DEFINED LCI_VERSION)
+    set(LCI_VERSION "0.0.0")
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" describe --tags --match "v[0-9]*" --abbrev=0
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE LCI_NEAREST_TAG
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE LCI_NEAREST_TAG_RESULT)
+        if(LCI_NEAREST_TAG_RESULT EQUAL 0)
+            string(REGEX REPLACE "^v" "" LCI_VERSION "${LCI_NEAREST_TAG}")
+        endif()
+    endif()
+    message(STATUS "lci version ${LCI_VERSION} (from git tags; -DLCI_VERSION overrides)")
+endif()
 
 project(lci
     VERSION ${LCI_VERSION}
