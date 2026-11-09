@@ -16,6 +16,7 @@
 
 #include "unique_temp.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -565,6 +566,58 @@ TEST(FileScannerTest, DetectsSymlinkCycles) {
     // Must complete without infinite loop
     auto tasks = scanner.scan().tasks;
     EXPECT_GE(tasks.size(), 1u);
+}
+
+namespace {
+// <tmp>/repo is the project root; <tmp>/outside holds a file the repo links to.
+// A cloned repo can ship `notes.txt -> ~/.ssh/id_rsa`; indexing the link would
+// serve the target through search and every MCP tool.
+struct SymlinkEscapeFixture {
+    TempDir dir;
+    std::filesystem::path root;
+    bool supported = true;
+    SymlinkEscapeFixture() {
+        dir.write_file("repo/main.go", "package main\n");
+        dir.write_file("repo/inside.txt", "INSIDE_TOKEN\n");
+        dir.write_file("outside/creds.txt", "TOPSECRET_TOKEN\n");
+        root = dir.path() / "repo";
+        std::error_code ec;
+        std::filesystem::create_symlink(dir.path() / "outside" / "creds.txt",
+                                        root / "notes.txt", ec);
+        if (!ec) {
+            std::filesystem::create_symlink(root / "inside.txt",
+                                            root / "alias.txt", ec);
+        }
+        supported = !ec;
+    }
+    std::vector<std::string> scanned_names(bool follow) const {
+        Config cfg = make_default_config();
+        cfg.project.root = root.string();
+        cfg.index.follow_symlinks = follow;
+        std::vector<std::string> names;
+        for (const auto& t : FileScanner(cfg).scan().tasks) {
+            names.push_back(std::filesystem::path(t.path).filename().string());
+        }
+        std::sort(names.begin(), names.end());
+        return names;
+    }
+};
+}  // namespace
+
+TEST(FileScannerTest, FileSymlinksAreSkippedWhenNotFollowing) {
+    SymlinkEscapeFixture fx;
+    if (!fx.supported) GTEST_SKIP() << "symlinks not supported";
+    EXPECT_EQ(fx.scanned_names(false),
+              (std::vector<std::string>{"inside.txt", "main.go"}));
+}
+
+TEST(FileScannerTest, FollowedSymlinksNeverEscapeTheRoot) {
+    SymlinkEscapeFixture fx;
+    if (!fx.supported) GTEST_SKIP() << "symlinks not supported";
+    // alias.txt resolves inside the root and is kept; notes.txt resolves
+    // outside it and is refused even though symlinks are followed.
+    EXPECT_EQ(fx.scanned_names(true),
+              (std::vector<std::string>{"alias.txt", "inside.txt", "main.go"}));
 }
 
 TEST(FileScannerTest, SortsByPriority) {
