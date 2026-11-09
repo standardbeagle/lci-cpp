@@ -259,6 +259,12 @@ ScopeSet scope_from_unified_diff(std::string_view diff_text) {
                                                : eol - pos);
         if (line.rfind("+++ ", 0) == 0) {
             std::string_view target = line.substr(4);
+            // git appends a TAB to the header of a path holding a space
+            // (quoted or not) so patch(1) can find the end of the name. A
+            // literal TAB in a name is always C-quoted, so a trailing one
+            // is never part of the path.
+            if (!target.empty() && target.back() == '\t')
+                target.remove_suffix(1);
             if (target == "/dev/null") {
                 current_file.clear();  // pure deletion: nothing on new side
             } else {
