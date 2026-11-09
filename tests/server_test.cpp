@@ -7,13 +7,16 @@
 #include <lci/server/server.h>
 #include <lci/server/request_decode.h>
 
+#include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstring>
 #include <functional>
 #include <future>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -25,7 +28,9 @@
 
 #ifndef _WIN32
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/file.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -556,6 +561,121 @@ TEST(ServerLifecycleTest, StartRefusesToStealALiveListener) {
     EXPECT_TRUE(first.shutdown());
     EXPECT_TRUE(second.shutdown());
 }
+
+// -- Listener caps ------------------------------------------------------------
+
+TEST(ServerCapsTest, BodyOverSixteenMebibytesIsRefused) {
+    TempDir tmp;
+    tmp.write_file("a.go", "package main\n");
+    Config config;
+    config.project.root = tmp.path().string();
+    MasterIndex indexer(config);
+    SearchEngine engine(indexer);
+    IndexServer server(config, indexer, &engine);
+    const auto addr = test::next_test_server_address();
+    server.set_socket_path(addr);
+    ASSERT_TRUE(server.start());
+
+    auto cli = test::make_test_http_client(addr);
+    const std::string over_cap((16u * 1024u * 1024u) + 1u, 'x');
+    auto refused = cli.Post("/search", over_cap, "application/json");
+    ASSERT_TRUE(refused);
+    EXPECT_EQ(refused->status, 413);
+
+    auto ping = cli.Get("/ping");
+    ASSERT_TRUE(ping);
+    EXPECT_EQ(ping->status, 200);
+    EXPECT_TRUE(server.shutdown());
+}
+
+#ifndef _WIN32
+TEST(ServerCapsTest, SocketIsReachableByItsOwnerOnly) {
+    TempDir tmp;
+    tmp.write_file("a.go", "package main\n");
+    Config config;
+    config.project.root = tmp.path().string();
+    MasterIndex indexer(config);
+    SearchEngine engine(indexer);
+    IndexServer server(config, indexer, &engine);
+    const auto addr = test::next_test_server_address();
+    server.set_socket_path(addr);
+    ASSERT_TRUE(server.start());
+
+    struct stat socket_stat {};
+    ASSERT_EQ(::stat(addr.c_str(), &socket_stat), 0);
+    EXPECT_EQ(socket_stat.st_mode & 0777, 0600u);
+    struct stat runtime_dir_stat {};
+    ASSERT_EQ(::stat(user_runtime_dir().c_str(), &runtime_dir_stat), 0);
+    EXPECT_EQ(runtime_dir_stat.st_mode & 0777, 0700u);
+    EXPECT_TRUE(server.shutdown());
+}
+
+// A half-sent request holds a worker for the 30 s read timeout, so every worker
+// and queue slot can be filled deterministically. The connection after that is
+// closed at once instead of waiting without bound.
+TEST(ServerCapsTest, ConnectionsBeyondWorkersAndQueueAreClosed) {
+    TempDir tmp;
+    tmp.write_file("a.go", "package main\n");
+    Config config;
+    config.project.root = tmp.path().string();
+    MasterIndex indexer(config);
+    SearchEngine engine(indexer);
+    IndexServer server(config, indexer, &engine);
+    const auto addr = test::next_test_server_address();
+    server.set_socket_path(addr);
+    ASSERT_TRUE(server.start());
+
+    auto connect_half_sent_request = [&addr]() {
+        int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+        EXPECT_GE(fd, 0);
+        sockaddr_un sun{};
+        sun.sun_family = AF_UNIX;
+        std::strncpy(sun.sun_path, addr.c_str(), sizeof(sun.sun_path) - 1);
+        EXPECT_EQ(::connect(fd, reinterpret_cast<sockaddr*>(&sun), sizeof(sun)), 0);
+        constexpr std::string_view kPartial = "POST /ping HTTP/1.1\r\n";
+        (void)!::send(fd, kPartial.data(), kPartial.size(), MSG_NOSIGNAL);
+        return fd;
+    };
+
+    const size_t capacity =
+        std::max<size_t>(std::thread::hardware_concurrency(),
+                         kMinServerWorkerThreads) +
+        kMaxQueuedRequests;
+    std::vector<int> held;
+    held.reserve(capacity);
+    for (size_t i = 0; i < capacity; ++i) {
+        held.push_back(connect_half_sent_request());
+    }
+
+    // Past capacity, a connection reads EOF. Connections are accepted
+    // asynchronously, so give the accept thread a few tries to reach the cap
+    // before one is refused; a server with no cap would refuse none of them.
+    int refused_connections = 0;
+    constexpr int kOverflowAttempts = 16;
+    for (int i = 0; i < kOverflowAttempts; ++i) {
+        const int fd = connect_half_sent_request();
+        pollfd pfd{fd, POLLIN, 0};
+        if (::poll(&pfd, 1, /*timeout_ms=*/2000) > 0) {
+            char byte = 0;
+            if (::recv(fd, &byte, 1, 0) <= 0) ++refused_connections;
+        }
+        held.push_back(fd);
+        if (refused_connections > 0) break;
+    }
+    EXPECT_GT(refused_connections, 0)
+        << "connections past workers+queue were neither refused nor closed";
+
+    for (const int fd : held) ::close(fd);
+
+    // Releasing the held connections frees the pool: the server recovers.
+    auto cli = test::make_test_http_client(addr);
+    cli.set_read_timeout(std::chrono::seconds{30});
+    auto ping = cli.Get("/ping");
+    ASSERT_TRUE(ping);
+    EXPECT_EQ(ping->status, 200);
+    EXPECT_TRUE(server.shutdown());
+}
+#endif  // !_WIN32
 
 // -- Build ID tests -----------------------------------------------------------
 
