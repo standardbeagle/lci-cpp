@@ -2662,6 +2662,93 @@ TEST(SameNameCallGrouping, ScalesWithSnapshotSizeNotCandidates) {
         << "x the 200-candidate time on the same 200k-ref snapshot";
 }
 
+namespace {
+
+// Outer git repo whose tracked subdirectory `sub/` is the project root —
+// the monorepo shape the impact and hotspot gates accept via tracks_any.
+// Git reports every path repo-relative ("sub/main.go"); the index spells
+// them under the project root.
+std::filesystem::path make_subdir_project_repo(const std::string& slug) {
+    namespace fs = std::filesystem;
+    fs::path repo = lci::test::unique_temp_dir(slug);
+    fs::remove_all(repo);
+    fs::create_directories(repo / "sub");
+    EXPECT_TRUE(lci::test::run_git(repo, "init -q"));
+    const char* commit =
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m ";
+    std::ofstream(repo / "sub" / "main.go")
+        << "package main\n\n"
+           "func main() { helper() }\n\n"
+           "func helper() int {\n"
+           "\tif true {\n\t\treturn 1\n\t}\n"
+           "\treturn 0\n"
+           "}\n";
+    EXPECT_TRUE(lci::test::run_git(repo, "add -A"));
+    EXPECT_TRUE(lci::test::run_git(repo, std::string(commit) + "one"));
+    return repo;
+}
+
+}  // namespace
+
+// The impact seed join keyed index symbols by PROJECT-relative path while
+// get_changed_scope returns REPO-relative paths, so a project rooted in a
+// subdirectory of its repo reported changed_symbols=0 for every edit.
+TEST(CodeInsightImpact, SubdirectoryProjectRootSeesItsChanges) {
+    namespace fs = std::filesystem;
+    fs::path repo = make_subdir_project_repo("lci_impact_subdir_");
+    // WIP edit inside helper's body.
+    std::ofstream(repo / "sub" / "main.go")
+        << "package main\n\n"
+           "func main() { helper() }\n\n"
+           "func helper() int {\n"
+           "\tif true {\n\t\treturn 2\n\t}\n"
+           "\treturn 0\n"
+           "}\n";
+
+    Config config;
+    config.project.root = (repo / "sub").string();
+    MasterIndex indexer(config);
+    indexer.index_directory(config.project.root);
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    params["mode"] = "detailed";
+    params["analysis"] = "impact";
+    params["scope"] = "wip";
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("changed_symbols=1 "), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("helper (main.go:5)"), std::string::npos)
+        << "locations stay project-relative\n" << result.text;
+
+    fs::remove_all(repo);
+}
+
+// The hotspot risk join keyed complexity by PROJECT-relative path while the
+// hotspots carry git log's REPO-relative paths, so a subdirectory project
+// never printed a RISK MATRIX.
+TEST(CodeInsightGitHotspots, SubdirectoryProjectRootGetsARiskMatrix) {
+    namespace fs = std::filesystem;
+    fs::path repo = make_subdir_project_repo("lci_risk_subdir_");
+
+    Config config;
+    config.project.root = (repo / "sub").string();
+    MasterIndex indexer(config);
+    indexer.index_directory(config.project.root);
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    params["mode"] = "git_hotspots";
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("== RISK MATRIX =="), std::string::npos)
+        << result.text;
+
+    fs::remove_all(repo);
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci
