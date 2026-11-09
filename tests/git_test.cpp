@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #if !defined(_WIN32)
 #include <sys/types.h>
@@ -771,6 +772,106 @@ TEST(GitAnalysis, MnemonicPrefixAndQuotedPathStillScopesChangedSymbols) {
         << "the changed function in café.go must survive change-scoping";
     EXPECT_EQ(report.summary.files_changed, 1);
 
+    fs::remove_all(repo);
+}
+
+namespace {
+
+// Two-commit Go repo whose second commit modifies exactly one function in
+// `file_name`. Optional `git config` lines are applied before the commits.
+std::filesystem::path make_one_change_repo(
+    const std::string& slug, const std::string& file_name,
+    const std::vector<std::string>& config_lines) {
+    namespace fs = std::filesystem;
+    fs::path repo = fs::temp_directory_path() /
+                    ("lci_git_" + slug + "_" +
+                     std::to_string(std::chrono::steady_clock::now()
+                                        .time_since_epoch()
+                                        .count()));
+    fs::create_directories(repo);
+    EXPECT_TRUE(lci::test::run_git(repo, "init -q"));
+    for (const auto& line : config_lines) {
+        EXPECT_TRUE(lci::test::run_git(repo, "config " + line));
+    }
+    const char* commit =
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m ";
+    std::ofstream(repo / file_name)
+        << "package main\nfunc Original() int { return 1 }\n";
+    EXPECT_TRUE(lci::test::run_git(repo, "add -A"));
+    EXPECT_TRUE(lci::test::run_git(repo, std::string(commit) + "one"));
+    std::ofstream(repo / file_name)
+        << "package main\nfunc Original() int { return 2 }\n";
+    EXPECT_TRUE(lci::test::run_git(repo, "add -A"));
+    EXPECT_TRUE(lci::test::run_git(repo, std::string(commit) + "two"));
+    return repo;
+}
+
+int range_symbols_modified(const std::filesystem::path& repo) {
+    Provider p;
+    EXPECT_TRUE(Provider::create(repo.string(), p));
+    Config cfg = make_default_config();
+    cfg.project.root = repo.string();
+    MasterIndex index(cfg);
+    Analyzer analyzer(p, index);
+    AnalysisParams params = AnalysisParams::defaults();
+    params.scope = AnalysisScope::Range;
+    params.base_ref = "HEAD~1";
+    AnalysisReport report;
+    EXPECT_TRUE(analyzer.analyze(params, report));
+    return report.summary.symbols_modified;
+}
+
+}  // namespace
+
+// Range/WIP/Staged scopes ran porcelain `git diff`, which hands the patch to
+// a repo's diff.external program and paints it with color.diff=always even
+// into a pipe. Either config emptied or mangled the +++/@@ lines, so the
+// change-scope filter saw no hunks and git_analysis reported zero changes.
+// Reference for the precondition: raw porcelain git really is affected.
+TEST(GitAnalysis, RangeScopeIgnoresRepoDiffExternal) {
+    namespace fs = std::filesystem;
+    fs::path repo =
+        make_one_change_repo("diffext", "main.go", {"diff.external true"});
+    std::string raw;
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "diff", "-U0", "HEAD~1..HEAD", "--"}, "",
+        raw));
+    ASSERT_EQ(raw.find("@@"), std::string::npos)
+        << "diff.external must swallow the porcelain patch for this to bite";
+    EXPECT_EQ(range_symbols_modified(repo), 1);
+    fs::remove_all(repo);
+}
+
+TEST(GitAnalysis, RangeScopeIgnoresRepoColorDiffAlways) {
+    namespace fs = std::filesystem;
+    fs::path repo =
+        make_one_change_repo("diffcolor", "main.go", {"color.diff always"});
+    std::string raw;
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "diff", "-U0", "HEAD~1..HEAD", "--"}, "",
+        raw));
+    ASSERT_NE(raw.find('\x1b'), std::string::npos)
+        << "color.diff=always must colour piped output for this to bite";
+    EXPECT_EQ(range_symbols_modified(repo), 1);
+    fs::remove_all(repo);
+}
+
+// git appends a TAB to the ---/+++ header of any path containing a space
+// (diff.c, so patch(1) can find where the name ends). The parser kept the
+// TAB in the path, so "my file.go\t" matched no parsed symbol and the
+// change-scope filter dropped the file's changes.
+TEST(GitAnalysis, PathWithSpaceStillScopesChangedSymbols) {
+    namespace fs = std::filesystem;
+    fs::path repo = make_one_change_repo("space", "my file.go", {});
+    std::string raw;
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "diff", "--no-prefix", "HEAD~1..HEAD",
+         "--"},
+        "", raw));
+    ASSERT_NE(raw.find("+++ my file.go\t"), std::string::npos)
+        << "git must emit the trailing TAB for this test to bite";
+    EXPECT_EQ(range_symbols_modified(repo), 1);
     fs::remove_all(repo);
 }
 
