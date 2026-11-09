@@ -599,7 +599,9 @@ class SideEffectsSymbolModeTest : public ::testing::Test {
 
         analyzer_ = std::make_unique<SideEffectAnalyzer>("go");
         for (const char* f : {"a.go", "b.go"}) {
-            auto abs = (dir_ / f).string();
+            // Generic form: the handler looks functions up by the indexer's
+            // file path, which uses '/' on every platform.
+            auto abs = (dir_ / f).generic_string();
             int column = (f[0] == 'a') ? a_column : b_column;
             analyzer_->begin_function("dup", abs, 3, 3, column);
             // Distinct markers: a.go writes a global (impure), b.go is pure.

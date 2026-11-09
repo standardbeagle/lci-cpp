@@ -551,7 +551,9 @@ TEST(SearchRgDifferentialTest, InvertMatchEqualsInvertOracle) {
     build_flag_corpus(corpus, labels);
 
     Config cfg = make_default_config();
-    cfg.project.root = corpus.path().string();
+    // Generic form: result paths use '/' on every platform and engine_hits()
+    // strips this root from them to compare against the oracle's relative paths.
+    cfg.project.root = corpus.path().generic_string();
     MasterIndex mi(cfg);
     ASSERT_TRUE(mi.index_directory(corpus.path().string()));
     SearchEngine engine(mi);
@@ -593,7 +595,9 @@ TEST(SearchRgDifferentialTest, ExcludeCommentsDropsCommentOnlyLines) {
     build_flag_corpus(corpus, labels);
 
     Config cfg = make_default_config();
-    cfg.project.root = corpus.path().string();
+    // Generic form: result paths use '/' on every platform and engine_hits()
+    // strips this root from them to compare against the oracle's relative paths.
+    cfg.project.root = corpus.path().generic_string();
     MasterIndex mi(cfg);
     ASSERT_TRUE(mi.index_directory(corpus.path().string()));
     SearchEngine engine(mi);
