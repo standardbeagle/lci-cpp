@@ -529,6 +529,41 @@ TEST(MasterIndexTest, IncrementalWritesRefuseSymlinksTheScanWouldRefuse) {
 }
 #endif
 
+// The bulk producer loads a batch, the content store's LRU then evicts past
+// max_memory_mb, and only after that do workers parse the batch. A worker
+// that read an evicted file got empty bytes: no symbols, and a trigram bloom
+// and postings built from nothing, so narrowing certified every pattern
+// absent and the file was silently unsearchable. Deterministic: 20 files of
+// ~100 KB in one batch (< 256) against a 1 MiB cap evict before any parse.
+TEST(MasterIndexTest, FilesEvictedBeforeParseAreStillIndexed) {
+    TempDir dir;
+    std::string filler;
+    for (int i = 0; i < 2000; ++i) {
+        filler += "// filler line " + std::to_string(i) +
+                  " padding padding padding\n";
+    }
+    constexpr int kFiles = 20;
+    for (int n = 0; n < kFiles; ++n) {
+        dir.write_file("f" + std::to_string(n) + ".go",
+                       "package main\n" + filler + "func Func" +
+                           std::to_string(n) + "() int { return 1 } // needle_" +
+                           std::to_string(n) + "_end\n");
+    }
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.performance.max_memory_mb = 1;  // far below the 2 MB corpus
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    for (int n = 0; n < kFiles; ++n) {
+        const std::string id = std::to_string(n);
+        EXPECT_FALSE(mi.search("needle_" + id + "_end", 0).empty())
+            << "f" << id << ".go is indexed but unsearchable";
+        EXPECT_FALSE(mi.search_definitions("Func" + id).empty())
+            << "f" << id << ".go lost its symbols";
+    }
+}
+
 TEST(MasterIndexTest, IndexFileNonexistent) {
     Config cfg = make_default_config();
     MasterIndex mi(cfg);
