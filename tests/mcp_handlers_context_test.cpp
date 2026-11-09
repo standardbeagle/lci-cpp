@@ -4,6 +4,7 @@
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/context_manifest.h>
 #include <lci/core/context_lookup.h>
+#include <lci/core/portable.h>
 #include <lci/idcodec.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/context_manifest_expander.h>
@@ -2592,6 +2593,7 @@ struct GctxChildRunner {
 } g_gctx_child_runner;
 
 std::string child_get_context_output(const std::filesystem::path& dir) {
+    std::string exe = portable::executable_path().string();
     int fds[2];
     if (pipe(fds) != 0) return {};
     pid_t pid = fork();
@@ -2603,12 +2605,8 @@ std::string child_get_context_output(const std::filesystem::path& dir) {
         // STDOUT_FILENO==1 only after dup2; use the fixed number.
         setenv("LCI_GCTX_CHILD_DIR", dir.string().c_str(), 1);
         setenv("LCI_GCTX_CHILD_FD", fdbuf, 1);
-        char exe[4096];
-        ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-        if (len <= 0) _exit(1);
-        exe[len] = '\0';
-        char* argv[] = {exe, nullptr};
-        execv(exe, argv);
+        char* argv[] = {exe.data(), nullptr};
+        execv(exe.c_str(), argv);
         _exit(1);
     }
     close(fds[1]);
