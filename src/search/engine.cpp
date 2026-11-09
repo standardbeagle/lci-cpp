@@ -1126,7 +1126,12 @@ std::vector<SearchMatch> find_content_matches(
             RE2::Options ro(RE2::Quiet);
             ro.set_log_errors(false);
             ro.set_case_sensitive(!options.case_insensitive);
-            cached_re = std::make_unique<RE2>(pattern, ro);
+            // Whole-file input, so `(?m)` is what makes `^` and `$` mean a line,
+            // as they do in `lci search -E`. `$` still stops short of a CRLF
+            // file's \r here: RE2 knows only \n as a line end.
+            std::string multiline = "(?m)";
+            multiline.append(pattern);
+            cached_re = std::make_unique<RE2>(multiline, ro);
             cached_key = std::move(key);
         }
         if (!cached_re->ok()) {

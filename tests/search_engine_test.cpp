@@ -998,6 +998,31 @@ TEST(SearchEngineRegexValidation, ValidRegexStillSearches) {
     EXPECT_GE(results.size(), 1u);
 }
 
+TEST(SearchEngineRegexValidation, AnchorsMatchAtEveryLine) {
+    TempDir dir;
+    dir.write_file("a.go", "package main\nfunc Alpha() {}\nvar Beta = 1\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.use_regex = true;
+
+    SearchStats stats;
+    const auto starts = engine.search("^func", opts, &stats);
+    EXPECT_TRUE(stats.error.empty()) << stats.error;
+    ASSERT_EQ(starts.size(), 1u);
+    EXPECT_EQ(starts[0].line, 2);
+
+    const auto ends = engine.search("= 1$", opts, &stats);
+    EXPECT_TRUE(stats.error.empty()) << stats.error;
+    ASSERT_EQ(ends.size(), 1u);
+    EXPECT_EQ(ends[0].line, 3);
+}
+
 // Criterion 5: a whole-word, exact-case hit must outrank a substring hit of
 // the same pattern in the same file. Pre-fix, score_result() derived the score
 // from the file class and the pattern text ONLY -- both identical here -- so
