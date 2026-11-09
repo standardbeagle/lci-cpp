@@ -237,7 +237,10 @@ Expansion directives in `x`: `callers[:N]`, `callees[:N]`, `implementations`,
 remaining token budget. Unknown directives are skipped.
 
 **Errors**: empty `refs`; no `to_file`/`to_string`; no `from_file`/`from_string`;
-file not found; invalid JSON / manifest; invalid `operation`.
+file not found; invalid JSON / manifest; invalid `operation`; a `to_file` that
+resolves outside the project root, lies under a `.git` directory, or names an
+existing file that is not a manifest (a save creates a new file or replaces a
+manifest, nothing else).
 
 **Not applicable**: index unavailable.
 
