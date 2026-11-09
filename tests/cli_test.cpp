@@ -720,42 +720,42 @@ TEST(GrepScopePaths, PathEscapingRootLeftUnchanged) {
 
 TEST(RegexLiteralSeeds, AlternationYieldsEveryBranch) {
     auto seeds = grep_filters::regex_literal_seeds(
-        R"(\b(?:panic|unreachable|todo|unimplemented)!\s*\()");
+        R"(\b(?:panic|unreachable|todo|unimplemented)!\s*\()", false);
     EXPECT_EQ(seeds, (std::vector<std::string>{
                          "panic", "unreachable", "todo", "unimplemented"}));
 }
 
 TEST(RegexLiteralSeeds, HttpStatusAlternation) {
     auto seeds = grep_filters::regex_literal_seeds(
-        R"(\b(?:status|sendStatus|writeHead)\s*\(\s*[45]\d\d\b)");
+        R"(\b(?:status|sendStatus|writeHead)\s*\(\s*[45]\d\d\b)", false);
     EXPECT_EQ(seeds, (std::vector<std::string>{"status", "sendStatus",
                                                "writeHead"}));
 }
 
 TEST(RegexLiteralSeeds, EscapedDotJoinsRuns) {
     auto seeds =
-        grep_filters::regex_literal_seeds(R"(\berrors\.New\s*\()");
+        grep_filters::regex_literal_seeds(R"(\berrors\.New\s*\()", false);
     EXPECT_EQ(seeds, (std::vector<std::string>{"errors.New"}));
 }
 
 TEST(RegexLiteralSeeds, QuantifierDropsPrecedingChar) {
     // `abc*` can match "ab" — the run must not include the quantified char.
-    auto star = grep_filters::regex_literal_seeds("abcd*efg");
+    auto star = grep_filters::regex_literal_seeds("abcd*efg", false);
     EXPECT_EQ(star, (std::vector<std::string>{"abc", "efg"}));
     // `+` requires its char, so the full run stands.
-    auto plus = grep_filters::regex_literal_seeds("abcd+");
+    auto plus = grep_filters::regex_literal_seeds("abcd+", false);
     EXPECT_EQ(plus, (std::vector<std::string>{"abcd"}));
-    auto brace = grep_filters::regex_literal_seeds("abcd{2,3}x");
+    auto brace = grep_filters::regex_literal_seeds("abcd{2,3}x", false);
     EXPECT_EQ(brace, (std::vector<std::string>{"abc"}));
 }
 
 TEST(RegexLiteralSeeds, ShortRunsAndPureMetaYieldNothing) {
-    EXPECT_TRUE(grep_filters::regex_literal_seeds(R"(\d+)").empty());
-    EXPECT_TRUE(grep_filters::regex_literal_seeds("a|b").empty());
+    EXPECT_TRUE(grep_filters::regex_literal_seeds(R"(\d+)", false).empty());
+    EXPECT_TRUE(grep_filters::regex_literal_seeds("a|b", false).empty());
 }
 
 TEST(RegexLiteralSeeds, DuplicateRunsDedup) {
-    auto seeds = grep_filters::regex_literal_seeds("foo.*foo.*bar");
+    auto seeds = grep_filters::regex_literal_seeds("foo.*foo.*bar", false);
     EXPECT_EQ(seeds, (std::vector<std::string>{"foo", "bar"}));
 }
 
@@ -769,39 +769,39 @@ TEST(RegexLiteralSeeds, DuplicateRunsDedup) {
 
 TEST(AlternationSeedTest, UnseededBranchForcesFallback) {
     // The root-cause pattern: "ab" has no >=3-char literal.
-    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("foobar|ab"));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("foobar|ab", false));
     // Nested group, same defect shape.
-    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("(foobar|ab)"));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("(foobar|ab)", false));
     // Optional group: `x(?:abc)?` can match "x", which carries no seed.
-    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("x(?:abc)?"));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("x(?:abc)?", false));
     // Quantified-away runs: `ab*` can match "a"; `abc{0,2}` only guarantees
     // "ab" (the `{0,2}` makes the 'c' optional) — neither reaches 3 chars.
-    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("ab*"));
-    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("abc{0,2}"));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("ab*", false));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("abc{0,2}", false));
     // Pure meta.
-    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\d+)"));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\d+)", false));
     // Escapes whose argument bytes are not literal text: the extractor
     // banks "41bc" / "Labc" as seeds no match carries, so claiming
     // "seeded" here would silently drop every match (review finding).
-    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\x41bc)"));
-    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\x{41}bcd)"));
-    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\pLabc)"));
-    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\Qa.b\Ecd)"));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\x41bc)", false));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\x{41}bcd)", false));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\pLabc)", false));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\Qa.b\Ecd)", false));
 }
 
 TEST(AlternationSeedTest, SeededPatternKeepsTrigramIndex) {
     // Every branch seedable -> indexed fast path stays.
-    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("foobar|barbaz"));
-    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("foobar"));
+    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("foobar|barbaz", false));
+    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("foobar", false));
     // A required outer literal covers an unseedable inner alternation:
     // every match of `foo(bar|ab)` contains "foo".
-    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("foo(bar|ab)"));
+    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("foo(bar|ab)", false));
     // `+` requires its char; `*` only drops the one quantified char.
-    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("abcd+"));
-    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("abcde*"));
+    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("abcd+", false));
+    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("abcde*", false));
     // The production detector that motivated the multi-seed extractor.
     EXPECT_TRUE(grep_filters::regex_every_match_has_seed(
-        R"(\b(?:panic|unreachable|todo|unimplemented)!\s*\()"));
+        R"(\b(?:panic|unreachable|todo|unimplemented)!\s*\()", false));
 }
 
 // The one comment-classification predicate, shared by CLI and MCP.

@@ -584,7 +584,8 @@ std::vector<std::string> resolve_scope_paths(
 /// can match "ab", so "abc" would over-narrow; `+` requires its char and
 /// keeps it. Runs inside a wholly-optional group can still over-narrow
 /// (pre-existing bound, unchanged).
-std::vector<std::string> regex_literal_seeds(const std::string& re) {
+std::vector<std::string> regex_literal_seeds(const std::string& re,
+                                             bool /*case_insensitive*/) {
     std::vector<std::string> seeds;
     std::string cur;
     auto take = [&]() {
@@ -794,7 +795,8 @@ struct SeedCoverage {
 };
 }  // namespace
 
-bool regex_every_match_has_seed(std::string_view pattern) {
+bool regex_every_match_has_seed(std::string_view pattern,
+                                bool /*case_insensitive*/) {
     SeedCoverage p{pattern, 0};
     const bool covered = p.parse_alt();
     return covered && !p.unsure;

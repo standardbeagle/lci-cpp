@@ -275,7 +275,8 @@ int run_grep(const GlobalFlags& flags, const GrepCommandOptions& options) {
             // the seeded branches and SILENTLY drop every row only the
             // unseeded branch matches. `lci grep` has no full-corpus regex
             // scan, so fail loudly instead of answering wrong.
-            if (!grep_filters::regex_every_match_has_seed(all_patterns[i])) {
+            if (!grep_filters::regex_every_match_has_seed(all_patterns[i],
+                                                          case_insensitive)) {
                 std::cerr << "Error: --regex pattern '" << all_patterns[i]
                           << "' has an alternation branch with no >=3-char "
                              "literal substring; the trigram fast path "
@@ -284,7 +285,8 @@ int run_grep(const GlobalFlags& flags, const GrepCommandOptions& options) {
                              "(use `lci search -E` for that).\n";
                 return 1;
             }
-            for (auto& seed : regex_literal_seeds(all_patterns[i])) {
+            for (auto& seed :
+                 regex_literal_seeds(all_patterns[i], case_insensitive)) {
                 if (std::find(grep_seeds.begin(), grep_seeds.end(), seed) ==
                     grep_seeds.end()) {
                     grep_seeds.push_back(std::move(seed));

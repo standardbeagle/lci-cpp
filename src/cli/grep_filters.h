@@ -59,7 +59,8 @@ nlohmann::json widen_context_blocks(nlohmann::json results, int context_lines);
 /// Still heuristic for patterns whose only runs are optional (`x(?:abc)?`),
 /// which can match text containing no run at all — same bound as before,
 /// now over a strictly larger row set.
-std::vector<std::string> regex_literal_seeds(const std::string& pattern);
+std::vector<std::string> regex_literal_seeds(const std::string& pattern,
+                                             bool case_insensitive);
 
 /// True iff every match of `pattern` necessarily contains a >=3-char literal
 /// run that regex_literal_seeds banks — i.e. the trigram-seeded fast path
@@ -67,7 +68,8 @@ std::vector<std::string> regex_literal_seeds(const std::string& pattern);
 /// seedable literal (`foobar|ab`), for pure-meta patterns, and on any
 /// construct the analysis is unsure about (conservative: the cost of false
 /// is a full scan; the cost of a wrong true is a silently dropped branch).
-bool regex_every_match_has_seed(std::string_view pattern);
+bool regex_every_match_has_seed(std::string_view pattern,
+                                bool case_insensitive);
 
 /// Resolves the trailing `lci grep/search <path>...` positionals to the
 /// ROOT-relative form the index matches against. Each token is interpreted as

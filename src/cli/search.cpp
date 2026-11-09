@@ -368,7 +368,7 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
     bool regex_full_scan = false;
     std::vector<std::string> regex_seeds;
     if (use_regex) {
-        regex_seeds = regex_literal_seeds(effective_pattern);
+        regex_seeds = regex_literal_seeds(effective_pattern, case_insensitive);
         RE2::Options regex_opts(RE2::Quiet);
         regex_opts.set_case_sensitive(!case_insensitive);
         regex_opts.set_log_errors(false);
@@ -383,7 +383,8 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
         }
         regex_filter = std::move(re);
         if (!regex_seeds.empty() &&
-            grep_filters::regex_every_match_has_seed(effective_pattern)) {
+            grep_filters::regex_every_match_has_seed(effective_pattern,
+                                                     case_insensitive)) {
             // Fast path: seed-then-filter via the indexed server search.
             // ALL literal runs seed (union) — a single longest-run seed
             // was alternation-blind and silently dropped every branch
