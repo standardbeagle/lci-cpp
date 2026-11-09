@@ -3745,10 +3745,18 @@ TEST(CliStatusTest, ThreadsAndRssMatchServerStatusJson) {
     ASSERT_NE(rss_pos, std::string::npos) << text_out;
     const double text_rss_mb = std::atof(text_out.c_str() + rss_pos + 4);
 
-    EXPECT_EQ(text_threads, server_threads)
-        << "text Threads: must be the server's /stats value, not the CLI's "
-           "own /proc/self\nserver threads: "
+    // The server is live, so a sanitizer's background thread or a worker can
+    // appear between the two reads: compare within a small tolerance, as RSS
+    // does below. The floor is what keeps this discriminating: the server runs
+    // at least kMinServerWorkerThreads workers and the CLI's own process runs
+    // a handful.
+    EXPECT_NEAR(text_threads, server_threads, 4)
+        << "text Threads: must be the server's /stats value\nserver threads: "
         << server_threads << "\ntext: " << text_out;
+    EXPECT_GE(text_threads, static_cast<int>(lci::kMinServerWorkerThreads))
+        << "text Threads: read the CLI's own /proc/self instead of the "
+           "server's /stats\ntext: "
+        << text_out;
     // Text prints RSS with %.1f and the live server's RSS can drift between
     // the in-process query and the CLI run; the tolerance covers display
     // rounding plus drift, while remaining far tighter than the CLI-vs-server
