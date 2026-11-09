@@ -38,8 +38,9 @@ jobs:
     runs-on: [self-hosted, linux, lci-linux]
     # Hard ceiling so a hung step (e.g. a wedged vcpkg/dep download) can never
     # occupy the self-hosted runner indefinitely — GitHub kills the job and
-    # frees the runner. Generous vs the ~30-40 min normal Linux build.
-    timeout-minutes: 60
+    # frees the runner. Generous vs the ~30-40 min normal Linux build; the
+    # instrumented legs run the whole suite at two jobs and need more.
+    timeout-minutes: ${{ matrix.timeout_minutes || 60 }}
     # Cap parallelism: this self-hosted runner's 12 cores share a memory-capped
     # WSL VM; an uncapped `--parallel` compile spiked RAM and froze the VM. 6
     # halves peak memory. cmake/ctest honor these when --parallel has no number.
@@ -54,8 +55,8 @@ jobs:
           - { cc: clang-18, cxx: clang++-18, preset: release }
           - { cc: gcc-13,   cxx: g++-13,     preset: debug }
           # Sanitizers are expensive — main only.
-          - { cc: gcc-13,   cxx: g++-13,     preset: sanitizer, main_only: true }
-          - { cc: gcc-13,   cxx: g++-13,     preset: tsan,      main_only: true }
+          - { cc: gcc-13,   cxx: g++-13,     preset: sanitizer, main_only: true, timeout_minutes: 150 }
+          - { cc: gcc-13,   cxx: g++-13,     preset: tsan,      main_only: true, timeout_minutes: 150 }
     name: linux ${{ matrix.cc }} / ${{ matrix.preset }}
     steps:
       - uses: actions/checkout@v4
