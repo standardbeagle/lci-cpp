@@ -889,12 +889,17 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             // product of the two normalized ranks; quadrant labels follow
             // the CodeScene convention.
             if (!report.hotspots.empty()) {
+                // Keyed repo-relative: hotspot paths come from git log, so a
+                // project rooted in a repo subdirectory must re-anchor its
+                // index paths under the repo to join at all.
                 absl::flat_hash_map<std::string, int> max_cc_by_rel;
                 {
+                    const git::RepoPathMapper to_repo(
+                        std::string(project_root), provider.repo_root());
                     auto rt_snap = indexer.ref_tracker().pin();
                     for (auto fid : indexer.get_all_file_ids()) {
-                        std::string rel = git::normalize_rel(
-                            indexer.get_file_path(fid), project_root);
+                        std::string rel =
+                            to_repo.to_repo_rel(indexer.get_file_path(fid));
                         int max_cc = 0;
                         for (const auto& sym :
                              rt_snap->get_file_enhanced_symbols(fid)) {
@@ -1085,8 +1090,13 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             absl::flat_hash_map<SymbolID,
                                 std::pair<std::string, std::string>>
                 sym_meta;  // id -> (name, location)
+            // `changed` is keyed repo-relative (git's spelling); locations
+            // stay project-relative like every other code_insight path.
+            const git::RepoPathMapper to_repo(std::string(project_root),
+                                              provider.repo_root());
             for (const auto& f : files_data) {
                 std::string rel = git::normalize_rel(f.path, project_root);
+                const std::string repo_rel = to_repo.to_repo_rel(f.path);
                 for (const auto* sym : f.symbols) {
                     if (sym == nullptr) continue;
                     auto t = sym->symbol.type;
@@ -1097,7 +1107,7 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
                     sym_meta[sym->id] = {
                         sym->symbol.name,
                         rel + ":" + std::to_string(sym->symbol.line)};
-                    if (changed.contains_symbol(rel, *sym)) {
+                    if (changed.contains_symbol(repo_rel, *sym)) {
                         seeds.push_back(
                             {sym->id, sym->symbol.name,
                              rel + ":" +
