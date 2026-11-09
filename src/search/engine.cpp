@@ -13,6 +13,7 @@
 #include <re2/re2.h>
 
 #include <algorithm>
+#include <limits>
 #include <cctype>
 #include <memory>
 #include <string>
@@ -1306,22 +1307,18 @@ int SearchEngine::process_file(
     // table lookup on the extension, so this is a few byte compares.
     const LangId file_lang = language_info_for_path(path).language;
 
-    // Honor a caller-set per-file cap (options.max_count_per_file); otherwise
-    // scan up to the rows this file can contribute to the answer. Retention,
-    // not scanning, is what the per-file bound limits.
-    //
-    // The old scan left max_count_per_file at 0, so find_content_matches fell
-    // back to the hidden kMaxMatchesPerFile=100 default and silently truncated
-    // dense files (a 601-match file returned 100 rows and lost the tail -- the
-    // CLI paging contract SearchPagingTest pins). execute_search had avoided
-    // this by setting the budget from the remaining max_results. Set it here
-    // from per_file_cap (== the output cap), which is the most rows this file
-    // can ever place in the answer; per_file_cap<=0 means unbounded output and
-    // leaves the historical default in place.
+    // Scan EVERY occurrence. per_file_cap bounds the rows this file RETAINS
+    // (the top-quality pending set below); it must never bound the
+    // occurrences considered. Truncating raw byte offsets to the cap ran
+    // before line dedup, the comment filter and ranking, so two hits on one
+    // line spent two slots, comment lines spent slots and yielded nothing,
+    // the file's best row past the cap was never ranked, total_found counted
+    // only the prefix, and invert reported matching lines past the cap.
+    // options.max_count_per_file is grep -m: it caps matching LINES that
+    // survive the filters, applied in the loops below (0 = unlimited).
     SearchOptions scan_options = options;
-    if (scan_options.max_count_per_file <= 0 && per_file_cap > 0) {
-        scan_options.max_count_per_file = per_file_cap;
-    }
+    scan_options.max_count_per_file = std::numeric_limits<int>::max();
+    const int line_cap = options.max_count_per_file;
     auto matches = find_matches(content_sv, pattern, scan_options);
     // Invert reports non-matching lines, so a file with zero matches is the
     // most productive input there is -- it contributes all of its lines.
@@ -1404,12 +1401,17 @@ int SearchEngine::process_file(
     std::vector<PendingRow> pending;
     if (per_file_cap > 0) pending.reserve(static_cast<size_t>(per_file_cap));
 
-    auto worst_pending = [&]() -> size_t {
-        size_t worst = 0;
+    // The worst retained slot is cached and recomputed only after a
+    // replacement. Every occurrence in the file reaches keep_pending, so a
+    // per-call rescan would cost O(occurrences x per_file_cap) on a dense
+    // file; quality takes a handful of discrete values, so replacements --
+    // the only rescans -- are bounded by per_file_cap x those levels.
+    size_t worst_slot = 0;
+    auto rescan_worst = [&]() {
+        worst_slot = 0;
         for (size_t i = 1; i < pending.size(); ++i) {
-            if (pending[i].quality < pending[worst].quality) worst = i;
+            if (pending[i].quality < pending[worst_slot].quality) worst_slot = i;
         }
-        return worst;
     };
     auto keep_pending = [&](PendingRow row) {
         if (per_file_cap <= 0) {
@@ -1418,11 +1420,13 @@ int SearchEngine::process_file(
         }
         if (pending.size() < static_cast<size_t>(per_file_cap)) {
             pending.push_back(row);
+            if (pending.size() == static_cast<size_t>(per_file_cap))
+                rescan_worst();
             return;
         }
-        size_t worst = worst_pending();
-        if (row.quality > pending[worst].quality) {
-            pending[worst] = row;
+        if (row.quality > pending[worst_slot].quality) {
+            pending[worst_slot] = row;
+            rescan_worst();
         }
     };
 
@@ -1461,6 +1465,7 @@ int SearchEngine::process_file(
                     !line_is_comment_only_with_spans(
                         content_sv, line_start, i, file_lang, comment_spans,
                         span_pos)) {
+                    if (line_cap > 0 && match_count >= line_cap) break;
                     ++match_count;
                     if (per_file_cap <= 0 ||
                         static_cast<int>(out.size()) < per_file_cap) {
@@ -1505,6 +1510,8 @@ int SearchEngine::process_file(
                 continue;
             }
         }
+
+        if (line_cap > 0 && match_count >= line_cap) break;
 
         int col = match_start - cursor_line_start;
 
