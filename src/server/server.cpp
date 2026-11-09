@@ -613,6 +613,8 @@ bool IndexServer::start() {
 
     listen_thread_ = std::thread([this, win_port] {
         if (!svr_.bind_to_port("127.0.0.1", win_port)) {
+            std::fprintf(stderr, "Error: cannot listen on 127.0.0.1:%d\n",
+                         win_port);
             running_.store(false, std::memory_order_release);
             listener_bind_failed_.store(true, std::memory_order_release);
             return;
@@ -652,6 +654,7 @@ bool IndexServer::start() {
         const bool bound = svr_.bind_to_port(sock, 80);
         ::umask(old_umask);
         if (!bound) {
+            std::fprintf(stderr, "Error: cannot listen on %s\n", sock.c_str());
             running_.store(false, std::memory_order_release);
             listener_bind_failed_.store(true, std::memory_order_release);
             return;
