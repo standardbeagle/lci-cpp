@@ -774,6 +774,8 @@ TEST(GitAnalysis, MnemonicPrefixAndQuotedPathStillScopesChangedSymbols) {
     fs::remove_all(repo);
 }
 
+// POSIX only: the fake git is a shell script, which CreateProcess cannot run.
+#if !defined(_WIN32)
 // file_pattern used to be expanded through ls-files into one argv entry per
 // matching file: a large repo's "*.ts" overflowed ARG_MAX (E2BIG; 32KB on
 // Windows) and the whole hotspots report failed. The pattern must reach git
@@ -858,6 +860,7 @@ TEST(GitFrequency, FilePatternReachesGitAsOnePathspecArg) {
 
     fs::remove_all(base);
 }
+#endif
 
 #if !defined(_WIN32)
 // Hotspots (and collisions/ownership) were sorted on the score alone from
