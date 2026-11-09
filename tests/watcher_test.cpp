@@ -495,6 +495,56 @@ TEST(FileWatcherTest, DetectsFileModify) {
     EXPECT_TRUE(found_write);
 }
 
+// FSEvents reports resolved paths while the index keys files under project.root
+// (on macOS /var/... against /private/var/...), so an event under the resolved
+// root must be delivered under the configured one or it matches no indexed file.
+TEST(FileWatcherTest, EventUnderResolvedRootIsDispatchedUnderConfiguredRoot) {
+    TempDir real_root;
+    real_root.write_file("kept.go", "package main\n");
+    const fs::path link_root =
+        test::unique_temp_dir("lci_watcher_symlinked_root_");
+    fs::create_directory_symlink(real_root.path(), link_root);
+
+    Config cfg = make_default_config();
+    cfg.project.root = link_root.string();
+
+    std::vector<std::pair<std::string, FileEventType>> events;
+    {
+        FileWatcher watcher(cfg);
+        watcher.set_callback([&](const std::string& path, FileEventType type) {
+            events.emplace_back(path, type);
+        });
+        watcher.on_efsw_event(fs::canonical(real_root.path()).string() + "/",
+                              "kept.go", FileEventType::Write);
+    }
+    std::error_code ec;
+    fs::remove(link_root, ec);
+
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].first, (link_root / "kept.go").string());
+    EXPECT_EQ(events[0].second, FileEventType::Write);
+}
+
+// An unlink that FSEvents delivered as a modify is still a removal.
+TEST(FileWatcherTest, WriteOfMissingFileIsDispatchedAsRemove) {
+    TempDir tmp;
+    Config cfg = make_default_config();
+    cfg.project.root = tmp.path().string();
+
+    std::vector<std::pair<std::string, FileEventType>> events;
+    FileWatcher watcher(cfg);
+    watcher.set_callback([&](const std::string& path, FileEventType type) {
+        events.emplace_back(path, type);
+    });
+
+    watcher.on_efsw_event(tmp.path().string() + "/", "already_gone.go",
+                          FileEventType::Write);
+
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].second, FileEventType::Remove);
+    EXPECT_NE(events[0].first.find("already_gone.go"), std::string::npos);
+}
+
 TEST(FileWatcherTest, DetectsFileDelete) {
     TempDir tmp;
     tmp.write_file("to_delete.rs", "fn main() {}\n");

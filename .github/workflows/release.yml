@@ -220,11 +220,9 @@ jobs:
         run: cmake --build build/release --parallel
 
       # FSEvents teardown abort fixed by patch-efsw.cmake (drains+releases the
-      # dispatch queue on teardown). Only DetectsFileDelete stays excluded on
-      # macOS — efsw doesn't classify an FSEvents unlink as Action::Delete
-      # (tracked follow-up; see ci.yml macOS leg).
+      # dispatch queue on teardown).
       - name: Test (unit suite)
-        run: ./build/release/tests/lci_tests "--gtest_filter=-FileWatcherTest.DetectsFileDelete"
+        run: ./build/release/tests/lci_tests
 
       - name: Package
         run: |

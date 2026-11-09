@@ -65,6 +65,11 @@ struct FileWatcher::WatcherState {
 
 FileWatcher::FileWatcher(const Config& config) : config_(config) {
     gitignore_.load_gitignore(config.project.root);
+    std::error_code ec;
+    const fs::path resolved = fs::canonical(config.project.root, ec);
+    if (!ec && resolved != fs::path(config.project.root).lexically_normal()) {
+        resolved_root_ = resolved.string();
+    }
 }
 
 FileWatcher::~FileWatcher() {
@@ -164,6 +169,24 @@ bool FileWatcher::should_process_path(const std::string& path) const {
     return true;
 }
 
+std::string FileWatcher::under_configured_root(std::string path) const {
+    if (resolved_root_.empty() || !path.starts_with(resolved_root_)) {
+        return path;
+    }
+    const std::string_view rest =
+        std::string_view(path).substr(resolved_root_.size());
+    if (rest.empty() || (rest.front() != '/' && rest.front() != '\\')) {
+        return path;  // A sibling such as <root>-other, not under the root.
+    }
+    std::string configured = config_.project.root;
+    while (configured.size() > 1 &&
+           (configured.back() == '/' || configured.back() == '\\')) {
+        configured.pop_back();
+    }
+    configured.append(rest);
+    return configured;
+}
+
 // -- Event dispatch ----------------------------------------------------------
 
 void FileWatcher::dispatch_event(const std::string& path, FileEventType type) {
@@ -198,6 +221,17 @@ void FileWatcher::on_efsw_event(const std::string& dir,
         full_path.push_back('/');
     }
     full_path.append(filename);
+    full_path = under_configured_root(std::move(full_path));
+
+    // FSEvents coalesces and does not reliably classify an unlink as a delete:
+    // the event can arrive as an add or modify of a path that is already gone.
+    // A file that no longer exists is removed, whatever the event called it.
+    if (type == FileEventType::Create || type == FileEventType::Write) {
+        std::error_code exists_ec;
+        if (!fs::exists(full_path, exists_ec) && !exists_ec) {
+            type = FileEventType::Remove;
+        }
+    }
 
     // Filter directory events using the same exclude/gitignore rules so
     // generated/build/.git output never propagates.  efsw doesn't separate
