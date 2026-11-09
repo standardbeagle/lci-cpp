@@ -159,9 +159,34 @@ bool owned_private_dir(const std::filesystem::path& dir) {
 }  // namespace
 #endif
 
-std::string user_runtime_dir() {
+#ifndef _WIN32
+std::string select_user_runtime_dir(const char* xdg_runtime_dir,
+                                    const std::filesystem::path& fixed_base,
+                                    const std::filesystem::path& temp_base) {
     namespace fs = std::filesystem;
+    const std::string uid = std::to_string(static_cast<unsigned>(::getuid()));
     fs::path dir;
+    if (xdg_runtime_dir != nullptr && *xdg_runtime_dir != '\0' &&
+        std::strlen(xdg_runtime_dir) <= kMaxRuntimePrefix &&
+        owned_private_dir(xdg_runtime_dir)) {
+        dir = fs::path(xdg_runtime_dir) / "lci";
+    } else {
+        dir = fixed_base / ("lci-" + uid);
+    }
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (!owned_private_dir(dir)) {
+        // Someone else owns (or symlinked) the fixed path: fall back to the
+        // caller's temp dir rather than trust it.
+        dir = temp_base / ("lci-" + uid);
+        fs::create_directories(dir, ec);
+    }
+    ::chmod(dir.c_str(), 0700);
+    return dir.string();
+}
+#endif
+
+std::string user_runtime_dir() {
 #ifndef _WIN32
     // Sockets used to live under temp_directory_path(), i.e. the caller's
     // TMPDIR. TMPDIR differs per caller (worktrack gives every run its own,
@@ -171,30 +196,16 @@ std::string user_runtime_dir() {
     // a server that never listened voided agent turns fleet-wide. One fixed
     // per-user place answers both: the kernel's runtime dir when it is short
     // enough, else a fixed /tmp/lci-<uid> (not TMPDIR), checked to be ours.
-    const std::string uid = std::to_string(static_cast<unsigned>(::getuid()));
-    const char* xdg = std::getenv("XDG_RUNTIME_DIR");
-    if (xdg != nullptr && *xdg != '\0' && std::strlen(xdg) <= kMaxRuntimePrefix &&
-        owned_private_dir(xdg)) {
-        dir = fs::path(xdg) / "lci";
-    } else {
-        dir = fs::path("/tmp") / ("lci-" + uid);
-    }
-    std::error_code ec;
-    fs::create_directories(dir, ec);
-    if (!owned_private_dir(dir)) {
-        // Someone else owns (or symlinked) the fixed path: fall back to the
-        // caller's temp dir rather than trust it.
-        dir = fs::temp_directory_path() / ("lci-" + uid);
-        fs::create_directories(dir, ec);
-    }
-    ::chmod(dir.c_str(), 0700);
+    return select_user_runtime_dir(std::getenv("XDG_RUNTIME_DIR"), "/tmp",
+                                   std::filesystem::temp_directory_path());
 #else
     // %TEMP% is already per-user on Windows (sockets are TCP ports there).
-    dir = fs::temp_directory_path() / "lci-registry";
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / "lci-registry";
     std::error_code ec;
     fs::create_directories(dir, ec);
-#endif
     return dir.string();
+#endif
 }
 
 std::string get_socket_path() {

@@ -34,6 +34,19 @@ class WatchPipeline;
 /// environment, and the socket path always fits sun_path.
 std::string user_runtime_dir();
 
+#ifndef _WIN32
+/// The choice user_runtime_dir() makes, with its inputs explicit for tests:
+/// `<xdg_runtime_dir>/lci` when that dir is short and the caller's, else
+/// `<fixed_base>/lci-<uid>`, else `<temp_base>/lci-<uid>`. A candidate is used
+/// only if it is a real directory (not a symlink) owned by the caller whose
+/// mode is 0700 after chmod. Throws std::runtime_error when no candidate
+/// passes: another local user who pre-creates the fixed path must not get the
+/// sockets and registry files of this one.
+std::string select_user_runtime_dir(const char* xdg_runtime_dir,
+                                    const std::filesystem::path& fixed_base,
+                                    const std::filesystem::path& temp_base);
+#endif
+
 /// Returns the default Unix socket path for the LCI server.
 std::string get_socket_path();
 

@@ -610,6 +610,45 @@ TEST(ServerCapsTest, SocketIsReachableByItsOwnerOnly) {
     EXPECT_TRUE(server.shutdown());
 }
 
+// Another local user can pre-create /tmp/lci-<uid> (uids are public). A symlink
+// stands in for "not a directory the caller owns": owned_private_dir rejects it
+// by lstat exactly as it rejects a foreign uid. With BOTH candidates rejected,
+// the runtime dir must not be returned anyway, or the sockets and registry
+// files land where the other user controls them.
+TEST(ServerCapsTest, RuntimeDirRefusesWhenNoCandidateIsPrivate) {
+    TempDir fixed;
+    TempDir temp;
+    TempDir elsewhere;
+    const std::string name = "lci-" + std::to_string(::getuid());
+    std::filesystem::create_directory_symlink(elsewhere.path(),
+                                              fixed.path() / name);
+    std::filesystem::create_directory_symlink(elsewhere.path(),
+                                              temp.path() / name);
+    EXPECT_THROW(select_user_runtime_dir(nullptr, fixed.path(), temp.path()),
+                 std::runtime_error);
+}
+
+// The fallback is taken only when it verifies, and a pre-existing dir of ours
+// with a loose mode is tightened to 0700 before it is used.
+TEST(ServerCapsTest, RuntimeDirFallsBackOnlyToAVerifiedPrivateDir) {
+    TempDir fixed;
+    TempDir temp;
+    TempDir elsewhere;
+    const std::string name = "lci-" + std::to_string(::getuid());
+    std::filesystem::create_directory_symlink(elsewhere.path(),
+                                              fixed.path() / name);
+    std::filesystem::create_directory(temp.path() / name);
+    ASSERT_EQ(::chmod((temp.path() / name).c_str(), 0777), 0);
+
+    const std::string dir =
+        select_user_runtime_dir(nullptr, fixed.path(), temp.path());
+    EXPECT_EQ(dir, (temp.path() / name).string());
+    struct stat st {};
+    ASSERT_EQ(::lstat(dir.c_str(), &st), 0);
+    EXPECT_TRUE(S_ISDIR(st.st_mode));
+    EXPECT_EQ(st.st_mode & 0777, 0700u);
+}
+
 // A half-sent request holds a worker for the 30 s read timeout, so every worker
 // and queue slot can be filled deterministically. The connection after that is
 // closed at once instead of waiting without bound.
