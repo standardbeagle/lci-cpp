@@ -2732,6 +2732,18 @@ TEST(CodeInsightImpact, SubdirectoryProjectRootSeesItsChanges) {
 TEST(CodeInsightGitHotspots, SubdirectoryProjectRootGetsARiskMatrix) {
     namespace fs = std::filesystem;
     fs::path repo = make_subdir_project_repo("lci_risk_subdir_");
+    // A hotspot needs min_changes=2 commits touching the file.
+    std::ofstream(repo / "sub" / "main.go")
+        << "package main\n\n"
+           "func main() { helper() }\n\n"
+           "func helper() int {\n"
+           "\tif true {\n\t\treturn 3\n\t}\n"
+           "\treturn 0\n"
+           "}\n";
+    ASSERT_TRUE(lci::test::run_git(
+        repo,
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -am two"));
 
     Config config;
     config.project.root = (repo / "sub").string();
@@ -2743,7 +2755,12 @@ TEST(CodeInsightGitHotspots, SubdirectoryProjectRootGetsARiskMatrix) {
     params["mode"] = "git_hotspots";
     auto result = handle_code_insight(params, engine, indexer);
     ASSERT_FALSE(result.is_error) << result.text;
+    ASSERT_NE(result.text.find(" hotspots=1"), std::string::npos)
+        << "the fixture must form a hotspot for this test to bite\n"
+        << result.text;
     EXPECT_NE(result.text.find("== RISK MATRIX =="), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find("  sub/main.go risk="), std::string::npos)
         << result.text;
 
     fs::remove_all(repo);
