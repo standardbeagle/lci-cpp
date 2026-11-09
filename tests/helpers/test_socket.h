@@ -43,10 +43,14 @@ inline std::string next_test_server_address() {
 #ifdef _WIN32
     // 127.0.0.1, not "localhost": the server binds IPv4 and "localhost"
     // resolves to ::1 first on Windows, yielding connection-refused. Base the
-    // port on the pid so two concurrent test processes claim disjoint ranges.
+    // port on the pid so concurrent test processes rarely overlap, and stay
+    // below 49152, where Windows hands out ephemeral ports: every test client
+    // connection takes one and holds it in TIME_WAIT, so a server asked for a
+    // port up there can find it taken. The wide wrap keeps one process from
+    // reusing a port it just left in TIME_WAIT.
     unsigned pid = static_cast<unsigned>(_getpid());
-    int base = 49200 + static_cast<int>((pid * 251u) % 15000u);
-    return "127.0.0.1:" + std::to_string(base + (n % 1000));
+    int base = 20000 + static_cast<int>((pid * 251u) % 10000u);
+    return "127.0.0.1:" + std::to_string(base + (n % 19000));
 #else
     return (std::filesystem::temp_directory_path() /
             ("lci_test_srv_" + std::to_string(::getpid()) + "_" +
