@@ -94,8 +94,14 @@ struct Harness {
     lci::CodebaseIntelligenceEngine ci_engine;
     lci::mcp::McpServer server;
 
-    Harness()
-        : cfg(lci::make_default_config()),
+    // The index admits only paths under its project root, so the root is
+    // the corpus directory the cycles write into.
+    explicit Harness(const std::filesystem::path& root)
+        : cfg([&] {
+              auto c = lci::make_default_config();
+              c.project.root = root.string();
+              return c;
+          }()),
           index(cfg),
           search_engine(index, cfg.synonyms),
           propagator(&index.ref_tracker()),
@@ -233,8 +239,8 @@ TEST(MemorySoak, RssPlateausAcrossReindexQueryCycles) {
     constexpr int kMeasuredCycles = 96;
     constexpr long kSlackKb = 12 * 1024;  // 12 MB absolute growth budget
 
-    Harness h;
     Corpus corpus;
+    Harness h(corpus.dir);
 
     // Discrimination guard: the first cycle must demonstrably exercise the
     // engine — the search must find the seeded symbol and no call may error.
