@@ -189,12 +189,17 @@ TEST(DebouncedRebuilderTest, ForceRebuildFiresCallback) {
     rebuilder.schedule_rebuild(20);
     rebuilder.force_rebuild();
 
-    std::unique_lock lock(mu);
-    EXPECT_TRUE(called);
-    std::sort(received.begin(), received.end());
-    EXPECT_EQ(received.size(), 2u);
-    EXPECT_EQ(received[0], 10u);
-    EXPECT_EQ(received[1], 20u);
+    {
+        // Released before shutdown(): the callback takes `mu` while the
+        // rebuilder holds its dispatch lock, so holding `mu` across shutdown()
+        // would invert that order.
+        std::lock_guard lock(mu);
+        EXPECT_TRUE(called);
+        std::sort(received.begin(), received.end());
+        EXPECT_EQ(received.size(), 2u);
+        EXPECT_EQ(received[0], 10u);
+        EXPECT_EQ(received[1], 20u);
+    }
     rebuilder.shutdown();
 }
 
