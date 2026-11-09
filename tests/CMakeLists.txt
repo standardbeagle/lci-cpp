@@ -102,14 +102,21 @@ if(LCI_TCMALLOC_LIB)
     target_link_libraries(lci_tests PRIVATE "${LCI_TCMALLOC_LIB}")
 endif()
 
+# 60s per-test cap. ServerTest fixtures spawn IndexServer instances that have
+# hung indefinitely under parallel ctest load (pre-existing parallel-flake
+# class). Without a cap, one hang blocks the run. The tests that build their
+# own corpus run many times slower unoptimized or under a sanitizer, so those
+# builds get a wider cap: a working test must not read as a hang.
+set(LCI_TEST_TIMEOUT_SECONDS 60)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_CXX_FLAGS MATCHES "-fsanitize=")
+    set(LCI_TEST_TIMEOUT_SECONDS 300)
+endif()
+
 include(GoogleTest)
 gtest_discover_tests(lci_tests
     PROPERTIES
         LABELS "unit"
-        # 60s per-test cap. ServerTest fixtures spawn IndexServer instances
-        # that have hung indefinitely under parallel ctest load (pre-existing
-        # parallel-flake class). Without a cap, one hang blocks the run.
-        TIMEOUT 60
+        TIMEOUT ${LCI_TEST_TIMEOUT_SECONDS}
 )
 
 # ---------------------------------------------------------------------------
