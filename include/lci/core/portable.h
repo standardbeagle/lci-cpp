@@ -2,6 +2,7 @@
 
 #include <ctime>
 #include <filesystem>
+#include <string>
 #include <string_view>
 
 namespace lci {
@@ -48,6 +49,16 @@ bool parse_double(std::string_view text, double& out);
 /// Sets an environment variable, overwriting any existing value. POSIX setenv
 /// / MSVC _putenv_s. Returns true on success.
 bool set_env(const char* name, const char* value);
+
+/// Replaces `path` with `data` atomically: writes a fresh, exclusively
+/// created temp file beside it (never an existing name, never through a
+/// symlink), then renames it over `path`. A predictable `<path>.tmp` opened
+/// with ofstream follows a planted symlink and overwrites its target; this
+/// helper exists so no writer does that. `mode` is the POSIX permission of
+/// the result (ignored on Windows). Returns an empty string on success, else
+/// the reason, with the temp file removed.
+std::string write_file_atomically(const std::filesystem::path& path,
+                                  std::string_view data, unsigned mode);
 
 /// Removes an environment variable (no-op if absent). POSIX unsetenv / MSVC
 /// _putenv_s with an empty value. Returns true on success.

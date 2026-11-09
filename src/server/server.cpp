@@ -974,22 +974,14 @@ bool IndexServer::write_registry_file() {
                          {"address", socket_path()},
                          {"root", config_.project.root}};
     // Write-then-rename so peers scanning the registry never read a torn
-    // entry.
-    const auto tmp = registry_path_ + ".tmp";
-    {
-        std::ofstream out(tmp, std::ios::trunc);
-        if (!out) {
-            std::fprintf(stderr,
-                         "Warning: cannot write server registry entry %s\n",
-                         tmp.c_str());
-            return false;
-        }
-        out << entry.dump();
-    }
-    std::error_code ec;
-    std::filesystem::rename(tmp, registry_path_, ec);
-    if (ec) {
-        std::filesystem::remove(tmp, ec);
+    // entry, through an exclusive temp file so a planted symlink is never
+    // written through.
+    auto err = portable::write_file_atomically(registry_path_, entry.dump(),
+                                               0600);
+    if (!err.empty()) {
+        std::fprintf(stderr,
+                     "Warning: cannot write server registry entry %s: %s\n",
+                     registry_path_.c_str(), err.c_str());
         return false;
     }
     return true;

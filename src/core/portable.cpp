@@ -12,7 +12,15 @@
 #include <unistd.h>
 #endif
 
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <sys/stat.h>
+#endif
+
 #include <array>
+#include <cerrno>
+#include <random>
+#include <string>
 #include <cctype>
 #include <charconv>
 #include <cstdlib>
@@ -108,6 +116,101 @@ bool parse_double(std::string_view text, double& out) {
     if (end == buf) return false;
     out = v;
     return true;
+#endif
+}
+
+std::string write_file_atomically(const std::filesystem::path& path,
+                                  std::string_view data, unsigned mode) {
+    namespace fs = std::filesystem;
+    const fs::path dir = path.has_parent_path() ? path.parent_path()
+                                                : fs::path(".");
+#if defined(_WIN32)
+    (void)mode;
+    // CREATE_NEW refuses any existing name, a planted reparse point included,
+    // so a random suffix only has to make collisions rare, not impossible.
+    std::random_device rd;
+    HANDLE h = INVALID_HANDLE_VALUE;
+    fs::path tmp;
+    for (int attempt = 0; attempt < 16 && h == INVALID_HANDLE_VALUE;
+         ++attempt) {
+        tmp = dir / (L"." + path.filename().wstring() + L".tmp." +
+                     std::to_wstring(rd()));
+        h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                        nullptr);
+        if (h == INVALID_HANDLE_VALUE && GetLastError() != ERROR_FILE_EXISTS) {
+            return "cannot create temp file beside " + path.string() +
+                   ": error " + std::to_string(GetLastError());
+        }
+    }
+    if (h == INVALID_HANDLE_VALUE) {
+        return "cannot create a unique temp file beside " + path.string();
+    }
+    size_t off = 0;
+    bool ok = true;
+    while (off < data.size()) {
+        const size_t left = data.size() - off;
+        DWORD chunk = static_cast<DWORD>(left < (1u << 30) ? left : (1u << 30));
+        DWORD written = 0;
+        if (!WriteFile(h, data.data() + off, chunk, &written, nullptr) ||
+            written == 0) {
+            ok = false;
+            break;
+        }
+        off += written;
+    }
+    CloseHandle(h);
+    if (!ok) {
+        DeleteFileW(tmp.c_str());
+        return "failed to write temp file " + tmp.string();
+    }
+    if (!MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        DWORD err = GetLastError();
+        DeleteFileW(tmp.c_str());
+        return "failed to replace " + path.string() + ": error " +
+               std::to_string(err);
+    }
+    return {};
+#else
+    // mkstemp creates with O_CREAT|O_EXCL: an existing name, a symlink
+    // included, is never opened.
+    std::string tmpl =
+        (dir / ("." + path.filename().string() + ".tmp.XXXXXX")).string();
+    int fd = ::mkstemp(tmpl.data());
+    if (fd < 0) {
+        return "cannot create temp file beside " + path.string() + ": " +
+               std::strerror(errno);
+    }
+    auto fail = [&](const std::string& what) {
+        int err = errno;
+        ::close(fd);
+        ::unlink(tmpl.c_str());
+        return what + ": " + std::strerror(err);
+    };
+    if (::fchmod(fd, static_cast<mode_t>(mode)) != 0) {
+        return fail("cannot set mode on " + tmpl);
+    }
+    size_t off = 0;
+    while (off < data.size()) {
+        ssize_t n = ::write(fd, data.data() + off, data.size() - off);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return fail("failed to write " + tmpl);
+        }
+        off += static_cast<size_t>(n);
+    }
+    if (::close(fd) != 0) {
+        int err = errno;
+        ::unlink(tmpl.c_str());
+        return "failed to close " + tmpl + ": " + std::strerror(err);
+    }
+    if (::rename(tmpl.c_str(), path.c_str()) != 0) {
+        int err = errno;
+        ::unlink(tmpl.c_str());
+        return "failed to replace " + path.string() + ": " +
+               std::strerror(err);
+    }
+    return {};
 #endif
 }
 

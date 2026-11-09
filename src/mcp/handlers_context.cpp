@@ -12,6 +12,7 @@
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
 
+#include <lci/core/portable.h>
 #include <lci/indexing/master_index.h>
 #include <lci/mcp/context_manifest_expander.h>
 #include <lci/mcp/time_format.h>
@@ -480,7 +481,9 @@ std::string resolve_manifest_path(const std::string& relative_path,
     return resolved.string();
 }
 
-/// Saves a manifest to a file atomically.
+/// Saves a manifest to a file atomically, through a fresh exclusive temp file
+/// (see portable::write_file_atomically: a predictable `<path>.tmp` opened
+/// with ofstream followed a planted symlink and overwrote its target).
 std::string save_manifest_to_file(const ContextManifest& manifest,
                                    const std::string& file_path) {
     namespace fs = std::filesystem;
@@ -500,26 +503,7 @@ std::string save_manifest_to_file(const ContextManifest& manifest,
     auto json_str = data.dump(2, ' ', /*ensure_ascii=*/false,
                               nlohmann::json::error_handler_t::replace);
 
-    auto temp_path = file_path + ".tmp";
-    {
-        std::ofstream out(temp_path, std::ios::binary);
-        if (!out) {
-            return "failed to write temp file: " + temp_path;
-        }
-        out.write(json_str.data(),
-                  static_cast<std::streamsize>(json_str.size()));
-        if (!out) {
-            return "failed to write manifest data";
-        }
-    }
-
-    fs::rename(temp_path, file_path, ec);
-    if (ec) {
-        fs::remove(temp_path, ec);
-        return "failed to rename temp file: " + ec.message();
-    }
-
-    return {};
+    return portable::write_file_atomically(file_path, json_str, 0644);
 }
 
 /// Loads a manifest from a file. Fatal for top-level/parse problems; a
@@ -568,6 +552,33 @@ std::string load_manifest_from_file(const std::string& file_path,
                " unparseable reference(s) that an append would silently drop";
     }
     return validate_manifest(out);
+}
+
+/// The save-side refusal for an in-root target, or empty when it may be
+/// written. Containment alone still let a save replace source or git state:
+/// `.git/config` gained caller-chosen JSON and `main.go` was destroyed. A
+/// save may create a new file or replace an existing manifest, nothing else.
+std::string manifest_save_refusal(const std::string& full_path,
+                                  const std::string& project_root) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    auto root = fs::weakly_canonical(
+        project_root.empty() ? fs::path(".") : fs::path(project_root), ec);
+    for (const auto& part : fs::path(full_path).lexically_relative(root)) {
+        if (part == ".git") return "refusing to write under a .git directory";
+    }
+    if (fs::exists(full_path, ec) && !ec) {
+        // The per-ref-tolerant loader: a manifest with a stale ref is still a
+        // manifest a plain save may replace.
+        ContextManifest existing;
+        std::vector<UnresolvedRef> invalid;
+        auto load_err = load_manifest_from_file(full_path, existing, invalid);
+        if (!load_err.empty()) {
+            return "refusing to replace an existing file that is not a "
+                   "manifest: " + load_err;
+        }
+    }
+    return {};
 }
 
 /// Filters refs by role inclusion/exclusion lists.
@@ -711,23 +722,27 @@ ToolResult handle_context_save(const nlohmann::json& params,
         return make_error_response("context", "invalid manifest: " + val_err);
     }
 
-    // Handle append mode
-    bool append = params.value("append", false);
-    if (append && !to_file.empty()) {
-        auto full_path = resolve_manifest_path(to_file, project_root);
-        if (full_path.empty()) {
+    std::string save_path;
+    if (!to_file.empty()) {
+        save_path = resolve_manifest_path(to_file, project_root);
+        if (save_path.empty()) {
             return make_error_response(
                 "context",
                 "'to_file' must resolve inside the project root: " + to_file);
         }
+    }
+
+    // Handle append mode
+    bool append = params.value("append", false);
+    if (append && !save_path.empty()) {
         ContextManifest existing;
         std::error_code ec;
-        if (std::filesystem::exists(full_path, ec) && !ec) {
+        if (std::filesystem::exists(save_path, ec) && !ec) {
             // The file exists but cannot be parsed/validated: refuse the
             // append instead of silently overwriting the manifest with only
             // the new refs (a corrupt manifest is a user problem to surface,
             // not to destroy).
-            auto load_err = load_manifest_from_file(full_path, existing);
+            auto load_err = load_manifest_from_file(save_path, existing);
             if (!load_err.empty()) {
                 return make_error_response(
                     "context",
@@ -748,14 +763,12 @@ ToolResult handle_context_save(const nlohmann::json& params,
 
     auto stats = compute_manifest_stats(manifest);
 
-    if (!to_file.empty()) {
-        auto full_path = resolve_manifest_path(to_file, project_root);
-        if (full_path.empty()) {
-            return make_error_response(
-                "context",
-                "'to_file' must resolve inside the project root: " + to_file);
+    if (!save_path.empty()) {
+        auto refusal = manifest_save_refusal(save_path, project_root);
+        if (!refusal.empty()) {
+            return make_error_response("context", refusal + ": " + to_file);
         }
-        auto save_err = save_manifest_to_file(manifest, full_path);
+        auto save_err = save_manifest_to_file(manifest, save_path);
         if (!save_err.empty()) {
             return make_error_response("context",
                                        "failed to save manifest: " + save_err);

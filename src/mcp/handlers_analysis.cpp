@@ -33,6 +33,7 @@
 #include <lci/analysis/naming_analyzer.h>
 #include <lci/analysis/side_effect_analyzer.h>
 #include <lci/core/graph_propagator.h>
+#include <lci/core/portable.h>
 #include <lci/core/reference_tracker.h>
 #include <lci/core/semantic_annotator.h>
 #include <lci/git/analyzer.h>
@@ -2549,20 +2550,9 @@ std::string write_error_report_capture(MasterIndex& indexer,
     }
 
     fs::path final_path = dir / (slug + ".txt");
-    fs::path tmp_path = dir / (slug + ".txt.tmp");
-    {
-        std::ofstream f(tmp_path, std::ios::trunc);
-        if (!f) {
-            std::cerr << "error-report capture: cannot write "
-                      << tmp_path.string() << "\n";
-            return {};
-        }
-        f << out.str();
-    }
-    fs::rename(tmp_path, final_path, ec);
-    if (ec) {
-        std::cerr << "error-report capture: rename failed: " << ec.message()
-                  << "\n";
+    auto err = portable::write_file_atomically(final_path, out.str(), 0644);
+    if (!err.empty()) {
+        std::cerr << "error-report capture: " << err << "\n";
         return {};
     }
     return final_path.string();
