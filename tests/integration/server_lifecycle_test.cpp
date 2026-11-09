@@ -477,26 +477,26 @@ TEST_F(ServerLifecycleTest, ReindexKeepsPriorGenerationReadableAndPublishesOnce)
     release.store(true, std::memory_order_release);
 
     // Gate the final assertions on the worker's real completion, NOT on the
-    // snapshot-publish edge. index_directory() bumps snapshot_publish_count()
-    // inside its commit, while handle_reindex's thread still has to return,
-    // build the successor SearchEngine and atomically republish it under mu_
-    // (the run opened by storing search_engine_ = nullptr, so /status.ready
-    // stays false until that republish) and clear indexing_active_. Poll
-    // /status until it reports ready under a bounded deadline, and assert the
-    // wait succeeded before touching any post-run state.
+    // snapshot-publish edge, and NOT on /status.ready: the prior engine stays
+    // published through the whole run, so ready is true before the commit.
+    // handle_reindex's thread clears indexing_active_ only after index_directory()
+    // has committed and the successor SearchEngine is republished, so poll for
+    // that under a bounded deadline and assert the wait succeeded before
+    // touching any post-run state.
     bool worker_done = false;
     const auto commit_deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (std::chrono::steady_clock::now() < commit_deadline) {
         auto status = post("/status");
-        if (status.contains("ready") && status["ready"].get<bool>()) {
+        if (status.contains("indexing_active") &&
+            !status["indexing_active"].get<bool>()) {
             worker_done = true;
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     ASSERT_TRUE(worker_done)
-        << "reindex worker never republished the engine within the deadline";
+        << "reindex worker never finished within the deadline";
 
     // The run is finished and the live state is stable: exactly one snapshot
     // published across the whole /reindex. A pre-clear would have published an
