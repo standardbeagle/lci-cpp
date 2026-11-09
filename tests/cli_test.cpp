@@ -815,8 +815,11 @@ TEST(AlternationSeedTest, InlineCaseFlagForcesFallback) {
         grep_filters::regex_every_match_has_seed("(?i:foobar)", false));
     EXPECT_FALSE(
         grep_filters::regex_every_match_has_seed("abc(?i)defgh", false));
-    // Flag groups that do not fold case keep the index.
+    // Flag groups that do not fold case keep the index, and their flags are
+    // syntax: the seed is "foobar", never "s:foobar".
     EXPECT_TRUE(grep_filters::regex_every_match_has_seed("(?s:foobar)", false));
+    EXPECT_EQ(grep_filters::regex_literal_seeds("(?s:foobar)", false),
+              (std::vector<std::string>{"foobar"}));
 }
 
 TEST(AlternationSeedTest, OctalEscapeForcesFallback) {
@@ -839,9 +842,13 @@ TEST(AlternationSeedTest, CaseFoldedSeedsAvoidBytesTheIndexCannotFold) {
     EXPECT_EQ(regex_literal_seeds("caf\xC3\xA9_au_lait", true),
               (std::vector<std::string>{"caf", "_au_lait"}));
     EXPECT_TRUE(regex_every_match_has_seed("caf\xC3\xA9_au_lait", true));
+    // The run breaks at each s: "cla" stays a sound seed.
+    EXPECT_EQ(regex_literal_seeds("class", true),
+              (std::vector<std::string>{"cla"}));
+    EXPECT_TRUE(regex_every_match_has_seed("class", true));
     // No foldable-safe run of 3 is left: full scan.
-    EXPECT_FALSE(regex_every_match_has_seed("class", true));
-    EXPECT_TRUE(regex_literal_seeds("class", true).empty());
+    EXPECT_FALSE(regex_every_match_has_seed("kiss", true));
+    EXPECT_TRUE(regex_literal_seeds("kiss", true).empty());
     EXPECT_FALSE(regex_every_match_has_seed("\xC3\xA9t\xC3\xA9", true));
     // Case-sensitive search keeps every byte in the seed.
     EXPECT_EQ(regex_literal_seeds("kelvin", false),

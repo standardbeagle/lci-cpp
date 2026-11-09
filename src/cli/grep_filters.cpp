@@ -584,8 +584,37 @@ std::vector<std::string> resolve_scope_paths(
 /// can match "ab", so "abc" would over-narrow; `+` requires its char and
 /// keeps it. Runs inside a wholly-optional group can still over-narrow
 /// (pre-existing bound, unchanged).
+namespace {
+
+// A byte the index cannot fold the way RE2's case-insensitive matcher does.
+// RE2 folds Unicode-aware (probed: k ~ U+212A KELVIN SIGN, s ~ U+017F LONG
+// S, e-acute ~ E-acute) while the index's case-insensitive search folds
+// ASCII only, so a -i seed holding one of these bytes certifies a present
+// match absent. Both seed walkers break their literal run on it.
+bool breaks_case_folded_seed(unsigned char c) {
+    return c >= 0x80 || c == 'k' || c == 'K' || c == 's' || c == 'S';
+}
+
+// `re[i]` is the '?' after a '('. When the group is a flag group --
+// "(?flags)" or "(?flags:" with flags from RE2's [imsU-] -- returns the
+// index of its ':' or ')' and reports whether the flags touch case folding.
+// Returns npos for every other "(?" form (named groups, lookarounds).
+size_t flag_group_end(std::string_view re, size_t i, bool* folds_case) {
+    *folds_case = false;
+    for (size_t j = i + 1; j < re.size(); ++j) {
+        char f = re[j];
+        if (f == ':' || f == ')') return j;
+        if (f == 'i') *folds_case = true;
+        if (f != 'i' && f != 'm' && f != 's' && f != 'U' && f != '-')
+            return std::string_view::npos;
+    }
+    return std::string_view::npos;
+}
+
+}  // namespace
+
 std::vector<std::string> regex_literal_seeds(const std::string& re,
-                                             bool /*case_insensitive*/) {
+                                             bool case_insensitive) {
     std::vector<std::string> seeds;
     std::string cur;
     auto take = [&]() {
@@ -603,6 +632,19 @@ std::vector<std::string> regex_literal_seeds(const std::string& re,
             // Skip char-class shorthands (\d, \w, \s, \b, etc.) — those
             // are not literals.
             if (std::isalpha(static_cast<unsigned char>(esc))) {
+                take();
+            } else if (esc >= '0' && esc <= '9') {
+                // Octal escape (\101 is 'A'): its digits are not the text.
+                take();
+                size_t k = i + 2;
+                while (k < re.size() && k < i + 4 && re[k] >= '0' &&
+                       re[k] <= '7')
+                    ++k;
+                i = k - 1;
+                continue;
+            } else if (case_insensitive &&
+                       breaks_case_folded_seed(
+                           static_cast<unsigned char>(esc))) {
                 take();
             } else {
                 cur.push_back(esc);
@@ -624,10 +666,13 @@ std::vector<std::string> regex_literal_seeds(const std::string& re,
                 take();
                 // Group modifiers are syntax, not literals: skip the
                 // "?:" of a non-capturing group (the ':' previously
-                // leaked into the first branch's run — ":panic").
-                if (i + 2 < re.size() && re[i + 1] == '?' &&
-                    re[i + 2] == ':') {
-                    i += 2;
+                // leaked into the first branch's run — ":panic") and the
+                // flags of "(?s:" / "(?i)" ("s:foobar" was banked for
+                // `(?s:foobar)`, a seed no match carries).
+                if (i + 1 < re.size() && re[i + 1] == '?') {
+                    bool folds_case = false;
+                    size_t end = flag_group_end(re, i + 1, &folds_case);
+                    if (end != std::string_view::npos) i = end;
                 }
                 break;
             case '.': case '+':
@@ -641,7 +686,12 @@ std::vector<std::string> regex_literal_seeds(const std::string& re,
                 }
                 break;
             default:
-                cur.push_back(c);
+                if (case_insensitive &&
+                    breaks_case_folded_seed(static_cast<unsigned char>(c))) {
+                    take();
+                } else {
+                    cur.push_back(c);
+                }
                 break;
         }
     }
@@ -661,6 +711,7 @@ namespace {
 struct SeedCoverage {
     std::string_view s;
     size_t i = 0;
+    bool case_insensitive = false;
     // Set on an escape whose ARGUMENT bytes are not literal text (`\x41`,
     // `\x{41}`, `\pL`, `\p{Greek}`, `\Q...\E`): regex_literal_seeds banks
     // those bytes as a run ("41bc" for `\x41bc`), a seed no match carries.
@@ -709,6 +760,14 @@ struct SeedCoverage {
         // parse to stay aligned but discard the result.
         bool usable = true;
         if (peek() == '?') {
+            // A case-folding flag makes the group (or, for "(?i)", the rest
+            // of the enclosing group) match text the case-sensitive seed
+            // search cannot see.
+            bool folds_case = false;
+            if (flag_group_end(s, i, &folds_case) != std::string_view::npos &&
+                folds_case) {
+                unsure = true;
+            }
             size_t j = i;
             while (j < s.size() && s[j] != ':' && s[j] != ')') ++j;
             if (j < s.size() && s[j] == ':') {
@@ -745,11 +804,16 @@ struct SeedCoverage {
                 char esc = s[i + 1];
                 i += 2;
                 if (esc == 'x' || esc == 'p' || esc == 'P' || esc == 'Q' ||
-                    esc == 'E') {
+                    esc == 'E' || (esc >= '0' && esc <= '9')) {
+                    // \101 is octal: its digits are not the matched text.
                     unsure = true;
                     run = 0;
                 } else if (std::isalpha(static_cast<unsigned char>(esc))) {
                     run = 0;  // \d \w \s \b ...: not a literal
+                } else if (case_insensitive &&
+                           breaks_case_folded_seed(
+                               static_cast<unsigned char>(esc))) {
+                    run = 0;
                 } else {
                     ++run;
                     apply_quantifier(&run);
@@ -783,6 +847,11 @@ struct SeedCoverage {
                     if (i < s.size()) ++i;
                 }
                 run = 0;
+            } else if (case_insensitive &&
+                       breaks_case_folded_seed(
+                           static_cast<unsigned char>(c))) {
+                ++i;
+                run = 0;  // the extractor breaks its run here too
             } else {
                 ++i;
                 ++run;
@@ -796,8 +865,8 @@ struct SeedCoverage {
 }  // namespace
 
 bool regex_every_match_has_seed(std::string_view pattern,
-                                bool /*case_insensitive*/) {
-    SeedCoverage p{pattern, 0};
+                                bool case_insensitive) {
+    SeedCoverage p{pattern, 0, case_insensitive};
     const bool covered = p.parse_alt();
     return covered && !p.unsure;
 }
