@@ -801,6 +801,12 @@ bool regex_every_match_has_seed(std::string_view pattern) {
 }
 
 
+std::string_view without_line_ending(std::string_view line) {
+    if (!line.empty() && line.back() == '\n') line.remove_suffix(1);
+    if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+    return line;
+}
+
 // Filter result rows by re-matching their content line against the
 // user-supplied regex. Drops rows whose context block has no line
 // matching the regex; rows that do match get their `line`, `column`,
@@ -837,11 +843,10 @@ nlohmann::json regex_filter_results(nlohmann::json results,
         auto match_at = [&](int idx) -> bool {
             if (idx < 0 || idx >= window) return false;
             const auto& line_json = ctx["lines"][static_cast<size_t>(idx)];
-            std::string line = line_json.is_string()
-                                   ? line_json.get<std::string>()
-                                   : "";
-            // Strip trailing newline so $ anchors work as expected.
-            if (!line.empty() && line.back() == '\n') line.pop_back();
+            const std::string stored = line_json.is_string()
+                                           ? line_json.get<std::string>()
+                                           : "";
+            const std::string_view line = without_line_ending(stored);
             re2::StringPiece input(line.data(), line.size());
             if (!re.Match(input, 0, line.size(), RE2::UNANCHORED,
                           submatches, 1)) {

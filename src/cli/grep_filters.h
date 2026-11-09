@@ -102,6 +102,8 @@ nlohmann::json apply_max_count_per_file(nlohmann::json results,
 nlohmann::json count_per_file_rows(const nlohmann::json& results);
 nlohmann::json files_with_matches_rows(const nlohmann::json& results);
 nlohmann::json regex_filter_results(nlohmann::json results, const RE2& re);
+/// `line` without its line ending, so a regex's `$` holds on CRLF files too.
+std::string_view without_line_ending(std::string_view line);
 
 /// Splits a bare top-level alternation of PURE literals ("a|b|c") into its
 /// branches, so `lci search "FileWatcher|DebouncedRebuilder"` (no --regex)

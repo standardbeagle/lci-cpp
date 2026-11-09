@@ -219,6 +219,7 @@ nlohmann::json invert_match_rows_regex(const nlohmann::json& results,
         int kept = 0;
         while (std::getline(in, line)) {
             ++line_no;
+            line.resize(grep_filters::without_line_ending(line).size());
             re2::StringPiece sp(line.data(), line.size());
             if (RE2::PartialMatch(sp, re)) continue;
             nlohmann::json row;
@@ -466,10 +467,10 @@ int run_search(const GlobalFlags& flags, const SearchCommandOptions& options) {
             size_t pos = 0;
             while (pos < content.size()) {
                 size_t eol = content.find('\n', pos);
-                std::string_view line =
+                std::string_view line = grep_filters::without_line_ending(
                     content.substr(pos, eol == std::string_view::npos
                                             ? content.size() - pos
-                                            : eol - pos);
+                                            : eol - pos));
                 re2::StringPiece sp(line.data(), line.size());
                 if (RE2::PartialMatch(sp, *regex_filter)) {
                     nlohmann::json row;

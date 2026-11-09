@@ -3212,6 +3212,43 @@ TEST(SearchMetaRegexTest, HonorsMaxCount) {
     fs::remove_all(root, ec);
 }
 
+TEST(SearchMetaRegexTest, DollarAnchorHoldsOnCrlfFiles) {
+    namespace fs = std::filesystem;
+    const auto lci_bin =
+        lci::test::lci_binary_path();
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_meta_crlf_");
+    fs::create_directories(root);
+    // Binary mode: the bytes on disk are CRLF on every platform.
+    std::ofstream(root / "crlf.cpp", std::ios::binary)
+        << "12345\r\nseed678\r\nother\r\n";
+
+    // A pure-meta pattern takes the full-scan path; a literal seed takes the
+    // server path, whose rows are re-matched by regex_filter_results.
+    for (const char* pattern : {"^\\d{5}$", "^seed\\d+$"}) {
+        std::string out;
+        ASSERT_TRUE(run_lci_search(lci_bin, root,
+                                   {lci_bin.string(), "search", "-E", pattern},
+                                   out));
+        EXPECT_NE(out.find("Found 1 results"), std::string::npos)
+            << pattern << "\n" << out;
+    }
+
+    // Invert mode: the two anchored lines are matches, only `other` is left.
+    std::string inverted;
+    ASSERT_TRUE(run_lci_search(
+        lci_bin, root,
+        {lci_bin.string(), "search", "-E", "--invert-match",
+         "^(\\d{5}|seed\\d+)$"},
+        inverted));
+    EXPECT_NE(inverted.find("other"), std::string::npos) << inverted;
+    EXPECT_EQ(inverted.find("seed678"), std::string::npos) << inverted;
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
 // Every flag that parses must change the output. Corpus: `token` appears
 // twice in alpha.cpp (plus one plain line) and once in beta.cpp (plus one
 // plain line), so each flag has an observable effect.
