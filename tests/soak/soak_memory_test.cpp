@@ -13,9 +13,15 @@
 // saturated. Any steady per-cycle RSS growth after warmup is unbounded
 // growth by construction. The threshold is absolute slack, not wall-clock,
 // so the test is robust to scheduler contention under ctest -j (see
-// .claude/rules on contention-robust tests); allocator noise (ASan
-// quarantine, arena growth) fits comfortably inside the slack while a real
-// per-cycle leak of ~100 KB crosses it well before the last cycle.
+// .claude/rules on contention-robust tests); allocator noise (arena growth)
+// fits comfortably inside the slack while a real per-cycle leak of ~100 KB
+// crosses it well before the last cycle.
+//
+// ASan's freed-memory quarantine does not fit: it holds up to 256 MB of freed
+// blocks before recycling any, which reads as 284 MB of growth over the
+// measured cycles. This binary turns the quarantine off (below) so RSS tracks
+// what the engine keeps; use-after-free detection on these code paths comes
+// from lci_tests, which keeps the default quarantine.
 
 #include <lci/analysis/codebase_intelligence.h>
 #include <lci/analysis/side_effect_analyzer.h>
@@ -42,6 +48,22 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#if defined(__SANITIZE_ADDRESS__)
+#define LCI_SOAK_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define LCI_SOAK_ASAN 1
+#endif
+#endif
+
+#if defined(LCI_SOAK_ASAN)
+// ASan reads this at startup; ASAN_OPTIONS from the environment still wins
+// flag by flag, so CI's hard_rss_limit_mb applies on top.
+extern "C" const char* __asan_default_options() {
+    return "quarantine_size_mb=0:thread_local_quarantine_size_kb=0";
+}
+#endif
 
 namespace {
 
