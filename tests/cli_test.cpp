@@ -804,6 +804,51 @@ TEST(AlternationSeedTest, SeededPatternKeepsTrigramIndex) {
         R"(\b(?:panic|unreachable|todo|unimplemented)!\s*\()", false));
 }
 
+// Escape and case-fold classes the seed walkers used to read as literal
+// text (review S3). Each one certified a present match absent: the seed
+// path searched a literal no matching line carries.
+TEST(AlternationSeedTest, InlineCaseFlagForcesFallback) {
+    // The seed is searched case-SENSITIVELY, but (?i) lets the regex match
+    // "FOOBAR", which carries no "foobar" seed.
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed("(?i)foobar", false));
+    EXPECT_FALSE(
+        grep_filters::regex_every_match_has_seed("(?i:foobar)", false));
+    EXPECT_FALSE(
+        grep_filters::regex_every_match_has_seed("abc(?i)defgh", false));
+    // Flag groups that do not fold case keep the index.
+    EXPECT_TRUE(grep_filters::regex_every_match_has_seed("(?s:foobar)", false));
+}
+
+TEST(AlternationSeedTest, OctalEscapeForcesFallback) {
+    // RE2 reads \101 as 'A': the extractor banked "101bcd", which no match
+    // ("Abcd") carries.
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\101bcd)", false));
+    EXPECT_FALSE(grep_filters::regex_every_match_has_seed(R"(\0abcd)", false));
+}
+
+TEST(AlternationSeedTest, CaseFoldedSeedsAvoidBytesTheIndexCannotFold) {
+    // Under -i RE2 folds Unicode-aware (probed: "kelvin" matches U+212A+
+    // "elvin", "class" matches "claſſ", "café" matches
+    // "CAFÉ") while the index folds ASCII only. A -i seed must hold no
+    // k, s or non-ASCII byte, and both walkers must agree on that.
+    using grep_filters::regex_every_match_has_seed;
+    using grep_filters::regex_literal_seeds;
+    EXPECT_EQ(regex_literal_seeds("kelvin", true),
+              (std::vector<std::string>{"elvin"}));
+    EXPECT_TRUE(regex_every_match_has_seed("kelvin", true));
+    EXPECT_EQ(regex_literal_seeds("caf\xC3\xA9_au_lait", true),
+              (std::vector<std::string>{"caf", "_au_lait"}));
+    EXPECT_TRUE(regex_every_match_has_seed("caf\xC3\xA9_au_lait", true));
+    // No foldable-safe run of 3 is left: full scan.
+    EXPECT_FALSE(regex_every_match_has_seed("class", true));
+    EXPECT_TRUE(regex_literal_seeds("class", true).empty());
+    EXPECT_FALSE(regex_every_match_has_seed("\xC3\xA9t\xC3\xA9", true));
+    // Case-sensitive search keeps every byte in the seed.
+    EXPECT_EQ(regex_literal_seeds("kelvin", false),
+              (std::vector<std::string>{"kelvin"}));
+    EXPECT_TRUE(regex_every_match_has_seed("class", false));
+}
+
 // The one comment-classification predicate, shared by CLI and MCP.
 TEST(GrepFiltersComment, LineSlashSlashIsComment) {
     EXPECT_TRUE(lci::line_is_comment_only("// hello", LangId::Cpp));
