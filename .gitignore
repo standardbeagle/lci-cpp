@@ -49,3 +49,7 @@ docs/.astro/
 /test
 /test.ps1
 /test.cmd
+
+# Per-clone lci config. The repo indexes itself with defaults; a local
+# `lci config init` template must not become everyone's index config.
+/.lci.kdl
