@@ -519,14 +519,15 @@ endif()
 
 # DEB-specific
 set(CPACK_DEBIAN_PACKAGE_SECTION "devel")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "libc6 (>= 2.35), libstdc++6 (>= 12), libssl3 (>= 3.0.0), zlib1g, libbrotli1")
+# Declared from what the built binary links, because that differs by build: vcpkg
+# links OpenSSL and zlib statically, FetchContent dynamically. The hand-kept list this
+# replaces named them for every build and set a libc floor below the one the binary
+# needs, so dpkg could install a package that then failed at startup.
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
 
 # RPM-specific
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 set(CPACK_RPM_PACKAGE_GROUP "Development/Tools")
-set(CPACK_RPM_PACKAGE_REQUIRES
-    "glibc >= 2.35, libstdc++ >= 12, openssl-libs >= 3.0.0, zlib, brotli")
 
 include(CPack)

@@ -72,10 +72,11 @@ cpack -G TGZ    # produces lci-0.10.1-Linux.tar.gz
 cpack -G DEB    # produces lci-0.10.1-Linux.deb
 ```
 
-The CPack output contains only `bin/lci`. Tree-sitter grammars are
-statically linked; the binary dynamically links libc, libstdc++, libssl
-(via libcrypto), zlib, and brotli — the Debian package declares only
-`libc6 (>= 2.35)` since the rest ship on modern Linux by default.
+The CPack output contains only `bin/lci`. Tree-sitter grammars are statically
+linked. A vcpkg build, which is how releases are made, links its other libraries
+statically too and leaves libc, libm, libstdc++ and libgcc_s dynamic. Release
+binaries need glibc 2.38 or newer (Ubuntu 24.04 or equivalent). The `.deb` and
+`.rpm` declare their dependencies from what the built binary links.
 
 ## What it does
 
