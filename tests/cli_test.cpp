@@ -4268,6 +4268,12 @@ class CliMcpToolsTest : public ::testing::Test {
         }
         std::ifstream err(stderr_path);
         session.stderr_text.assign(std::istreambuf_iterator<char>(err), {});
+        // A bridge session whose server cannot start falls back to an
+        // in-process index with only a stderr warning, so the *OverTheBridge
+        // tests would pass on the in-process path. No session here may take
+        // that fallback.
+        EXPECT_EQ(session.stderr_text.find("falling back"), std::string::npos)
+            << session.stderr_text;
         return session;
     }
 };
