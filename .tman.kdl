@@ -24,18 +24,15 @@ alias "test" {
     max-time "60m"
 }
 
-// The instrumented legs CI runs. setarch -R turns off ASLR because the sanitizers abort
-// on this kernel's default mmap entropy, and it wraps the build as well as ctest since
+// The TSan leg CI runs. setarch -R turns off ASLR because the sanitizers abort on this
+// kernel's default mmap entropy, and it wraps the build as well as ctest since
 // gtest_discover_tests runs the instrumented binaries at build time. Instrumented
 // processes take several GB each, so ctest runs two at a time, as in ci.yml.
+// The sanitizer preset has no alias: GCC with UBSan cannot compile the abseil 20240722
+// that FetchContent pins, so only CI's vcpkg abseil builds that leg.
 alias "tsan" {
     command "sh"
     args "-c" "cmake --preset tsan && setarch \"$(uname -m)\" -R cmake --build --preset tsan --parallel 4 && setarch \"$(uname -m)\" -R ctest --preset tsan -j2"
     max-time "120m"
 }
 
-alias "asan" {
-    command "sh"
-    args "-c" "cmake --preset sanitizer && setarch \"$(uname -m)\" -R cmake --build --preset sanitizer --parallel 4 && setarch \"$(uname -m)\" -R ctest --preset sanitizer -j2"
-    max-time "120m"
-}
