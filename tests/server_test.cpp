@@ -641,31 +641,44 @@ TEST(ServerCapsTest, ConnectionsBeyondWorkersAndQueueAreClosed) {
         std::max<size_t>(std::thread::hardware_concurrency(),
                          kMinServerWorkerThreads) +
         kMaxQueuedRequests;
-    std::vector<int> held;
-    held.reserve(capacity);
-    for (size_t i = 0; i < capacity; ++i) {
-        held.push_back(connect_half_sent_request());
+    constexpr size_t kOverflow = 16;
+    std::vector<pollfd> held;
+    held.reserve(capacity + kOverflow);
+    for (size_t i = 0; i < capacity + kOverflow; ++i) {
+        held.push_back({connect_half_sent_request(), POLLIN, 0});
     }
 
-    // Past capacity, a connection reads EOF. Connections are accepted
-    // asynchronously, so give the accept thread a few tries to reach the cap
-    // before one is refused; a server with no cap would refuse none of them.
-    int refused_connections = 0;
-    constexpr int kOverflowAttempts = 16;
-    for (int i = 0; i < kOverflowAttempts; ++i) {
-        const int fd = connect_half_sent_request();
-        pollfd pfd{fd, POLLIN, 0};
-        if (::poll(&pfd, 1, /*timeout_ms=*/2000) > 0) {
-            char byte = 0;
-            if (::recv(fd, &byte, 1, 0) <= 0) ++refused_connections;
+    // At least kOverflow of them must read EOF, but not necessarily the last
+    // ones: in a burst the accept thread can fill the queue before the workers
+    // drain it, refusing early connections and leaving room for later ones. The
+    // deadline stays well inside the server's 30 s read timeout, past which it
+    // closes half-sent requests of its own accord.
+    size_t refused_connections = 0;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    while (refused_connections < kOverflow) {
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline - std::chrono::steady_clock::now());
+        if (remaining.count() <= 0 ||
+            ::poll(held.data(), held.size(),
+                   static_cast<int>(remaining.count())) <= 0) {
+            break;
         }
-        held.push_back(fd);
-        if (refused_connections > 0) break;
+        for (auto& pfd : held) {
+            if (pfd.fd < 0 || pfd.revents == 0) continue;
+            char byte = 0;
+            if (::recv(pfd.fd, &byte, 1, 0) <= 0) ++refused_connections;
+            ::close(pfd.fd);
+            pfd.fd = -1;  // poll() skips a negative fd.
+        }
     }
-    EXPECT_GT(refused_connections, 0)
+    EXPECT_GE(refused_connections, kOverflow)
         << "connections past workers+queue were neither refused nor closed";
 
-    for (const int fd : held) ::close(fd);
+    for (const auto& pfd : held) {
+        if (pfd.fd >= 0) ::close(pfd.fd);
+    }
 
     // Releasing the held connections frees the pool: the server recovers.
     auto cli = test::make_test_http_client(addr);
