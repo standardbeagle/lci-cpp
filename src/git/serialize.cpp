@@ -4,6 +4,7 @@
 #include <cctype>
 #include <chrono>
 #include <ctime>
+#include <filesystem>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -49,6 +50,38 @@ std::string normalize_rel(const std::string& p,
         return path.substr(root.size() + 1);
     }
     return path;
+}
+
+namespace {
+
+// POSIX '/'-rooted or a Windows drive specifier: what normalize_rel leaves
+// in place when a path is outside the root it was given.
+bool is_rooted_rel(const std::string& p) {
+    return !p.empty() &&
+           (p.front() == '/' || (p.size() >= 2 && p[1] == ':'));
+}
+
+}  // namespace
+
+RepoPathMapper::RepoPathMapper(std::string project_root,
+                               std::string repo_root)
+    : project_root_(std::move(project_root)),
+      repo_root_(std::move(repo_root)) {
+    std::error_code ec;
+    auto canon_root = std::filesystem::weakly_canonical(project_root_, ec);
+    if (ec) return;
+    repo_prefix_ = normalize_rel(canon_root.generic_string(), repo_root_);
+    if (is_rooted_rel(repo_prefix_)) repo_prefix_.clear();  // not under repo
+}
+
+std::string RepoPathMapper::to_repo_rel(const std::string& index_path) const {
+    std::string path = normalize_rel(index_path, project_root_);
+    if (path.empty()) return path;
+    // Outside the project root's spelling: the git root is the remaining
+    // chance.
+    if (is_rooted_rel(path)) return normalize_rel(path, repo_root_);
+    if (repo_prefix_.empty()) return path;
+    return repo_prefix_ + "/" + path;
 }
 
 namespace {

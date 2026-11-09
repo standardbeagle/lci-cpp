@@ -58,6 +58,28 @@ nlohmann::json report_to_json(const AnalysisReport& report,
 std::string normalize_rel(const std::string& p,
                           const std::string& project_root);
 
+/// Maps index file paths (spelled under the project root) to the
+/// repo-relative paths git diffs, git log and ScopeSet carry. Index paths use
+/// the PROJECT root's spelling while Provider::repo_root() has symlinks
+/// resolved (macOS: /var/folders -> /private/var/folders), so stripping with
+/// the git root silently fails on a symlinked checkout. The mapper strips the
+/// project root (an exact prefix by construction), then re-anchors under the
+/// git root when the project root is a subdirectory of the repo. Every join
+/// of index paths against git paths goes through this one key.
+class RepoPathMapper {
+  public:
+    RepoPathMapper(std::string project_root, std::string repo_root);
+
+    /// Repo-relative path for `index_path`; "" for an empty input. A path
+    /// outside both roots stays as normalize_rel leaves it.
+    std::string to_repo_rel(const std::string& index_path) const;
+
+  private:
+    std::string project_root_;
+    std::string repo_root_;
+    std::string repo_prefix_;  // project root relative to the repo, or ""
+};
+
 // ============================================================================
 // Analyzer
 // ============================================================================
