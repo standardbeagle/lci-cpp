@@ -6,6 +6,10 @@
 #include <ctime>
 #include <filesystem>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 namespace lci {
 
 TEST(TextTest, AsciiLowerIsLocaleIndependent) {
@@ -37,6 +41,29 @@ TEST(PortableTest, LocaltimeLocalProducesValidTm) {
     EXPECT_LT(tm.tm_min, 60);
     EXPECT_LE(tm.tm_sec, 61);    // allow leap seconds
 }
+
+#ifndef _WIN32
+TEST(PortableTest, AtomicWriteHonoursTheUmask) {
+    // write_file_atomically fchmod'ed the requested mode, so a user running
+    // with umask 077 got group- and world-readable 0644 context manifests.
+    // The mode is a request masked by the umask, as with open(2).
+    namespace fs = std::filesystem;
+    const fs::path dir =
+        fs::temp_directory_path() /
+        ("lci-umask-" + std::to_string(portable::process_id()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const mode_t old = ::umask(077);
+    const std::string err =
+        portable::write_file_atomically(dir / "m.json", "{}", 0644);
+    ::umask(old);
+    ASSERT_EQ(err, "");
+    struct stat st{};
+    ASSERT_EQ(::stat((dir / "m.json").c_str(), &st), 0);
+    EXPECT_EQ(st.st_mode & 0777, 0600u);
+    fs::remove_all(dir);
+}
+#endif
 
 TEST(PortableTest, ProcessIdIsPositiveAndStable) {
     int pid = portable::process_id();
