@@ -119,6 +119,12 @@ namespace {
 
 
 bool validate_search_options(const SearchCommandOptions& options) {
+    if (std::string err = grep_filters::path_filter_error(
+            options.exclude_pattern, options.include_pattern);
+        !err.empty()) {
+        std::cerr << "Error: " << err << "\n";
+        return false;
+    }
     int content_filters = (options.comments_only ? 1 : 0) +
                           (options.code_only ? 1 : 0) +
                           (options.strings_only ? 1 : 0);

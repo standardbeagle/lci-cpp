@@ -18,6 +18,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -256,45 +257,49 @@ nlohmann::json apply_word_boundary(nlohmann::json results,
 /// Mirrors Go's `displayStandardResults` which calls regexp.MatchString on
 /// each result path. Pre-compiled regexes — no per-row compile.
 ///
-/// On invalid regex syntax, emits a warning to stderr and treats the
-/// corresponding filter as inactive (matches Go's `regexp.Compile` error
-/// path which logs and continues with no filter applied).
+/// Invalid regex syntax throws. Go's `regexp.Compile` path logged and
+/// returned every row unfiltered with exit 0 — a deliberate divergence: a
+/// caller that asked for a subset cannot tell it got the whole corpus.
+std::string path_filter_error(const std::string& exclude_pattern,
+                              const std::string& include_pattern) {
+    RE2::Options opts(RE2::Quiet);
+    opts.set_log_errors(false);
+    const std::pair<const char*, const std::string*> filters[] = {
+        {"--exclude", &exclude_pattern}, {"--include", &include_pattern}};
+    for (const auto& [flag, pattern] : filters) {
+        if (pattern->empty()) continue;
+        RE2 re(*pattern, opts);
+        if (!re.ok()) {
+            return std::string("invalid ") + flag + " regex '" + *pattern +
+                   "': " + re.error();
+        }
+    }
+    return {};
+}
+
 nlohmann::json apply_path_filters(nlohmann::json results,
                                   const std::string& exclude_pattern,
                                   const std::string& include_pattern) {
     if (exclude_pattern.empty() && include_pattern.empty()) return results;
 
+    if (std::string err = path_filter_error(exclude_pattern, include_pattern);
+        !err.empty()) {
+        throw std::invalid_argument(err);
+    }
+
     // RE2 instances are compiled ONCE here per call and reused across every
-    // result row in the loop below — no recompile per row. RE2 reports compile
-    // errors via ok()/error() rather than exceptions (matches Go's
-    // regexp.Compile error path which logs+continues with no filter applied).
+    // result row in the loop below — no recompile per row.
     RE2::Options opts(RE2::Quiet);
     opts.set_log_errors(false);
 
     std::unique_ptr<RE2> exclude_re;
     std::unique_ptr<RE2> include_re;
     if (!exclude_pattern.empty()) {
-        auto re = std::make_unique<RE2>(exclude_pattern, opts);
-        if (re->ok()) {
-            exclude_re = std::move(re);
-        } else {
-            std::cerr << "Warning: invalid --exclude regex '"
-                      << exclude_pattern << "': " << re->error()
-                      << " (filter ignored)\n";
-        }
+        exclude_re = std::make_unique<RE2>(exclude_pattern, opts);
     }
     if (!include_pattern.empty()) {
-        auto re = std::make_unique<RE2>(include_pattern, opts);
-        if (re->ok()) {
-            include_re = std::move(re);
-        } else {
-            std::cerr << "Warning: invalid --include regex '"
-                      << include_pattern << "': " << re->error()
-                      << " (filter ignored)\n";
-        }
+        include_re = std::make_unique<RE2>(include_pattern, opts);
     }
-
-    if (!exclude_re && !include_re) return results;
 
     nlohmann::json out = nlohmann::json::array();
     for (auto& r : results) {

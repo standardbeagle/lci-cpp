@@ -192,6 +192,14 @@ int run_grep(const GlobalFlags& flags, const GrepCommandOptions& options) {
     const int max_count_per_file = options.max_count_per_file;
     const bool verbose = options.verbose;
 
+    // `lci grep` ignores --include (see the path filter below), so only
+    // --exclude can fail the command.
+    if (std::string err = path_filter_error(exclude_pattern, "");
+        !err.empty()) {
+        std::cerr << "Error: " << err << "\n";
+        return 1;
+    }
+
     Config cfg;
     if (std::string err = load_config_with_overrides(flags, cfg); !err.empty()) {
         std::cerr << "Error: " << err << "\n";

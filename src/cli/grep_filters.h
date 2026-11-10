@@ -95,6 +95,14 @@ nlohmann::json invert_match_rows(const nlohmann::json& results,
 nlohmann::json apply_word_boundary(nlohmann::json results,
                                    const std::string& pattern,
                                    bool case_insensitive);
+/// "invalid --exclude regex '<p>': <reason>" (or --include) for the first
+/// pattern RE2 cannot compile; empty when both compile or are empty.
+/// Commands call it before searching so a bad filter fails the command
+/// instead of reaching apply_path_filters.
+std::string path_filter_error(const std::string& exclude_pattern,
+                              const std::string& include_pattern);
+/// Throws std::invalid_argument (message from path_filter_error) on a
+/// pattern that does not compile: an ignored filter would return every row.
 nlohmann::json apply_path_filters(nlohmann::json results,
                                   const std::string& exclude_pattern,
                                   const std::string& include_pattern);
