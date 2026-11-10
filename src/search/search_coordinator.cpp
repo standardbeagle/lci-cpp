@@ -228,6 +228,30 @@ std::vector<CommentByteRange> scan_block_comment_ranges(
             i = j;
             continue;
         }
+        // Backtick literal: a Go raw string (no escapes) or a JS/TS template
+        // literal (backslash escapes); both span lines. Elsewhere a backtick
+        // quotes an identifier on one line, which the same scan consumes.
+        // An unmatched backtick is skipped alone so it cannot hide code.
+        if (c == '`') {
+            const bool escapes = lang != LangId::Go;
+            size_t j = i + 1;
+            bool closed = false;
+            while (j < n) {
+                const char d = content[j];
+                if (escapes && d == '\\') {
+                    j += 2;
+                    continue;
+                }
+                if (d == '`') {
+                    closed = true;
+                    ++j;
+                    break;
+                }
+                ++j;
+            }
+            i = closed ? j : i + 1;
+            continue;
+        }
         ++i;
     }
     return spans;
