@@ -20,7 +20,9 @@ struct CaptureLimits {
 /// inherit), capturing stdout into `out`. stderr is discarded. No shell is
 /// involved on any platform — args are passed verbatim, so there is no
 /// quoting/injection surface. Returns true iff the process spawned and
-/// exited 0.
+/// exited 0 within `limits`. Past the timeout or the output cap the child is
+/// killed (on POSIX with its whole process group, so a grandchild holding
+/// the pipe dies too) and false is returned.
 bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
                  std::string& out, const CaptureLimits& limits = {});
 

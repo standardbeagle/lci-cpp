@@ -149,7 +149,7 @@ HANDLE spawn(const std::vector<std::string>& argv, const std::string& cwd,
 }  // namespace
 
 bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
-                 std::string& out, const CaptureLimits& /*limits*/) {
+                 std::string& out, const CaptureLimits& limits) {
     out.clear();
     if (argv.empty()) return false;
 
@@ -170,20 +170,47 @@ bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
         return false;
     }
 
+    // The read blocks, so a watchdog enforces the timeout: terminating the
+    // child closes its write end and ends the read.
+    std::atomic<bool> killed{false};
+    HANDLE done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (done == nullptr) {
+        TerminateProcess(proc, 1);
+        CloseHandle(rd);
+        CloseHandle(proc);
+        return false;
+    }
+    std::thread watchdog([&] {
+        const HANDLE waits[2] = {proc, done};
+        const DWORD ms = static_cast<DWORD>(limits.timeout.count());
+        if (WaitForMultipleObjects(2, waits, FALSE, ms) == WAIT_TIMEOUT) {
+            killed.store(true);
+            TerminateProcess(proc, 1);
+        }
+    });
+
     std::array<char, 4096> buf{};
     DWORD n = 0;
     while (ReadFile(rd, buf.data(), static_cast<DWORD>(buf.size()), &n,
                     nullptr) &&
            n > 0) {
+        if (out.size() + n > limits.max_output_bytes) {
+            killed.store(true);
+            TerminateProcess(proc, 1);
+            break;
+        }
         out.append(buf.data(), n);
     }
     CloseHandle(rd);
 
     WaitForSingleObject(proc, INFINITE);
+    SetEvent(done);
+    watchdog.join();
+    CloseHandle(done);
     DWORD code = 1;
     GetExitCodeProcess(proc, &code);
     CloseHandle(proc);
-    return code == 0;
+    return !killed.load() && code == 0;
 }
 
 int run_status(const std::vector<std::string>& argv) {
@@ -220,6 +247,8 @@ bool spawn_detached(const std::vector<std::string>& argv,
 
 #include <cerrno>
 #include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
 #include <spawn.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -244,7 +273,7 @@ std::vector<char*> to_cargv(const std::vector<std::string>& argv) {
 }  // namespace
 
 bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
-                 std::string& out, const CaptureLimits& /*limits*/) {
+                 std::string& out, const CaptureLimits& limits) {
     out.clear();
     if (argv.empty()) return false;
 
@@ -285,20 +314,47 @@ bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
         }
     }
 
+    // Its own process group, so a timeout or an overflow kills every
+    // descendant: a grandchild that inherited the pipe would otherwise hold
+    // the read open after the child itself died.
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
+    posix_spawnattr_setpgroup(&attr, 0);
+
     auto cargv = to_cargv(argv);
     pid_t pid = -1;
-    int rc = posix_spawnp(&pid, cargv[0], &fa, nullptr, cargv.data(), environ);
+    int rc = posix_spawnp(&pid, cargv[0], &fa, &attr, cargv.data(), environ);
     posix_spawn_file_actions_destroy(&fa);
+    posix_spawnattr_destroy(&attr);
     close(fds[1]);
     if (rc != 0) {
         close(fds[0]);
         return false;
     }
 
+    const auto deadline = std::chrono::steady_clock::now() + limits.timeout;
+    bool killed = false;
     std::array<char, 4096> buf{};
     for (;;) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        if (left.count() <= 0) {
+            killed = true;
+            break;
+        }
+        struct pollfd pfd{fds[0], POLLIN, 0};
+        const int ready = ::poll(&pfd, 1, static_cast<int>(std::min<long long>(
+                                               left.count(), 60000)));
+        if (ready < 0 && errno == EINTR) continue;
+        if (ready < 0) break;
+        if (ready == 0) continue;  // re-check the deadline
         ssize_t n = read(fds[0], buf.data(), buf.size());
         if (n > 0) {
+            if (out.size() + static_cast<size_t>(n) > limits.max_output_bytes) {
+                killed = true;
+                break;
+            }
             out.append(buf.data(), static_cast<size_t>(n));
         } else if (n < 0 && errno == EINTR) {
             continue;
@@ -306,13 +362,14 @@ bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
             break;  // n == 0 (EOF) or a real error
         }
     }
+    if (killed) ::kill(-pid, SIGKILL);
     close(fds[0]);
 
     int status = 0;
     while (waitpid(pid, &status, 0) < 0) {
         if (errno != EINTR) return false;
     }
-    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    return !killed && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 int run_status(const std::vector<std::string>& argv) {
