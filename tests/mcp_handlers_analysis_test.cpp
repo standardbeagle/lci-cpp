@@ -685,6 +685,41 @@ TEST_F(CodeInsightTest, InvalidModeReturnsError) {
     EXPECT_TRUE(result.is_error);
 }
 
+// max_results was read as a raw int and cast to size_t at every cap site:
+// -1 became SIZE_MAX (an unlimited dump, and clones' resize(SIZE_MAX) an
+// internal error), 0 an empty report that looked like "nothing found".
+TEST_F(CodeInsightTest, OutOfRangeMaxResultsIsRejected) {
+    const std::vector<nlohmann::json> bad = {-1, 0, 10001, 2.5, "10"};
+    const std::vector<std::pair<std::string, std::string>> modes = {
+        {"overview", ""},
+        {"detailed", "clones"},
+        {"detailed", "deadcode"},
+        {"detailed", "modules"},
+    };
+    for (const auto& [mode, analysis] : modes) {
+        for (const auto& v : bad) {
+            nlohmann::json params;
+            params["mode"] = mode;
+            if (!analysis.empty()) params["analysis"] = analysis;
+            params["max_results"] = v;
+            auto result = handle_code_insight(params, *engine_, *indexer_);
+            EXPECT_TRUE(result.is_error) << mode << "/" << analysis << " "
+                                         << v.dump() << "\n" << result.text;
+            EXPECT_NE(result.text.find("max_results must be an integer"),
+                      std::string::npos)
+                << mode << "/" << analysis << " " << v.dump() << "\n"
+                << result.text;
+        }
+        nlohmann::json ok;
+        ok["mode"] = mode;
+        if (!analysis.empty()) ok["analysis"] = analysis;
+        ok["max_results"] = 5;
+        auto result = handle_code_insight(ok, *engine_, *indexer_);
+        EXPECT_FALSE(result.is_error) << mode << "/" << analysis << "\n"
+                                      << result.text;
+    }
+}
+
 TEST_F(CodeInsightTest, OverviewModeProducesResponse) {
     nlohmann::json params;
     params["mode"] = "overview";
