@@ -1090,10 +1090,17 @@ std::vector<SearchMatch> find_content_matches(
     std::string_view content,
     std::string_view pattern,
     const SearchOptions& options,
-    MatchScope /*scope*/) {
+    MatchScope scope) {
 
     std::vector<SearchMatch> matches;
     if (pattern.empty() || content.empty()) return matches;
+    // kMaxMatchesPerFile applies ONLY when the caller set no explicit
+    // per-file budget. The scan stops at the cap: collecting past it and
+    // trimming afterwards materialized every occurrence of a dense file.
+    const size_t cap = static_cast<size_t>(options.max_count_per_file > 0
+                                               ? options.max_count_per_file
+                                               : kMaxMatchesPerFile);
+    const bool first_per_line = scope == MatchScope::FirstPerLine;
 
     // Regex path uses RE2 (Karpathy rule: no std::regex). RE2 is compiled per
     // call here — for hot multi-file scans a future iteration can lift the
@@ -1125,8 +1132,8 @@ std::vector<SearchMatch> find_content_matches(
             // error surfaced upstream by validation. No silent fallback.
             return matches;
         }
-        // Collects every match inside `text`, a span of `content`; offsets
-        // stay relative to `content`.
+        // Collects the matches inside `text`, a span of `content`; offsets
+        // stay relative to `content`. Returns false once the cap is reached.
         const auto collect = [&](std::string_view text) {
             re2::StringPiece input(text.data(), text.size());
             re2::StringPiece m;
@@ -1152,8 +1159,17 @@ std::vector<SearchMatch> find_content_matches(
                 bool exact = is_word_boundary(content, start) &&
                              is_word_boundary(content, end);
                 matches.push_back({start, end, exact});
+                if (matches.size() >= cap) return false;
                 cursor = local + m.size();
+                if (first_per_line) {
+                    // Resume on the next line; a match spanning lines still
+                    // resumes after its own end.
+                    const size_t nl = text.find('\n', local);
+                    if (nl == std::string_view::npos) break;
+                    cursor = std::max(cursor, nl + 1);
+                }
             }
+            return true;
         };
         if (content.find('\r') == std::string_view::npos) {
             collect(content);
@@ -1168,17 +1184,12 @@ std::vector<SearchMatch> find_content_matches(
                 size_t line_end = nl == std::string_view::npos ? content.size() : nl;
                 size_t text_end = line_end;
                 if (text_end > line_start && content[text_end - 1] == '\r') --text_end;
-                collect(content.substr(line_start, text_end - line_start));
+                if (!collect(content.substr(line_start, text_end - line_start))) {
+                    break;
+                }
                 if (nl == std::string_view::npos) break;
                 line_start = nl + 1;
             }
-        }
-
-        int cap = options.max_count_per_file > 0
-                      ? options.max_count_per_file
-                      : kMaxMatchesPerFile;
-        if (static_cast<int>(matches.size()) > cap) {
-            matches.resize(static_cast<size_t>(cap));
         }
         return matches;
     }
@@ -1227,19 +1238,13 @@ std::vector<SearchMatch> find_content_matches(
                      is_word_boundary(content, end);
 
         matches.push_back({start, end, exact});
-        offset = found + 1;
-    }
-
-    // kMaxMatchesPerFile applies ONLY when the caller set no explicit
-    // per-file budget. The previous else-if chain re-applied the constant
-    // whenever an explicit larger budget was not yet exceeded, silently
-    // truncating dense files to 100 regardless of the caller's cap.
-    {
-        const int cap = options.max_count_per_file > 0
-                            ? options.max_count_per_file
-                            : kMaxMatchesPerFile;
-        if (static_cast<int>(matches.size()) > cap) {
-            matches.resize(static_cast<size_t>(cap));
+        if (matches.size() >= cap) break;
+        if (first_per_line) {
+            const size_t nl = search_content.find('\n', found);
+            if (nl == std::string_view::npos) break;
+            offset = nl + 1;
+        } else {
+            offset = found + 1;
         }
     }
 
@@ -1303,10 +1308,14 @@ int SearchEngine::process_file(
     // only the prefix, and invert reported matching lines past the cap.
     // options.max_count_per_file is grep -m: it caps matching LINES that
     // survive the filters, applied in the loops below (0 = unlimited).
+    // Rows key on lines and read only each line's first match, so the scan
+    // keeps one match per line: holding every occurrence cost a SearchMatch
+    // per byte of a dense minified line.
     SearchOptions scan_options = options;
     scan_options.max_count_per_file = std::numeric_limits<int>::max();
     const int line_cap = options.max_count_per_file;
-    auto matches = find_matches(content_sv, pattern, scan_options);
+    auto matches = find_content_matches(content_sv, pattern, scan_options,
+                                        MatchScope::FirstPerLine);
     // Invert reports non-matching lines, so a file with zero matches is the
     // most productive input there is -- it contributes all of its lines.
     if (matches.empty() && !options.invert_match) return 0;
