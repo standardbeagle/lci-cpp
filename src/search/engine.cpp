@@ -1089,7 +1089,8 @@ std::vector<SearchResult> SearchEngine::search(
 std::vector<SearchMatch> find_content_matches(
     std::string_view content,
     std::string_view pattern,
-    const SearchOptions& options) {
+    const SearchOptions& options,
+    MatchScope /*scope*/) {
 
     std::vector<SearchMatch> matches;
     if (pattern.empty() || content.empty()) return matches;

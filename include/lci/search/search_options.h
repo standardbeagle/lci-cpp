@@ -342,11 +342,17 @@ int search_binary_line_offset(const std::vector<int>& offsets, int offset);
 /// byte offsets (uint32_t version, as stored by FileContentStore).
 int search_binary_line_offset(const std::vector<uint32_t>& offsets, int offset);
 
+/// Which occurrences find_content_matches reports. Every: each occurrence
+/// (literal occurrences may overlap). FirstPerLine: only the first occurrence
+/// that survives the word-boundary filter on each line, for a consumer that
+/// keys rows on lines and never reads a line's later matches.
+enum class MatchScope : uint8_t { Every, FirstPerLine };
+
 /// Shared literal/regex content matcher backing both SearchEngine::find_matches
 /// and MasterIndex::execute_search. Returns byte-offset matches; thread_local
 /// RE2 cache + lowercase buffers keep it allocation-free across a candidate scan.
-std::vector<SearchMatch> find_content_matches(std::string_view content,
-                                              std::string_view pattern,
-                                              const SearchOptions& options);
+std::vector<SearchMatch> find_content_matches(
+    std::string_view content, std::string_view pattern,
+    const SearchOptions& options, MatchScope scope = MatchScope::Every);
 
 }  // namespace lci
