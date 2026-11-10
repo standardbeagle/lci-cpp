@@ -23,6 +23,10 @@ namespace mcp {
 // -- Helpers ------------------------------------------------------------------
 
 namespace {
+// browse_file lists at most this many candidates for an ambiguous path,
+// with ambiguous_total carrying the full count. Same cap as /browse-file.
+constexpr size_t kMaxAmbiguousPaths = 20;
+
 
 /// Splits a comma-separated string into trimmed tokens.
 std::vector<std::string> parse_list(const std::string& s) {
@@ -896,7 +900,10 @@ ToolResult handle_browse_file(const nlohmann::json& params,
     FileID target_fid = 0;
     std::string target_path;
     bool found = false;
+    // The first kMaxAmbiguousPaths candidates in sorted order, plus the full
+    // count: a broad basename or glob must not answer with the whole repo.
     std::vector<std::string> ambiguous_paths;
+    size_t ambiguous_total = 0;
 
     if (file_id_param > 0) {
         target_fid = static_cast<FileID>(file_id_param);
@@ -930,9 +937,12 @@ ToolResult handle_browse_file(const nlohmann::json& params,
             target_path = indexer.get_file_path(target_fid);
             found = true;
             if (candidates.size() > 1) {
-                ambiguous_paths.reserve(candidates.size());
-                for (const auto& [rel, fid] : candidates) {
-                    ambiguous_paths.push_back(rel);
+                ambiguous_total = candidates.size();
+                const size_t shown =
+                    std::min(candidates.size(), kMaxAmbiguousPaths);
+                ambiguous_paths.reserve(shown);
+                for (size_t i = 0; i < shown; ++i) {
+                    ambiguous_paths.push_back(candidates[i].first);
                 }
             }
         }
@@ -997,6 +1007,7 @@ ToolResult handle_browse_file(const nlohmann::json& params,
     response["file"]["language"] = language_from_path(target_path);
     if (!ambiguous_paths.empty()) {
         response["ambiguous"] = std::move(ambiguous_paths);
+        response["ambiguous_total"] = ambiguous_total;
         response["ambiguous_hint"] =
             "multiple files match; the lexicographically smallest "
             "root-relative path was chosen — pass a longer path prefix or "

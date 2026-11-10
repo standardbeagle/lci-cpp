@@ -325,6 +325,11 @@ Symbol outline for a single file, with optional stats.
 `max_complexity`, `avg_complexity` (computed over the whole file, not the
 filtered subset).
 
+When `file` matches more than one indexed file, the lexicographically
+smallest root-relative path is browsed and the response adds `ambiguous`
+(the first 20 matching paths, sorted), `ambiguous_total` (the full count)
+and `ambiguous_hint`.
+
 **Errors**: neither `file` nor `file_id`.
 
 **Not applicable**: file not found (`found: false` + `hint`); index
