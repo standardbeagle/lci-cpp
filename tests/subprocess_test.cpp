@@ -4,9 +4,12 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <thread>
 
 #if !defined(_WIN32)
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -73,6 +76,81 @@ TEST(SubprocessTest, SpawnDetachedReturnsTrue) {
 TEST(SubprocessTest, SpawnDetachedMissingBinaryReturnsFalse) {
     EXPECT_FALSE(subprocess::spawn_detached({"lci-no-such-binary-xyzzy"}));
 }
+
+#if !defined(_WIN32)
+namespace {
+std::string read_whole(const fs::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// Waits (bounded) for `needle` to appear in the file a detached child writes.
+std::string wait_for_text(const fs::path& p, const std::string& needle) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    std::string content;
+    while (std::chrono::steady_clock::now() < deadline) {
+        content = read_whole(p);
+        if (content.find(needle) != std::string::npos) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return content;
+}
+}  // namespace
+
+// The daemon's stderr is the only channel for its own exit reason (RSS
+// self-cap, bind failure). On the null device nobody ever saw it. The log is
+// owner-only and replaces an earlier daemon's log rather than appending.
+TEST(SubprocessTest, SpawnDetachedWritesStderrToTheLog) {
+    const fs::path dir = fs::temp_directory_path() /
+                         ("lci_spawn_log_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const fs::path log = dir / "daemon.log";
+    {
+        std::ofstream stale(log);
+        stale << "stale line\n";
+    }
+    ::chmod(log.c_str(), 0644);
+
+    ASSERT_TRUE(subprocess::spawn_detached(
+        {"sh", "-c", "echo daemon-exit-reason >&2"}, log.string()));
+    const std::string content = wait_for_text(log, "daemon-exit-reason");
+    EXPECT_NE(content.find("daemon-exit-reason"), std::string::npos)
+        << "the daemon's stderr never reached the log: '" << content << "'";
+    EXPECT_EQ(content.find("stale line"), std::string::npos)
+        << "an earlier daemon's log was appended to, not replaced";
+    struct stat st {};
+    ASSERT_EQ(::lstat(log.c_str(), &st), 0);
+    EXPECT_EQ(st.st_mode & 0777, 0600u) << "the daemon log is not owner-only";
+    fs::remove_all(dir);
+}
+
+// A symlink planted at the log path must not redirect the daemon's stderr
+// into its target.
+TEST(SubprocessTest, SpawnDetachedLogDoesNotFollowASymlink) {
+    const fs::path dir = fs::temp_directory_path() /
+                         ("lci_spawn_link_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const fs::path target = dir / "victim.txt";
+    {
+        std::ofstream v(target);
+        v << "keep me\n";
+    }
+    const fs::path log = dir / "daemon.log";
+    fs::create_symlink(target, log);
+
+    ASSERT_TRUE(subprocess::spawn_detached(
+        {"sh", "-c", "echo daemon-exit-reason >&2"}, log.string()));
+    const std::string content = wait_for_text(log, "daemon-exit-reason");
+    EXPECT_NE(content.find("daemon-exit-reason"), std::string::npos);
+    EXPECT_FALSE(fs::is_symlink(log)) << "the log is still the planted link";
+    EXPECT_EQ(read_whole(target), "keep me\n")
+        << "the daemon wrote through the planted symlink";
+    fs::remove_all(dir);
+}
+#endif
 
 #if !defined(_WIN32)
 // The kernel's per-process fd table: /proc/self/fd on Linux, /dev/fd (fdescfs)
