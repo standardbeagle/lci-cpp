@@ -21,7 +21,11 @@ int run_status(const std::vector<std::string>& argv);
 /// Spawns argv as a fully detached background process (new session on POSIX,
 /// no console on Windows; stdio redirected to the null device). Returns true
 /// on successful spawn. Used to launch the index server daemon.
-bool spawn_detached(const std::vector<std::string>& argv);
+///
+/// `stderr_log` names where the daemon's stderr should go; not yet honoured,
+/// stderr still goes to the null device.
+bool spawn_detached(const std::vector<std::string>& argv,
+                    const std::string& stderr_log = std::string());
 
 }  // namespace subprocess
 }  // namespace lci

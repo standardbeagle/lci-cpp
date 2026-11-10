@@ -200,7 +200,8 @@ int run_status(const std::vector<std::string>& argv) {
     return static_cast<int>(code);
 }
 
-bool spawn_detached(const std::vector<std::string>& argv) {
+bool spawn_detached(const std::vector<std::string>& argv,
+                    const std::string& /*stderr_log*/) {
     if (argv.empty()) return false;
     HANDLE proc = spawn(argv, "", nullptr, /*detached=*/true);
     if (proc == nullptr) return false;
@@ -325,7 +326,8 @@ int run_status(const std::vector<std::string>& argv) {
     return WEXITSTATUS(status);
 }
 
-bool spawn_detached(const std::vector<std::string>& argv) {
+bool spawn_detached(const std::vector<std::string>& argv,
+                    const std::string& /*stderr_log*/) {
     if (argv.empty()) return false;
 
     posix_spawn_file_actions_t fa;
