@@ -1424,6 +1424,25 @@ int SearchEngine::process_file(
 
     int match_count = 0;
 
+    // symbol_types: a row survives only when its line's innermost symbol has
+    // a wanted type. Both the invert branch and the match loop below consult
+    // it before the cap and the count, so neither can return or count a row
+    // the filter excludes.
+    auto line_passes_type_filter = [&](int line) {
+        if (type_filter == nullptr) return true;
+        if (!symbol_at_line_built) {
+            symbol_at_line = type_filter->innermost_symbol_by_line(file_id);
+            symbol_at_line_built = true;
+        }
+        const EnhancedSymbol* sym =
+            static_cast<size_t>(line) < symbol_at_line.size()
+                ? symbol_at_line[static_cast<size_t>(line)]
+                : nullptr;
+        return sym != nullptr &&
+               symbol_type_matches_filter(options.symbol_types,
+                                          to_string(sym->symbol.type));
+    };
+
     if (options.invert_match) {
         // Mark every line carrying a match, then emit the rest. One forward
         // pass each, no per-line allocation (Karpathy rule 2). Invert rows all
@@ -1452,7 +1471,8 @@ int SearchEngine::process_file(
             if (!at_end && content_sv[static_cast<size_t>(i)] != '\n') continue;
             if (at_end && i == line_start) break;  // no trailing partial line
 
-            if (!matching_lines.contains(line_no)) {
+            if (!matching_lines.contains(line_no) &&
+                line_passes_type_filter(line_no)) {
                 if (!options.exclude_comments ||
                     !line_is_comment_only_with_spans(
                         content_sv, line_start, i, file_lang, comment_spans,
@@ -1503,21 +1523,7 @@ int SearchEngine::process_file(
             }
         }
 
-        if (type_filter != nullptr) {
-            if (!symbol_at_line_built) {
-                symbol_at_line = type_filter->innermost_symbol_by_line(file_id);
-                symbol_at_line_built = true;
-            }
-            const EnhancedSymbol* sym =
-                static_cast<size_t>(line) < symbol_at_line.size()
-                    ? symbol_at_line[static_cast<size_t>(line)]
-                    : nullptr;
-            if (sym == nullptr ||
-                !symbol_type_matches_filter(options.symbol_types,
-                                            to_string(sym->symbol.type))) {
-                continue;
-            }
-        }
+        if (!line_passes_type_filter(line)) continue;
 
         if (line_cap > 0 && match_count >= line_cap) break;
 
