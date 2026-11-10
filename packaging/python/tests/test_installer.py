@@ -34,5 +34,24 @@ class AssetMatcherTest(unittest.TestCase):
         self.assertFalse(match("lci-1.2.3-Darwin.tar.gz"))
 
 
+
+class ExpectedSha256Test(unittest.TestCase):
+    NAME = "lci-1.2.3-Linux.tar.gz"
+
+    # A suffix match let any line whose filename merely ENDS with the asset
+    # name supply the hash.
+    def test_suffix_lookalike_does_not_supply_the_hash(self):
+        sums = ("a" * 64 + "  evil-" + self.NAME + "\n"
+                + "b" * 64 + "  " + self.NAME + "\n")
+        self.assertEqual(installer._expected_sha256(sums, self.NAME), "b" * 64)
+
+    def test_binary_mode_marker_is_accepted(self):
+        sums = "C" * 64 + " *" + self.NAME + "\n"
+        self.assertEqual(installer._expected_sha256(sums, self.NAME), "c" * 64)
+
+    def test_missing_entry_is_none(self):
+        sums = "a" * 64 + "  evil-" + self.NAME + "\n"
+        self.assertIsNone(installer._expected_sha256(sums, self.NAME))
+
 if __name__ == "__main__":
     unittest.main()
