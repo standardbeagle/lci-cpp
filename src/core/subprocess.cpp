@@ -262,6 +262,11 @@ bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
     posix_spawn_file_actions_adddup2(&fa, fds[1], STDOUT_FILENO);
     posix_spawn_file_actions_addclose(&fa, fds[0]);
     posix_spawn_file_actions_addclose(&fa, fds[1]);
+    // Never the parent's stdin: under `lci mcp` it is the JSON-RPC pipe, and
+    // a child that reads stdin (a git prompt or hook) would eat client frames.
+    // The Windows spawn already hands children NUL.
+    posix_spawn_file_actions_addopen(&fa, STDIN_FILENO, "/dev/null", O_RDONLY,
+                                     0);
     posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null", O_WRONLY,
                                      0);
     if (!cwd.empty()) {
