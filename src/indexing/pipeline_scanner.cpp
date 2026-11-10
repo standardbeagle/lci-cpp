@@ -296,6 +296,14 @@ bool FileScanner::directory_pruned(std::string_view rel_dir) const {
     return should_exclude(dir_with_slash);
 }
 
+bool FileScanner::directory_admitted(std::string_view rel_dir) const {
+    for (size_t i = rel_dir.find('/'); i != std::string_view::npos;
+         i = rel_dir.find('/', i + 1)) {
+        if (directory_pruned(rel_dir.substr(0, i))) return false;
+    }
+    return !directory_pruned(rel_dir);
+}
+
 bool FileScanner::file_admitted(const std::filesystem::path& path,
                                 std::string_view rel_path) const {
     for (size_t i = rel_path.find('/'); i != std::string_view::npos;

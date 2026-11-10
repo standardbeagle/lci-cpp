@@ -78,6 +78,10 @@ class FileScanner {
     /// question, so incremental updates cannot admit what a scan prunes.
     bool directory_pruned(std::string_view rel_dir) const;
 
+    /// True when a scan descends into the directory at `rel_dir`: neither
+    /// it nor any ancestor is pruned.
+    bool directory_admitted(std::string_view rel_dir) const;
+
     /// True when a scan would index the regular file at `path` /
     /// `rel_path`, size aside: no ancestor directory is pruned and the file
     /// rules (binary extension, gitignore, exclude/include, attributes) pass.

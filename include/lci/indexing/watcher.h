@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include <lci/config.h>
 #include <lci/indexing/pipeline_scanner.h>
@@ -70,6 +71,14 @@ class FileWatcher {
     /// Returns current watch statistics.
     WatchStats get_stats() const;
 
+    /// Every file under the existing directory `dir` that a full scan
+    /// would index, sorted: pruned subdirectories are not entered and each
+    /// file passes the scanner's file rules and the size cap. Empty when
+    /// the scan would not descend into `dir` at all. A tree moved or
+    /// renamed into place arrives as one directory event with no per-file
+    /// events, so this is how the pipeline indexes it.
+    std::vector<std::string> admitted_files_under(const std::string& dir) const;
+
     // -- Internal: invoked by the efsw listener adapter.  Public so the
     // -- adapter (defined in the .cpp) can dispatch without friend coupling.
     /// `old_filename` is non-empty only for Rename events: efsw's previous
@@ -118,10 +127,14 @@ class FileWatcher {
 /// a bulk reindex window for minutes, overflowing the inotify queue):
 ///   - Remove: the path is queued in pending_paths_ (batched under
 ///     kPathBatchId); at rebuild time the file id is recorded in a
-///     DeletedFileTracker snapshot and the file removed from the index.
+///     DeletedFileTracker snapshot and the file removed from the index. A
+///     gone path that is not an indexed file may have been a directory
+///     (renamed away, or deleted as a tree, which delivers no per-file
+///     events): every indexed file under it is removed the same way.
 ///   - Create/Write/Rename of a NOT-yet-indexed path: queued in
 ///     pending_paths_, then applied via index_file (a new path has no
-///     FileID to debounce on).
+///     FileID to debounce on). A directory is applied by indexing every
+///     not-yet-indexed file FileWatcher::admitted_files_under returns.
 ///   - Write/Rename of an indexed path: debounced per FileID, then applied
 ///     via update_file with content read from disk.
 ///
@@ -160,9 +173,14 @@ class WatchPipeline {
     void on_event(const std::string& path, FileEventType type);
     void on_rebuild(const std::vector<FileID>& file_ids);
     /// Reconciles one queued path against disk and index (remove / fresh
-    /// add / update). Runs on the debouncer timer thread; may block on
-    /// MasterIndex::bulk_mu_.
-    void apply_path(const std::string& path);
+    /// add / update / directory add). A gone path that is not an indexed
+    /// file goes to `vanished` for remove_files_under. Runs on the debouncer
+    /// timer thread; may block on MasterIndex::bulk_mu_.
+    void apply_path(const std::string& path,
+                    absl::flat_hash_set<std::string>& vanished);
+    /// Removes every indexed file under any of `dirs`, in one pass over the
+    /// file map rather than one per directory.
+    void remove_files_under(const absl::flat_hash_set<std::string>& dirs);
 
     const Config& config_;
     MasterIndex& index_;

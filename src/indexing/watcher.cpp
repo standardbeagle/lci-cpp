@@ -1,5 +1,6 @@
 #include <lci/indexing/watcher.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -139,6 +140,44 @@ bool FileWatcher::should_process_path(const std::string& path) const {
     return scanner_.file_admitted(path, root_relative(path));
 }
 
+std::vector<std::string> FileWatcher::admitted_files_under(
+    const std::string& dir) const {
+    std::vector<std::string> files;
+    const std::string dir_generic = fs::path(dir).generic_string();
+    const std::string rel_dir = root_relative(dir);
+    if (!scanner_.directory_admitted(rel_dir)) return files;
+    // Children's repo-relative paths are derived from the directory's by
+    // string append, not fs::relative per entry (a readlink per component).
+    auto rel_of = [&](const std::string& path) {
+        std::string rel = rel_dir;
+        rel.append(path, dir_generic.size(), std::string::npos);
+        return rel;
+    };
+    std::error_code ec;
+    fs::recursive_directory_iterator it(
+        dir, fs::directory_options::skip_permission_denied, ec);
+    for (; !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        std::error_code entry_ec;
+        const std::string path = it->path().generic_string();
+        if (it->is_directory(entry_ec)) {
+            if (entry_ec || scanner_.directory_pruned(rel_of(path))) {
+                it.disable_recursion_pending();
+            }
+            continue;
+        }
+        if (!it->is_regular_file(entry_ec) || entry_ec) continue;
+        const auto size = it->file_size(entry_ec);
+        if (entry_ec ||
+            size > static_cast<uintmax_t>(config_.index.max_file_size)) {
+            continue;
+        }
+        if (!scanner_.file_admitted(it->path(), rel_of(path))) continue;
+        files.push_back(path);
+    }
+    std::sort(files.begin(), files.end());
+    return files;
+}
+
 std::string FileWatcher::under_configured_root(std::string path) const {
     if (resolved_root_.empty() || !path.starts_with(resolved_root_)) {
         return path;
@@ -210,22 +249,29 @@ void FileWatcher::on_efsw_event(const std::string& dir,
     bool is_dir = fs::is_directory(full_path, ec);
     if (!ec && is_dir) {
         if (should_ignore_dir(full_path)) return;
-        // A directory that still EXISTS (create / modify / rename-target)
-        // stays suppressed: per-file events inside it arrive separately.
-        // But a Remove of a formerly-watched directory must propagate —
-        // the kernel does not deliver per-child events for a recursive
-        // delete, so swallowing it stranded every child in the index.
-        // Dispatch directly: should_process_path applies FILE include
-        // patterns (e.g. *.go) that a directory path would never match.
-        if (type == FileEventType::Remove) dispatch_event(full_path, type);
+        // A directory created or renamed into place arrives as this ONE
+        // event: the kernel reports nothing for the files of a tree moved
+        // in, so the pipeline indexes it from the directory. A Remove of a
+        // still-present directory (efsw can deliver it early) propagates
+        // too. Dispatch directly: should_process_path applies FILE include
+        // patterns (e.g. *.go) that a directory path would never match. A
+        // Write on a directory is a metadata change with nothing to index.
+        if (type != FileEventType::Write) dispatch_event(full_path, type);
         return;
     }
-    // Note: for a deleted path (file OR directory) the filesystem check
-    // above cannot classify it — the path is gone. Remove events therefore
-    // always flow through; consumers treat a Remove of a path they track
-    // as a prefix (directory) or exact (file) invalidation.
 
-    if (!should_process_path(full_path)) return;
+    if (!should_process_path(full_path)) {
+        // A gone path cannot be classified as file or directory. Failing
+        // the FILE rules, it may still have been a directory holding
+        // indexed files (a directory rename's old name, a deleted tree), so
+        // its Remove propagates unless a scan would have pruned it as a
+        // directory too.
+        if (type == FileEventType::Remove &&
+            scanner_.directory_admitted(root_relative(full_path))) {
+            dispatch_event(full_path, type);
+        }
+        return;
+    }
 
     // Size cap: skip files exceeding max_file_size to match the prior
     // behaviour (avoids re-indexing huge generated artefacts).
@@ -327,7 +373,8 @@ void WatchPipeline::on_event(const std::string& path, FileEventType type) {
 
 // Reconcile one queued path against the disk and the index. Runs on the
 // debouncer timer thread, which may block on bulk_mu_.
-void WatchPipeline::apply_path(const std::string& path) {
+void WatchPipeline::apply_path(const std::string& path,
+                               absl::flat_hash_set<std::string>& vanished) {
     const FileID fid = index_.path_to_id(path);
     std::error_code ec;
     if (!fs::exists(path, ec) || ec) {
@@ -335,6 +382,18 @@ void WatchPipeline::apply_path(const std::string& path) {
         if (fid != FileID{0}) {
             deleted_.mark_deleted(fid);
             index_.remove_file(path);
+        } else {
+            // Not an indexed file: possibly a directory renamed away or
+            // deleted as a tree, whose files get no events of their own.
+            vanished.insert(path);
+        }
+        return;
+    }
+    if (fid == FileID{0} && fs::is_directory(path, ec) && !ec) {
+        // A directory created or moved into place: index what a scan
+        // would. Files already indexed keep their own Write events.
+        for (const auto& file : watcher_.admitted_files_under(path)) {
+            if (index_.path_to_id(file) == FileID{0}) index_.index_file(file);
         }
         return;
     }
@@ -353,7 +412,34 @@ void WatchPipeline::apply_path(const std::string& path) {
     index_.update_file(path, content);
 }
 
+void WatchPipeline::remove_files_under(
+    const absl::flat_hash_set<std::string>& dirs) {
+    if (dirs.empty()) return;
+    std::vector<std::string> doomed;
+    {
+        const auto snap = index_.load_snapshot();
+        for (const auto& [file, fid] : snap->file_map) {
+            const std::string_view view(file);
+            for (size_t i = view.rfind('/'); i != std::string_view::npos && i > 0;
+                 i = view.rfind('/', i - 1)) {
+                if (dirs.contains(view.substr(0, i))) {
+                    doomed.push_back(file);
+                    break;
+                }
+            }
+        }
+    }
+    std::sort(doomed.begin(), doomed.end());
+    for (const auto& file : doomed) {
+        const FileID fid = index_.path_to_id(file);
+        if (fid == FileID{0}) continue;
+        deleted_.mark_deleted(fid);
+        index_.remove_file(file);
+    }
+}
+
 void WatchPipeline::on_rebuild(const std::vector<FileID>& file_ids) {
+    absl::flat_hash_set<std::string> vanished;
     for (FileID fid : file_ids) {
         if (fid == kPathBatchId) {
             // Path-keyed batch: Remove and new-path events. Drain under the
@@ -363,7 +449,7 @@ void WatchPipeline::on_rebuild(const std::vector<FileID>& file_ids) {
                 std::lock_guard lock(paths_mu_);
                 paths.swap(pending_paths_);
             }
-            for (const auto& path : paths) apply_path(path);
+            for (const auto& path : paths) apply_path(path, vanished);
             continue;
         }
 
@@ -375,8 +461,9 @@ void WatchPipeline::on_rebuild(const std::vector<FileID>& file_ids) {
             path = std::move(it->second);
             scheduled_paths_.erase(it);
         }
-        apply_path(path);
+        apply_path(path, vanished);
     }
+    remove_files_under(vanished);
 }
 
 }  // namespace lci
