@@ -48,6 +48,10 @@ namespace lci {
 
 
 namespace {
+// /browse-file lists at most this many candidates for an ambiguous path,
+// with ambiguous_total carrying the full count. Same cap as MCP browse_file.
+constexpr size_t kMaxAmbiguousPaths = 20;
+
 
 using KindSet = std::vector<SymbolType>;
 
@@ -584,27 +588,41 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
         if (!target_path.empty()) found = true;
     }
 
-    // Try by file path
+    // Try by file path. An exact path wins; otherwise every path-component
+    // suffix match is collected and the smallest path is picked, so the
+    // answer cannot depend on get_all_file_ids() hash order, and the other
+    // candidates are reported (capped) instead of silently dropped.
+    std::vector<std::string> ambiguous_paths;
+    size_t ambiguous_total = 0;
     if (!found && !file_str.empty()) {
-        auto all_ids = indexer_->get_all_file_ids();
-        for (auto fid : all_ids) {
+        std::vector<std::pair<std::string, FileID>> candidates;
+        for (auto fid : indexer_->get_all_file_ids()) {
             auto fp = indexer_->get_file_path(fid);
             if (fp.empty()) continue;
-
-            bool match = (fp == file_str);
-            if (!match) {
-                // Check suffix match
-                if (fp.size() > file_str.size()) {
-                    auto sep = fp[fp.size() - file_str.size() - 1];
-                    match = (sep == '/' || sep == '\\') &&
-                            fp.substr(fp.size() - file_str.size()) == file_str;
+            if (fp == file_str) {
+                candidates.assign(1, {std::string(fp), fid});
+                break;
+            }
+            if (fp.size() > file_str.size()) {
+                auto sep = fp[fp.size() - file_str.size() - 1];
+                if ((sep == '/' || sep == '\\') &&
+                    fp.substr(fp.size() - file_str.size()) == file_str) {
+                    candidates.emplace_back(std::string(fp), fid);
                 }
             }
-            if (match) {
-                target_fid = fid;
-                target_path = fp;
-                found = true;
-                break;
+        }
+        if (!candidates.empty()) {
+            std::sort(candidates.begin(), candidates.end());
+            target_fid = candidates.front().second;
+            target_path = candidates.front().first;
+            found = true;
+            if (candidates.size() > 1) {
+                ambiguous_total = candidates.size();
+                const size_t shown =
+                    std::min(candidates.size(), kMaxAmbiguousPaths);
+                for (size_t i = 0; i < shown; ++i) {
+                    ambiguous_paths.push_back(candidates[i].first);
+                }
             }
         }
     }
@@ -675,6 +693,10 @@ void IndexServer::handle_browse_file(const httplib::Request& req,
     j["file"]["language"] = language_from_path(target_path);
     j["symbols"] = entries;
     j["total"] = total;
+    if (!ambiguous_paths.empty()) {
+        j["ambiguous"] = std::move(ambiguous_paths);
+        j["ambiguous_total"] = ambiguous_total;
+    }
 
     // Optional imports
     if (show_imports) {
