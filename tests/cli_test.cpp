@@ -4417,6 +4417,79 @@ TEST_F(CliMcpToolsTest, UnknownToolNameFailsAtStartupOverTheBridge) {
         run_session(bridge_args("search,nope"), narrowing_requests()));
 }
 
+// The MCP handshake must never wait on the corpus: a client gives up on a
+// server whose `initialize` outlives its connect deadline. The in-process path
+// already answers it before indexing; the default bridge path waited for the
+// spawned server's whole index build first, and then held every frame behind
+// a tool call that was itself waiting on the index, liveness pings included. LCI_DEBUG_INDEX_DELAY_MS holds the
+// spawned server's build back, so the window is wide and deterministic; the
+// tool call that follows must still wait the index out and answer from it.
+TEST_F(CliMcpToolsTest, BridgeAnswersInitializeBeforeTheIndexIsReady) {
+    constexpr int kIndexDelayMs = 6000;
+    const auto stdin_path = io_dir / "stdin_handshake.jsonl";
+    const auto stderr_path = io_dir / "stderr_handshake.txt";
+    {
+        std::ofstream in(stdin_path);
+        in << mcp_request(1, "initialize", {{"protocolVersion", "2025-06-18"}})
+                  .dump()
+           << '\n';
+        in << mcp_request(2, "tools/call",
+                          {{"name", "search"},
+                           {"arguments", {{"pattern", "alpha"}}}})
+                  .dump()
+           << '\n';
+        // A liveness ping sent while the tool call still waits on the index.
+        in << mcp_request(3, "ping", nlohmann::json::object()).dump() << '\n';
+    }
+    const std::string command =
+        "XDG_CONFIG_HOME=/nonexistent/lci-test-xdg LCI_DEBUG_INDEX_DELAY_MS=" +
+        std::to_string(kIndexDelayMs) + " " + shell_quote(lci_bin.string()) +
+        " mcp -r " + shell_quote(root.string()) + " < " +
+        shell_quote(stdin_path.string()) + " 2> " +
+        shell_quote(stderr_path.string());
+
+    const auto started = std::chrono::steady_clock::now();
+    FILE* pipe = ::popen(command.c_str(), "r");
+    ASSERT_NE(pipe, nullptr);
+    std::map<int, nlohmann::json> by_id;
+    std::map<int, long long> answered_ms;
+    std::array<char, 1 << 16> line{};
+    while (std::fgets(line.data(), static_cast<int>(line.size()), pipe)) {
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - started)
+                            .count();
+        auto frame = nlohmann::json::parse(line.data(), nullptr, false);
+        if (frame.is_object() && frame.contains("id") &&
+            frame["id"].is_number_integer()) {
+            by_id[frame["id"].get<int>()] = frame;
+            answered_ms[frame["id"].get<int>()] = ms;
+        }
+    }
+    ::pclose(pipe);
+    std::ifstream err(stderr_path);
+    const std::string stderr_text{std::istreambuf_iterator<char>(err), {}};
+    ASSERT_EQ(stderr_text.find("falling back"), std::string::npos)
+        << stderr_text;
+
+    ASSERT_TRUE(by_id.count(1)) << stderr_text;
+    EXPECT_TRUE(by_id[1].contains("result")) << by_id[1].dump();
+    EXPECT_LT(answered_ms[1], kIndexDelayMs - 2000)
+        << "initialize waited for the index build; stderr: " << stderr_text;
+
+    ASSERT_TRUE(by_id.count(2)) << stderr_text;
+    ASSERT_TRUE(by_id[2].contains("result")) << by_id[2].dump();
+    EXPECT_FALSE(by_id[2]["result"].value("isError", false))
+        << by_id[2].dump();
+    EXPECT_NE(by_id[2].dump().find("alpha"), std::string::npos)
+        << "the tool call must answer from the finished index: "
+        << by_id[2].dump();
+
+    ASSERT_TRUE(by_id.count(3)) << stderr_text;
+    EXPECT_TRUE(by_id[3].contains("result")) << by_id[3].dump();
+    EXPECT_LT(answered_ms[3], kIndexDelayMs - 2000)
+        << "the ping queued behind a tool call waiting on the index";
+}
+
 // An empty allowlist would serve nothing; "every tool" is spelled by leaving
 // --tools out. Both an empty value and an empty name inside a list refuse.
 TEST_F(CliMcpToolsTest, EmptyToolsValueOrNameIsRefused) {
