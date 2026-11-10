@@ -20,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <functional>
 #include <cstdlib>
 #include <limits>
 #include <new>
@@ -839,7 +840,12 @@ TEST_F(ExploreIndexTestFixture, BrowseFileSortByName) {
 // Runs browse_file for "util.go" against a two-candidate corpus in a fresh
 // child process (fresh absl hash salt -> fresh get_all_file_ids order) and
 // returns the raw response text. Returns empty on child failure.
-static std::string run_browse_ambiguous_in_child(const std::string& root) {
+// Indexes `root` in a fresh child process (fresh absl hash salt -> fresh
+// get_all_file_ids order), runs `handler` and returns its response text.
+// Empty on child failure.
+static std::string run_handler_in_child(
+    const std::string& root,
+    const std::function<std::string(MasterIndex&)>& handler) {
     int fds[2];
     if (pipe(fds) != 0) return {};
     pid_t pid = fork();
@@ -849,9 +855,7 @@ static std::string run_browse_ambiguous_in_child(const std::string& root) {
         config.project.root = root;
         MasterIndex indexer(config);
         if (!indexer.index_directory(root)) _exit(1);
-        nlohmann::json params = {{"file", "util.go"}};
-        auto result = handle_browse_file(params, indexer);
-        const std::string& text = result.text;
+        const std::string text = handler(indexer);
         size_t off = 0;
         while (off < text.size()) {
             ssize_t n = write(fds[1], text.data() + off, text.size() - off);
@@ -871,6 +875,13 @@ static std::string run_browse_ambiguous_in_child(const std::string& root) {
     int status = 0;
     waitpid(pid, &status, 0);
     return out;
+}
+
+static std::string run_browse_ambiguous_in_child(const std::string& root) {
+    return run_handler_in_child(root, [](MasterIndex& indexer) {
+        nlohmann::json params = {{"file", "util.go"}};
+        return handle_browse_file(params, indexer).text;
+    });
 }
 
 // Karpathy #4 (determinism): a bare basename matching two files must resolve
@@ -912,6 +923,81 @@ TEST(BrowseFileDeterminismTest, AmbiguousBasenameResolvesSmallestPath) {
     EXPECT_EQ(ambig, (std::vector<std::string>{"alpha/util.go",
                                                "zeta/util.go"}));
 
+    std::filesystem::remove_all(dir);
+}
+
+// browse_file listed EVERY candidate in `ambiguous`, so a broad basename or
+// glob over a large repo answered with a list as long as the repo.
+TEST(BrowseFileDeterminismTest, AmbiguousListIsCappedWithItsTotal) {
+    auto dir = lci::test::unique_temp_dir("lci_browse_ambig_cap_test_");
+    std::filesystem::remove_all(dir);
+    const char* src = "package p\n\nfunc helper() int { return 1 }\n";
+    for (int i = 0; i < 30; ++i) {
+        char name[8];
+        std::snprintf(name, sizeof(name), "d%02d", i);
+        std::filesystem::create_directories(dir / name);
+        std::ofstream(dir / name / "util.go") << src;
+    }
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex indexer(config);
+    ASSERT_TRUE(indexer.index_directory(dir.string()));
+    auto result = handle_browse_file({{"file", "util.go"}}, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+    EXPECT_EQ(j["file"]["path"].get<std::string>(), "d00/util.go");
+    ASSERT_TRUE(j.contains("ambiguous")) << j.dump();
+    ASSERT_EQ(j["ambiguous"].size(), 20u);
+    EXPECT_EQ(j["ambiguous"][0].get<std::string>(), "d00/util.go");
+    EXPECT_EQ(j["ambiguous"][19].get<std::string>(), "d19/util.go");
+    EXPECT_EQ(j.value("ambiguous_total", -1), 30);
+    std::filesystem::remove_all(dir);
+}
+
+// debug_info mode=references sorted on incoming count alone, so among
+// tied symbols the max_results cut kept whichever came first in hash
+// order — a different top list per process.
+TEST(DebugInfoDeterminismTest, ReferencesTopListStableAcrossProcesses) {
+    auto dir = lci::test::unique_temp_dir("lci_debug_refs_test_");
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    std::string caller = "package p\n\nfunc caller() {\n";
+    for (int i = 0; i < 20; ++i) {
+        char name[16];
+        std::snprintf(name, sizeof(name), "f%02d", i);
+        std::ofstream(dir / (std::string(name) + ".go"))
+            << "package p\n\nfunc Fn" << name << "() {}\n";
+        caller += std::string("\tFn") + name + "()\n";
+    }
+    caller += "}\n";
+    std::ofstream(dir / "zz_caller.go") << caller;
+
+    std::string reference;
+    for (int run = 0; run < 5; ++run) {
+        std::string text =
+            run_handler_in_child(dir.string(), [](MasterIndex& indexer) {
+                nlohmann::json params = {{"mode", "references"},
+                                         {"max_results", 3}};
+                // Compare the ranked list only: the envelope carries a
+                // timestamp that differs per run by design.
+                auto j = nlohmann::json::parse(
+                    handle_debug_info(params, indexer).text);
+                return j["top_referenced_symbols"].dump();
+            });
+        ASSERT_FALSE(text.empty()) << "child process produced no output";
+        if (run == 0) {
+            reference = text;
+        } else {
+            EXPECT_EQ(text, reference) << "run " << run << " diverged";
+        }
+    }
+    auto top = nlohmann::json::parse(reference);
+    std::vector<std::string> names;
+    for (const auto& item : top) {
+        names.push_back(item["symbol_name"].get<std::string>());
+    }
+    EXPECT_EQ(names, (std::vector<std::string>{"Fnf00", "Fnf01", "Fnf02"}))
+        << reference;
     std::filesystem::remove_all(dir);
 }
 #endif  // !_WIN32
