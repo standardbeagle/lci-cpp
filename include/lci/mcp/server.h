@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -31,6 +32,22 @@ namespace mcp {
 inline constexpr const char* kSupportedProtocolVersions[] = {
     "2024-11-05", "2025-03-26", "2025-06-18"};
 inline constexpr const char* kLatestProtocolVersion = "2025-06-18";
+
+// -- Tool-call queue ----------------------------------------------------------
+
+/// Tool calls a stdio session may hold queued behind the running one, on the
+/// in-process server and on the `lci mcp` bridge alike. Past it each excess
+/// call is answered at once with tool_queue_full_error(), so a client that
+/// pipelines calls without reading results cannot grow the queue unbounded.
+inline constexpr size_t kMaxQueuedToolCalls = 256;
+
+/// The JSON-RPC error object for a call refused past kMaxQueuedToolCalls.
+inline nlohmann::json tool_queue_full_error() {
+    return {{"code", -32000},
+            {"message", "too many queued tool calls (" +
+                            std::to_string(kMaxQueuedToolCalls) +
+                            "); wait for results before sending more"}};
+}
 
 // -- JSON-RPC types -----------------------------------------------------------
 
