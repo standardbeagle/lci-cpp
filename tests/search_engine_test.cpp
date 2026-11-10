@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <random>
 #include <string>
 #include <string_view>
@@ -21,6 +22,45 @@
 
 namespace lci {
 namespace {
+
+// process_file keys rows on lines and reads only each line's FIRST match, yet
+// it scanned with an unbounded per-file cap that materialized one SearchMatch
+// per occurrence first: a 10 MiB minified line searched for "e" held millions
+// of 12-byte matches per concurrent search. FirstPerLine keeps exactly the
+// matches that consumer reads.
+std::vector<int> match_starts(const std::vector<SearchMatch>& matches) {
+    std::vector<int> starts;
+    for (const auto& m : matches) starts.push_back(m.start);
+    return starts;
+}
+
+TEST(FindContentMatchesScope, FirstPerLineKeepsEachLinesFirstSurvivingMatch) {
+    SearchOptions literal;
+    literal.max_count_per_file = std::numeric_limits<int>::max();
+    EXPECT_EQ(match_starts(find_content_matches("aaaa\naa\n\nba", "a", literal,
+                                                MatchScope::FirstPerLine)),
+              (std::vector<int>{0, 5, 10}));
+    // A word-boundary reject is not skipped past: line 1's first SURVIVING
+    // match is at 3.
+    SearchOptions word = literal;
+    word.word_boundary = true;
+    EXPECT_EQ(match_starts(find_content_matches("xa a a\na\n", "a", word,
+                                                MatchScope::FirstPerLine)),
+              (std::vector<int>{3, 7}));
+    SearchOptions regex = literal;
+    regex.use_regex = true;
+    EXPECT_EQ(match_starts(find_content_matches("ab ab\nab\n", "a.", regex,
+                                                MatchScope::FirstPerLine)),
+              (std::vector<int>{0, 6}));
+    // CRLF content takes the line-at-a-time regex path.
+    EXPECT_EQ(match_starts(find_content_matches("ab ab\r\nab\r\n", "b", regex,
+                                                MatchScope::FirstPerLine)),
+              (std::vector<int>{1, 8}));
+    // Every stays exhaustive, overlapping literal occurrences included.
+    EXPECT_EQ(find_content_matches("aaaa\naa\n", "a", literal).size(), 6u);
+    EXPECT_EQ(match_starts(find_content_matches("ab ab\r\nab\r\n", "b", regex)),
+              (std::vector<int>{1, 4, 8}));
+}
 
 // -- Temp directory helper (matches existing test patterns) -------------------
 
