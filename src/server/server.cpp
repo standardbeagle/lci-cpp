@@ -438,9 +438,11 @@ void reap_stale_sockets(const std::string& own_sock) {
             ::close(lfd);  // a starting server owns this path
             continue;
         }
+        // The lock file stays. Unlinking a lock another process may have
+        // open splits it in two: a holder of the unlinked inode and a later
+        // opener of a fresh one would both "own" this socket path.
         std::error_code rm_ec;
         fs::remove(path, rm_ec);
-        fs::remove(lock_path, rm_ec);
         ::close(lfd);
     }
 }
@@ -493,30 +495,40 @@ bool IndexServer::start() {
             // Zombie-holder grace: a live process can hold the lock while
             // serving NOTHING — its socket unlinked out from under it (the
             // stale-restart orphan class). A starting server binds within
-            // moments of taking the lock, so if the socket is still dead
-            // after a short grace, the holder is a zombie and refusing
-            // forever turns one orphan into a root-wide outage. Proceed
-            // unguarded (loudly): the zombie has no listener to orphan.
+            // moments of taking the lock and the stale-socket reaper holds
+            // it for microseconds, so keep retrying the lock through a short
+            // grace: a transient holder releases it and this server starts
+            // GUARDED. Only a holder that keeps the lock for the whole grace
+            // with no listener is a zombie; refusing forever would turn one
+            // orphan into a root-wide outage, so proceed unguarded (loudly):
+            // the zombie has no listener to orphan.
             bool holder_serves = unix_socket_alive(sock);
-            if (!holder_serves) {
-                std::this_thread::sleep_for(std::chrono::seconds(2));
-                holder_serves = unix_socket_alive(sock);
+            bool acquired = false;
+            const auto grace_end =
+                std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            while (!holder_serves && !acquired &&
+                   std::chrono::steady_clock::now() < grace_end) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                acquired = ::flock(fd, LOCK_EX | LOCK_NB) == 0;
+                if (!acquired) holder_serves = unix_socket_alive(sock);
             }
-            ::close(fd);
-            if (holder_serves) {
+            if (!acquired) {
+                ::close(fd);
+                if (holder_serves) {
+                    std::fprintf(stderr,
+                                 "Error: another index server is starting or "
+                                 "already serving %s\n",
+                                 sock.c_str());
+                    running_.store(false, std::memory_order_release);
+                    return false;
+                }
                 std::fprintf(stderr,
-                             "Error: another index server is starting or "
-                             "already serving %s\n",
+                             "Warning: socket lock for %s is held by a "
+                             "process with no listener (orphaned server); "
+                             "starting unguarded\n",
                              sock.c_str());
-                running_.store(false, std::memory_order_release);
-                return false;
+                fd = -1;
             }
-            std::fprintf(stderr,
-                         "Warning: socket lock for %s is held by a process "
-                         "with no listener (orphaned server); starting "
-                         "unguarded\n",
-                         sock.c_str());
-            fd = -1;
         }
         // fd < 0 (lock file uncreatable) degrades to the probe-only guard
         // below rather than refusing to serve.
