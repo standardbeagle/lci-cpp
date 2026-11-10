@@ -132,9 +132,23 @@ std::string MasterIndex::id_to_path(FileID file_id) const {
 
 std::string MasterIndex::reload_evicted_content(const FileSnapshot& snap,
                                                 FileID file_id) const {
-    std::string_view path = id_to_path(snap, file_id);
-    if (path.empty()) return {};
-    std::ifstream in{std::string(path), std::ios::binary};
+    std::string_view path_view = id_to_path(snap, file_id);
+    if (path_view.empty()) return {};
+    const std::string path(path_view);
+    // The scanner's admission and size rules hold for a reload too: a path
+    // indexed as a regular file can since have become a symlink (a branch
+    // checkout swaps it) or grown past max_file_size, and an unguarded read
+    // served the link target's bytes or buffered the whole file per search.
+    if (!path_admissible_for_index(path, config_.project.root,
+                                   config_.index.follow_symlinks)) {
+        return {};
+    }
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    if (ec || static_cast<int64_t>(size) > config_.index.max_file_size) {
+        return {};
+    }
+    std::ifstream in{path, std::ios::binary};
     if (!in) return {};
     std::string bytes((std::istreambuf_iterator<char>(in)),
                       std::istreambuf_iterator<char>());
