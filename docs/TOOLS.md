@@ -239,7 +239,10 @@ only (warn once on stderr).
 
 Expansion directives in `x`: `callers[:N]`, `callees[:N]`, `implementations`,
 `interface`, `siblings`, `tests`, `doc`, `signature` — applied within the
-remaining token budget. Unknown directives are skipped.
+remaining token budget. Unknown directives are skipped. On every load, bounded
+or not, a directive's depth is clamped to 5 and one load expands at most 512
+targets; either clamp sets `stats.traversal_truncated` and adds a warning. A
+bounded load (`max_tokens` > 0) also refuses more than 128 input refs.
 
 **Errors**: empty `refs`; no `to_file`/`to_string`; no `from_file`/`from_string`;
 file not found; invalid JSON / manifest; invalid `operation`; a `to_file` that

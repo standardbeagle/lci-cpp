@@ -19,9 +19,10 @@ namespace lci {
 /// under a bound. An MCP caller that omits max_tokens keeps unlimited (0).
 constexpr int kHydrationDefaultMaxTokens = 8000;
 
-/// Traversal bounds applied independently of the token budget, and only to a
-/// bounded load (max_tokens > 0). They cap the request shape and the graph walk
-/// so a hostile or oversized manifest cannot drive unbounded hydration.
+/// Traversal bounds applied independently of the token budget. The input-ref
+/// cap applies to a bounded load (max_tokens > 0) only; the expansion depth
+/// and visited-target caps bound the graph walk on EVERY load, so a hostile or
+/// oversized manifest cannot drive unbounded hydration by omitting max_tokens.
 constexpr int kHydrationMaxInputRefs = 128;
 constexpr int kHydrationMaxExpansionDepth = 5;
 constexpr int kHydrationMaxVisitedTargets = 512;

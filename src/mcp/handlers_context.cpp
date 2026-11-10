@@ -1012,10 +1012,11 @@ ToolResult handle_context_load(const nlohmann::json& params,
     // applies the independent traversal caps (depth, visited targets).
     ExpansionTally tally;
     tally.emitted_keys = &emitted_keys;
-    tally.max_depth =
-        bounded ? kHydrationMaxExpansionDepth : std::numeric_limits<int>::max();
-    tally.visited_cap =
-        bounded ? kHydrationMaxVisitedTargets : std::numeric_limits<int>::max();
+    // Both caps bound the graph walk, not the token budget, so they hold for
+    // an unbounded (max_tokens 0) load too: a manifest's `callers:N` must not
+    // walk the whole caller closure just because no budget was named.
+    tally.max_depth = kHydrationMaxExpansionDepth;
+    tally.visited_cap = kHydrationMaxVisitedTargets;
     for (const auto& kv : key_to_index) {
         emitted_keys.insert(kv.first);
     }
