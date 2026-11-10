@@ -2801,6 +2801,49 @@ TEST(CodeInsightGitHotspots, SubdirectoryProjectRootGetsARiskMatrix) {
     fs::remove_all(repo);
 }
 
+// Hotspot history ran `git log` over the whole repo for a project rooted in
+// a subdirectory, so busier sibling directories listed files the project
+// does not contain and crowded its own files out of the top-N and the risk
+// join. The history must stay inside the project's directory.
+TEST(CodeInsightGitHotspots, SubdirectoryProjectHistoryStaysInsideTheProject) {
+    namespace fs = std::filesystem;
+    fs::path repo = make_subdir_project_repo("lci_hotspot_scope_");
+    const std::string commit =
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false commit -q -m ";
+    fs::create_directories(repo / "other");
+    for (int i = 0; i < 2; ++i) {
+        std::ofstream(repo / "other" / "busy.go")
+            << "package other\n\nfunc Busy() int { return " << i << " }\n";
+        ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+        ASSERT_TRUE(lci::test::run_git(repo, commit + "other" +
+                                                 std::to_string(i)));
+    }
+    std::ofstream(repo / "sub" / "main.go")
+        << "package main\n\nfunc main() {}\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(repo, commit + "sub-two"));
+
+    Config config;
+    config.project.root = (repo / "sub").string();
+    MasterIndex indexer(config);
+    indexer.index_directory(config.project.root);
+    CodebaseIntelligenceEngine engine;
+
+    nlohmann::json params;
+    params["mode"] = "git_hotspots";
+    auto result = handle_code_insight(params, engine, indexer);
+    ASSERT_FALSE(result.is_error) << result.text;
+    EXPECT_EQ(result.text.find("other/busy.go"), std::string::npos)
+        << "a file outside the project root was reported\n" << result.text;
+    EXPECT_NE(result.text.find("sub/main.go"), std::string::npos)
+        << result.text;
+    EXPECT_NE(result.text.find(" hotspots=1"), std::string::npos)
+        << result.text;
+
+    fs::remove_all(repo);
+}
+
 }  // namespace
 }  // namespace mcp
 }  // namespace lci
