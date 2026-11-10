@@ -485,6 +485,32 @@ TEST_F(GetContextPurityTest, FunctionCarriesPurityWhenAnalyzerWired) {
     EXPECT_TRUE(purity["is_pure"].get<bool>());
 }
 
+// confidence_threshold is a probability. A caller passing a percentage (30)
+// was silently run at the 0.3 default; refuse it instead, and keep an
+// in-range value working.
+TEST_F(GetContextPurityTest, OutOfRangeConfidenceThresholdIsRefused) {
+    auto oid = adder_object_id();
+    ASSERT_FALSE(oid.empty());
+    for (double bad : {30.0, -0.1, 1.5}) {
+        nlohmann::json params;
+        params["id"] = oid;
+        params["mode"] = "full";
+        params["confidence_threshold"] = bad;
+        auto result = handle_get_context(params, *indexer_);
+        EXPECT_TRUE(result.is_error) << bad << ": " << result.text;
+        EXPECT_NE(result.text.find("confidence_threshold"), std::string::npos)
+            << result.text;
+    }
+    for (double good : {0.0, 0.5, 1.0}) {
+        nlohmann::json params;
+        params["id"] = oid;
+        params["mode"] = "full";
+        params["confidence_threshold"] = good;
+        auto result = handle_get_context(params, *indexer_);
+        EXPECT_FALSE(result.is_error) << good << ": " << result.text;
+    }
+}
+
 TEST_F(GetContextPurityTest, PurityOmittedWithoutAnalyzer) {
     auto oid = adder_object_id();
     ASSERT_FALSE(oid.empty());
