@@ -2090,6 +2090,29 @@ TEST(ScopeSet, ParsesUnifiedDiffNewSideRanges) {
     EXPECT_FALSE(s.contains_file("real.go"));
 }
 
+// An added source line that itself starts with "++ " renders as "+++ ..."
+// inside a hunk. The parser took it for a new-file header, so every later
+// hunk of the real file was attributed to a file named "counter;" and its
+// changed symbols dropped out of git_analysis.
+TEST(ScopeSet, AddedLineStartingWithPlusPlusIsNotAFileHeader) {
+    const char* diff =
+        "diff --git src/c.cpp src/c.cpp\n"
+        "--- src/c.cpp\n"
+        "+++ src/c.cpp\n"
+        "@@ -1,2 +1,3 @@\n"
+        " int a;\n"
+        "+++ counter;\n"
+        " int b;\n"
+        "@@ -20,2 +21,3 @@\n"
+        " int c;\n"
+        "+int d;\n"
+        " int e;\n";
+    auto s = scope_from_unified_diff(diff);
+    EXPECT_FALSE(s.contains_file("counter;"));
+    EXPECT_TRUE(s.contains_lines("src/c.cpp", 22, 22))
+        << "the second hunk lost its file";
+}
+
 // ===========================================================================
 // entry_signatures: packages/* scan must skip non-directory entries and
 // sample in a deterministic (sorted) order. The fixture mixes 70 regular
