@@ -6,6 +6,10 @@
 #include <filesystem>
 #include <thread>
 
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
+
 namespace lci {
 namespace {
 
@@ -113,6 +117,31 @@ TEST(SubprocessTest, ConcurrentRunCaptureLeaksNoFdsIntoOtherChild) {
     slow.join();
     EXPECT_EQ(concurrent, baseline)
         << "a concurrent run_capture's pipe ends leaked into this child";
+}
+
+// run_capture children inherited the parent's stdin. Under `lci mcp` that
+// is the JSON-RPC pipe: any child that reads stdin (a git credential or
+// pager prompt, a hook) would swallow client frames. Reference: the child
+// is `cat`, which echoes whatever stdin it was given.
+TEST(SubprocessTest, RunCaptureChildGetsNoParentStdin) {
+    int fds[2];
+    ASSERT_EQ(::pipe(fds), 0);
+    const std::string frame = "{\"jsonrpc\":\"2.0\",\"id\":7}\n";
+    ASSERT_EQ(::write(fds[1], frame.data(), frame.size()),
+              static_cast<ssize_t>(frame.size()));
+    ::close(fds[1]);  // EOF after the frame, so a pre-fix `cat` returns
+    const int saved_stdin = ::dup(STDIN_FILENO);
+    ASSERT_GE(saved_stdin, 0);
+    ASSERT_GE(::dup2(fds[0], STDIN_FILENO), 0);
+    ::close(fds[0]);
+
+    std::string out;
+    const bool ok = subprocess::run_capture({"cat"}, "", out);
+
+    ::dup2(saved_stdin, STDIN_FILENO);
+    ::close(saved_stdin);
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(out, "") << "the child read the parent's stdin";
 }
 #endif
 
