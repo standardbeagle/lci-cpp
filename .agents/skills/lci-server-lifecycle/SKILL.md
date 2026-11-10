@@ -96,6 +96,11 @@ build/release/src/lci status -v -r .
 # Foreground server for debugging (Ctrl-C or `lci shutdown` stops it)
 build/release/src/lci server --foreground -r .
 
+# Hold the initial index build back (ms, capped at 10 min) to observe the
+# "listening, index not ready" window; a background server's stderr is in
+# <socket>.log
+LCI_DEBUG_INDEX_DELAY_MS=6000 build/release/src/lci server --foreground -r .
+
 # Talk to the socket directly
 ls -l /tmp/lci-$(id -u)-*.sock
 curl --unix-socket /tmp/lci-$(id -u)-<hash>.sock http://lci/status

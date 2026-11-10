@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -306,6 +307,22 @@ std::string language_from_extension(const std::string& path) {
     return std::string(to_string(info.language));
 }
 
+// LCI_DEBUG_INDEX_DELAY_MS=<n>: the server waits n ms (capped at 10 min)
+// before its initial index build. A manual-testing and test hook for the
+// window in which the server listens but its index is not ready, which a
+// fast machine otherwise closes before anything can be observed. Unset,
+// malformed or non-positive: no delay.
+std::chrono::milliseconds debug_index_delay() {
+    const char* raw = std::getenv("LCI_DEBUG_INDEX_DELAY_MS");
+    if (raw == nullptr || *raw == '\0') return std::chrono::milliseconds{0};
+    char* end = nullptr;
+    const long long ms = std::strtoll(raw, &end, 10);
+    if (end == raw || *end != '\0' || ms <= 0) {
+        return std::chrono::milliseconds{0};
+    }
+    return std::chrono::milliseconds{std::min(ms, 600000LL)};
+}
+
 }  // namespace
 
 // -- IndexServer construction -------------------------------------------------
@@ -587,6 +604,16 @@ bool IndexServer::start() {
         search_engine_.load(std::memory_order_acquire) == nullptr) {
         indexing_active_.store(true, std::memory_order_release);
         swap_indexing_thread(std::thread([this] {
+            // Manual-testing hook: hold the initial build back so the
+            // "listening, index not ready" window can be observed on demand.
+            // Waits in short steps so shutdown and cancellation stay prompt.
+            const auto delay = debug_index_delay();
+            const auto delay_end = std::chrono::steady_clock::now() + delay;
+            while (std::chrono::steady_clock::now() < delay_end &&
+                   running_.load(std::memory_order_acquire) &&
+                   !indexer_->stop_requested()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
             indexer_->index_directory(config_.project.root);
 
             if (indexer_->stop_requested()) {
