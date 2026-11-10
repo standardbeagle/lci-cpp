@@ -260,7 +260,9 @@ class McpServer {
     };
 
     /// Enqueues a tools/call for the worker thread (starts it on first use).
-    void enqueue_call(PendingCall call);
+    /// Returns false, queuing nothing, when kMaxQueuedToolCalls calls
+    /// already wait.
+    [[nodiscard]] bool enqueue_call(PendingCall call);
 
     /// Worker loop: pops queued calls, waits the readiness gate, runs the
     /// handler, writes the response. Exits when told to finish and the

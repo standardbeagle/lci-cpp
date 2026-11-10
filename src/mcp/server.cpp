@@ -245,9 +245,12 @@ nlohmann::json McpServer::handle_request(const nlohmann::json& request) {
             // build takes), runs the handler, and writes the response,
             // while this thread keeps draining stdin so initialize /
             // tools/list / ping stay answered mid-build.
-            enqueue_call({&*it,
-                          params.value("arguments", nlohmann::json::object()),
-                          id});
+            if (!enqueue_call(
+                    {&*it, params.value("arguments", nlohmann::json::object()),
+                     id})) {
+                response["error"] = tool_queue_full_error();
+                return response;
+            }
             return nullptr;
         }
     } else if (method == "ping") {
@@ -682,15 +685,17 @@ std::string McpServer::dispatch_wire(const std::string& line) {
 
 // -- Tool worker --------------------------------------------------------------
 
-void McpServer::enqueue_call(PendingCall call) {
+bool McpServer::enqueue_call(PendingCall call) {
     {
         std::lock_guard lock(queue_mu_);
+        if (queue_.size() >= kMaxQueuedToolCalls) return false;
         queue_.push_back(std::move(call));
         if (!worker_.joinable()) {
             worker_ = std::thread([this] { drain_calls(); });
         }
     }
     queue_cv_.notify_one();
+    return true;
 }
 
 void McpServer::drain_calls() {

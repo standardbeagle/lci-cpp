@@ -181,11 +181,23 @@ int run_mcp_bridge(Client& client, const mcp::ToolAllowlist* allowlist) {
                 request["params"]["name"].is_string()) {
                 called_tool = request["params"]["name"].get<std::string>();
             }
+            bool queued = false;
             {
                 std::lock_guard<std::mutex> lock(calls_mu);
-                calls.push_back({std::move(line), std::move(called_tool)});
+                if (calls.size() < mcp::kMaxQueuedToolCalls) {
+                    calls.push_back({std::move(line), std::move(called_tool)});
+                    queued = true;
+                }
             }
-            calls_cv.notify_one();
+            if (queued) {
+                calls_cv.notify_one();
+            } else if (request.contains("id")) {
+                write_frame(nlohmann::json{{"jsonrpc", "2.0"},
+                                           {"id", request["id"]},
+                                           {"error",
+                                            mcp::tool_queue_full_error()}}
+                                .dump());
+            }
             continue;
         }
         forward(line, is_object && request["method"] == "tools/list", {});
