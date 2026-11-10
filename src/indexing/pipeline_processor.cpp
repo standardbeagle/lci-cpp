@@ -16,6 +16,8 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <optional>
 #include <thread>
 #include <utility>
@@ -24,6 +26,15 @@
 namespace lci {
 
 namespace {
+
+// Reads the whole file into `out`. False on open or read failure.
+bool read_whole_file(const std::string& path, std::vector<uint8_t>& out) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+    out.assign(std::istreambuf_iterator<char>(in),
+               std::istreambuf_iterator<char>());
+    return !in.bad();
+}
 
 /// Extracts symbols, references, and scopes from a file's content via
 /// tree-sitter + UnifiedExtractor. Populates `result` in place; trigram and
@@ -284,7 +295,30 @@ ProcessedFile FileProcessor::process_file(
         }
     }
 
-    auto content = file_service_->get_content(file_id);
+    // Pin the bytes for the whole parse. The store's LRU (max_memory_mb)
+    // can evict this file between the producer's batch load and this
+    // worker reaching it — get_content then returns empty and the file
+    // would be indexed with no symbols, trigrams or postings, i.e.
+    // unsearchable. An evicted file is re-read from disk, as search does
+    // (MasterIndex::reload_evicted_content); an unreadable one fails loudly.
+    std::shared_ptr<const FileContent> pinned =
+        file_service_->store().get_file(file_id);
+    if (pinned == nullptr) {
+        auto reloaded = std::make_shared<FileContent>();
+        reloaded->file_id = file_id;
+        if (!read_whole_file(task.path, reloaded->content)) {
+            result.has_error = true;
+            result.error.type = ErrorType::Indexing;
+            result.error.message =
+                "content evicted before parse and unreadable from disk";
+            result.error.file_path = task.path;
+            result.stage = "loading";
+            result.duration = std::chrono::steady_clock::now() - start;
+            return result;
+        }
+        pinned = std::move(reloaded);
+    }
+    const std::string_view content = pinned->view();
 
     // Defense-in-depth: binary check on loaded content
     if (binary_detector_.is_binary_by_magic_number(content)) {
@@ -306,6 +340,13 @@ ProcessedFile FileProcessor::process_file(
     run_unified_extraction(result, content, task.path,
                            config_.index.max_parse_file_size,
                            side_effect_sink);
+
+    // Imports are extracted here, not in the integrator, for the same
+    // eviction reason as the pin above: only the worker is sure to hold
+    // the bytes, and ProcessedFile results are buffered until commit, so
+    // carrying the bytes instead would hold the whole corpus in memory.
+    result.imports =
+        import_extractor_.extract_file_imports(file_id, task.path, content);
 
     // Per-occurrence trigram bucketing removed (2026-08-04): its sole
     // consumer, ShardedTrigramStorage (fed via the merger pipeline), had no

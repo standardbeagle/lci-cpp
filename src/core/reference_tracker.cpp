@@ -696,8 +696,11 @@ void ReferenceTracker::apply_enrichment(
 
 void ReferenceTracker::process_file_imports(
     FileID file_id, std::string_view file_path, std::string_view content) {
-    auto data = import_resolver_.extract_file_imports(file_id, file_path,
-                                                      content);
+    queue_file_imports(
+        import_resolver_.extract_file_imports(file_id, file_path, content));
+}
+
+void ReferenceTracker::queue_file_imports(FileImportData data) {
     if (!data.bindings.empty()) {
         import_data_.push_back(std::move(data));
     }

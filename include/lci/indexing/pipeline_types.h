@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include <lci/core/reference_tracker.h>
 #include <lci/core/trigram.h>
 #include <lci/error.h>
 #include <lci/reference.h>
@@ -94,6 +95,10 @@ struct ProcessedFile {
     std::vector<ScopeInfo> scopes;
     std::vector<ProcessedSymbolMetadata> symbol_metadata;
     std::vector<ProcessedToken> postings_tokens;  // worker-built
+    /// Worker-extracted import bindings. Extracted while the worker holds
+    /// the content, because the content store's LRU may evict the file
+    /// before integration; the integrator never re-reads the store.
+    FileImportData imports;
     std::vector<int> line_offsets;
     std::string language;
     std::string stage;

@@ -91,10 +91,11 @@ class ImportResolver {
   public:
     ImportResolver() = default;
 
-    /// Extracts import data from a file (lock-free, safe for parallel calls).
+    /// Extracts import data from a file. Reads no resolver state, so it is
+    /// safe from the parallel pipeline workers (lock-free).
     FileImportData extract_file_imports(FileID file_id,
                                         std::string_view file_path,
-                                        std::string_view content);
+                                        std::string_view content) const;
 
     /// BULK path only. Rebuilds the whole graph, CLEARING every previously
     /// recorded binding first. The bulk pipeline integrates the entire corpus
@@ -450,9 +451,15 @@ class ReferenceTracker {
         std::span<const ScopeInfo> scopes,
         std::span<const FieldType> field_types = {});
 
-    /// Processes a file's imports for symbol resolution.
+    /// Processes a file's imports for symbol resolution: extract, then
+    /// queue_file_imports.
     void process_file_imports(FileID file_id, std::string_view file_path,
                               std::string_view content);
+
+    /// Queues import data a pipeline worker already extracted (see
+    /// ProcessedFile::imports), for process_all_references. Empty data is
+    /// dropped, matching process_file_imports.
+    void queue_file_imports(FileImportData data);
 
     /// Processes all stored references after all symbols have been indexed.
     /// Import-graph ownership of the clear is decided by the bulk window:

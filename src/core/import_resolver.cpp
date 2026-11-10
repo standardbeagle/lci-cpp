@@ -10,7 +10,8 @@ namespace lci {
 // ---------------------------------------------------------------------------
 
 FileImportData ImportResolver::extract_file_imports(
-    FileID file_id, std::string_view file_path, std::string_view content) {
+    FileID file_id, std::string_view file_path,
+    std::string_view content) const {
 
     FileImportData data;
     data.file_id = file_id;

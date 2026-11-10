@@ -119,6 +119,9 @@ class FileProcessor {
     const Config& config_;
     std::shared_ptr<FileService> file_service_;
     BinaryDetector binary_detector_;
+    /// Stateless use only (extract_file_imports is const): shared by every
+    /// worker, never holds a graph.
+    const ImportResolver import_extractor_;
     TrigramIndex* trigram_index_;
     SideEffectAnalyzer* side_effect_target_{};
     std::mutex side_effect_mu_;

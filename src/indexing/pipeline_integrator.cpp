@@ -111,11 +111,7 @@ void FileIntegrator::merge_symbols(ProcessedFile& file) {
     // removed every cross-file edge its call sites should have built.
     if (ref_tracker_ != nullptr) {
         // Process imports first, then symbols + references + scopes.
-        if (file_content_store_ != nullptr) {
-            auto content = file_content_store_->get_content(file.file_id);
-            ref_tracker_->process_file_imports(
-                file.file_id, file.path, content);
-        }
+        ref_tracker_->queue_file_imports(std::move(file.imports));
 
         auto enhanced = ref_tracker_->process_file(
             file.file_id, file.path, file.symbols,
