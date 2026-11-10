@@ -495,6 +495,31 @@ TEST(FileScannerTest, RespectsExclusionPatterns) {
     }
 }
 
+// An exclude ending in `/**` or `/*` covers everything under the directory,
+// so the walk must stop AT the directory, not enter it and reject each file:
+// `**/node_modules/**` matched node_modules/x but never "node_modules"
+// itself, so every excluded tree was walked file by file.
+TEST(FileScannerTest, TrailingWildcardExcludePrunesTheDirectory) {
+    TempDir dir;
+    dir.write_file("main.go", "package main");
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.exclude = {"**/node_modules/**", "vendor/**", "out/*", "src/*.gen.go",
+                   "**/gen/**"};
+    FileScanner scanner(cfg);
+
+    EXPECT_TRUE(scanner.directory_pruned("node_modules"));
+    EXPECT_TRUE(scanner.directory_pruned("web/node_modules"));
+    EXPECT_TRUE(scanner.directory_pruned("vendor"));
+    EXPECT_TRUE(scanner.directory_pruned("out"));
+    EXPECT_TRUE(scanner.directory_pruned("pkg/gen"));
+    // Only the directory a trailing wildcard sits under is pruned.
+    EXPECT_FALSE(scanner.directory_pruned("src"));
+    EXPECT_FALSE(scanner.directory_pruned("web"));
+    EXPECT_FALSE(scanner.directory_pruned("pkg/generated"));
+    EXPECT_FALSE(scanner.directory_pruned("vendorized"));
+}
+
 TEST(FileScannerTest, RespectsMaxFileSize) {
     TempDir dir;
     dir.write_file("small.go", "package small");
