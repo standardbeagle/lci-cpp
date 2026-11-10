@@ -2191,6 +2191,47 @@ TEST(CommentSpanScan, LanguageGateAndStringAndTerminatorSafety) {
                     .empty());
 }
 
+// Backtick literals (Go raw strings, JS/TS template literals) were not
+// strings to the scanner, so a glob like `**/*.go` opened a block comment
+// that ran to the next real */ and nc search dropped every line between.
+TEST(CommentSpanScan, BacktickLiteralsCannotOpenABlock) {
+    const std::string go =
+        "var glob = `src/**/*.go`\n"
+        "func keep() {}\n"
+        "/* real */\n";
+    auto go_spans = scan_block_comment_ranges(go, LangId::Go);
+    ASSERT_EQ(go_spans.size(), 1u);
+    EXPECT_EQ(go.substr(go_spans[0].start,
+                        go_spans[0].end - go_spans[0].start),
+              "/* real */");
+
+    // Go raw strings take no escapes: the backslash does not eat the
+    // closing backtick.
+    const std::string go_raw_backslash =
+        "var re = `\\`\nvar s = `/*`\nfunc keep() {}\n/* real */\n";
+    auto raw_spans = scan_block_comment_ranges(go_raw_backslash, LangId::Go);
+    ASSERT_EQ(raw_spans.size(), 1u);
+    EXPECT_EQ(go_raw_backslash.substr(raw_spans[0].start,
+                                      raw_spans[0].end - raw_spans[0].start),
+              "/* real */");
+
+    // A JS template literal spans lines and honours backslash escapes.
+    const std::string js =
+        "const t = `a\\` /* still inside\n*/ b`;\n"
+        "keep();\n"
+        "/* real */\n";
+    auto js_spans = scan_block_comment_ranges(js, LangId::JavaScript);
+    ASSERT_EQ(js_spans.size(), 1u);
+    EXPECT_EQ(js.substr(js_spans[0].start,
+                        js_spans[0].end - js_spans[0].start),
+              "/* real */");
+
+    // An unmatched backtick does not swallow the rest of the file.
+    EXPECT_EQ(scan_block_comment_ranges("int `x;\n/* c */\n", LangId::Cpp)
+                  .size(),
+              1u);
+}
+
 TEST(CommentSpanScan, ContinuationClassifiedWithMonotonicCursor) {
     const std::string content = "int a;\n/* b\n * c\n */\nint d;\n";
     auto spans = scan_block_comment_ranges(content, LangId::Cpp);
