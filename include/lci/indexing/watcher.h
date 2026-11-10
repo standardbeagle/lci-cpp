@@ -21,6 +21,7 @@
 namespace lci {
 
 class MasterIndex;
+struct FileChangeBatch;
 
 /// Type of file system event detected by the watcher.
 enum class FileEventType : uint8_t {
@@ -171,16 +172,23 @@ class WatchPipeline {
     static constexpr FileID kPathBatchId{0};
 
     void on_event(const std::string& path, FileEventType type);
+    /// Plans the batch's paths and applies them as ONE
+    /// MasterIndex::apply_file_changes write. Runs on the debouncer timer
+    /// thread; may block on MasterIndex::bulk_mu_.
     void on_rebuild(const std::vector<FileID>& file_ids);
-    /// Reconciles one queued path against disk and index (remove / fresh
-    /// add / update / directory add). A gone path that is not an indexed
-    /// file goes to `vanished` for remove_files_under. Runs on the debouncer
-    /// timer thread; may block on MasterIndex::bulk_mu_.
-    void apply_path(const std::string& path,
-                    absl::flat_hash_set<std::string>& vanished);
-    /// Removes every indexed file under any of `dirs`, in one pass over the
-    /// file map rather than one per directory.
-    void remove_files_under(const absl::flat_hash_set<std::string>& dirs);
+    /// Directory paths a batch saw: gone from disk (`vanished`) or present
+    /// without being an indexed file (`present`: created, moved in, swapped).
+    struct DirectoryPlan {
+        absl::flat_hash_set<std::string> vanished;
+        absl::flat_hash_set<std::string> present;
+    };
+    /// Plans one queued path against disk and index: a removal, a file to
+    /// (re)index, or a directory for plan_directories.
+    void plan_path(const std::string& path, FileChangeBatch& batch,
+                   DirectoryPlan& dirs);
+    /// Folds the directory paths into the batch in one pass over the file map.
+    void plan_directories(const DirectoryPlan& dirs,
+                          FileChangeBatch& batch);
 
     const Config& config_;
     MasterIndex& index_;

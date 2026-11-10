@@ -371,85 +371,82 @@ void WatchPipeline::on_event(const std::string& path, FileEventType type) {
     rebuilder_.schedule_rebuild(fid);
 }
 
-// Reconcile one queued path against the disk and the index. Runs on the
-// debouncer timer thread, which may block on bulk_mu_.
-void WatchPipeline::apply_path(const std::string& path,
-                               absl::flat_hash_set<std::string>& vanished) {
+// Plans one queued path against the disk and the index. Runs on the
+// debouncer timer thread; nothing is written until on_rebuild applies the
+// whole batch.
+void WatchPipeline::plan_path(const std::string& path,
+                              FileChangeBatch& batch,
+                              DirectoryPlan& dirs) {
     const FileID fid = index_.path_to_id(path);
     std::error_code ec;
     if (!fs::exists(path, ec) || ec) {
         // Removed (or vanished between event and rebuild).
         if (fid != FileID{0}) {
             deleted_.mark_deleted(fid);
-            index_.remove_file(path);
+            batch.removed.push_back(path);
         } else {
             // Not an indexed file: possibly a directory renamed away or
             // deleted as a tree, whose files get no events of their own.
-            vanished.insert(path);
+            dirs.vanished.insert(path);
         }
         return;
     }
     if (fid == FileID{0} && fs::is_directory(path, ec) && !ec) {
-        // A directory created or moved into place: index what a scan
-        // would. Files already indexed keep their own Write events.
-        for (const auto& file : watcher_.admitted_files_under(path)) {
-            if (index_.path_to_id(file) == FileID{0}) index_.index_file(file);
-        }
+        // A directory created, moved into place, or swapped in under a name
+        // that held another tree in the same debounce window.
+        dirs.present.insert(path);
         return;
     }
-    if (fid == FileID{0}) {
-        // New path (or removed from the index while the event was pending):
-        // fresh add.
-        index_.index_file(path);
-        return;
-    }
-
-    std::ifstream in(path, std::ios::binary);
-    if (!in) return;
-    std::string content((std::istreambuf_iterator<char>(in)),
-                        std::istreambuf_iterator<char>());
-    if (!in.good() && !in.eof()) return;
-    index_.update_file(path, content);
+    // A new file, or an indexed one whose bytes may have changed.
+    batch.indexed.push_back(path);
 }
 
-void WatchPipeline::remove_files_under(
-    const absl::flat_hash_set<std::string>& dirs) {
-    if (dirs.empty()) return;
-    std::vector<std::string> doomed;
-    {
-        const auto snap = index_.load_snapshot();
-        for (const auto& [file, fid] : snap->file_map) {
-            const std::string_view view(file);
-            for (size_t i = view.rfind('/'); i != std::string_view::npos && i > 0;
-                 i = view.rfind('/', i - 1)) {
-                if (dirs.contains(view.substr(0, i))) {
-                    doomed.push_back(file);
-                    break;
-                }
-            }
+// Folds the directory events into the batch with one pass over the file map.
+// A vanished directory drops every indexed file under it. A present one is
+// indexed as a scan would see it: every admitted file under it is (re)read,
+// so a same-name swap replaces old bytes, and an indexed file the tree no
+// longer holds is dropped instead of lingering as a ghost.
+void WatchPipeline::plan_directories(const DirectoryPlan& dirs,
+                                     FileChangeBatch& batch) {
+    if (dirs.vanished.empty() && dirs.present.empty()) return;
+    absl::flat_hash_set<std::string> on_disk;
+    for (const auto& dir : dirs.present) {
+        for (auto& file : watcher_.admitted_files_under(dir)) {
+            on_disk.insert(file);
+            batch.indexed.push_back(std::move(file));
         }
     }
-    std::sort(doomed.begin(), doomed.end());
-    for (const auto& file : doomed) {
-        const FileID fid = index_.path_to_id(file);
-        if (fid == FileID{0}) continue;
-        deleted_.mark_deleted(fid);
-        index_.remove_file(file);
+    const auto snap = index_.load_snapshot();
+    for (const auto& [file, fid] : snap->file_map) {
+        const std::string_view view(file);
+        for (size_t i = view.rfind('/'); i != std::string_view::npos && i > 0;
+             i = view.rfind('/', i - 1)) {
+            const std::string_view dir = view.substr(0, i);
+            const bool gone =
+                dirs.vanished.contains(dir) ||
+                (dirs.present.contains(dir) && !on_disk.contains(file));
+            if (gone) {
+                deleted_.mark_deleted(fid);
+                batch.removed.push_back(file);
+                break;
+            }
+        }
     }
 }
 
 void WatchPipeline::on_rebuild(const std::vector<FileID>& file_ids) {
-    absl::flat_hash_set<std::string> vanished;
+    FileChangeBatch batch;
+    DirectoryPlan dirs;
     for (FileID fid : file_ids) {
         if (fid == kPathBatchId) {
             // Path-keyed batch: Remove and new-path events. Drain under the
-            // lock, reconcile outside it.
+            // lock, plan outside it.
             absl::flat_hash_set<std::string> paths;
             {
                 std::lock_guard lock(paths_mu_);
                 paths.swap(pending_paths_);
             }
-            for (const auto& path : paths) apply_path(path, vanished);
+            for (const auto& path : paths) plan_path(path, batch, dirs);
             continue;
         }
 
@@ -461,9 +458,17 @@ void WatchPipeline::on_rebuild(const std::vector<FileID>& file_ids) {
             path = std::move(it->second);
             scheduled_paths_.erase(it);
         }
-        apply_path(path, vanished);
+        plan_path(path, batch, dirs);
     }
-    remove_files_under(vanished);
+    plan_directories(dirs, batch);
+
+    // Sorted and unique: a file can arrive both as its own event and from its
+    // directory's scan, and the sort makes FileID assignment deterministic.
+    for (auto* paths : {&batch.removed, &batch.indexed}) {
+        std::sort(paths->begin(), paths->end());
+        paths->erase(std::unique(paths->begin(), paths->end()), paths->end());
+    }
+    index_.apply_file_changes(batch);
 }
 
 }  // namespace lci
