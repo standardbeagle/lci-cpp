@@ -8,9 +8,12 @@
 #include <lci/server/client.h>
 #include <lci/server/server.h>
 
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -85,42 +88,29 @@ int run_mcp_bridge(Client& client, const mcp::ToolAllowlist* allowlist) {
         }
     }
 
-    std::string line;
-    while (std::getline(std::cin, line)) {
-        if (line.empty()) continue;
-        bool is_tools_list = false;
-        std::string called_tool;
-        if (allowlist) {
-            auto request = nlohmann::json::parse(line, nullptr,
-                                                 /*allow_exceptions=*/false);
-            if (std::string refused = allowlist->refused_call_frame(request);
-                !refused.empty()) {
-                std::cout << refused << '\n';
-                std::cout.flush();
-                continue;
-            }
-            is_tools_list = request.is_object() && request.contains("method") &&
-                            request["method"] == "tools/list";
-            if (request.is_object() && request.contains("method") &&
-                request["method"] == "tools/call" &&
-                request.contains("params") && request["params"].is_object() &&
-                request["params"].contains("name") &&
-                request["params"]["name"].is_string()) {
-                called_tool = request["params"]["name"].get<std::string>();
-            }
-        }
+    // Responses are written whole, one line each, from two threads.
+    std::mutex out_mu;
+    auto write_frame = [&out_mu](const std::string& frame) {
+        std::lock_guard<std::mutex> lock(out_mu);
+        std::cout << frame << '\n';
+        std::cout.flush();
+    };
+
+    // Forwards one frame and writes its answer. `is_tools_list` and
+    // `called_tool` select the allowlist's narrowing of the reply.
+    auto forward = [&](const std::string& line, bool is_tools_list,
+                       const std::string& called_tool) {
         std::string out, err;
         int st = client.mcp_dispatch(line, out, err);
-        if (st == 204) continue;  // notification: no response frame
+        if (st == 204) return;  // notification: no response frame
         if (st == 200) {
-            if (is_tools_list) {
+            if (allowlist && is_tools_list) {
                 out = allowlist->filter_tools_list_frame(out);
-            } else if (!called_tool.empty()) {
+            } else if (allowlist && !called_tool.empty()) {
                 out = allowlist->narrow_call_response_frame(called_tool, out);
             }
-            std::cout << out << '\n';
-            std::cout.flush();
-            continue;
+            write_frame(out);
+            return;
         }
         // Mid-session bridge failure: answer THIS frame with a JSON-RPC
         // error rather than dying silently; notifications and unparseable
@@ -131,7 +121,7 @@ int run_mcp_bridge(Client& client, const mcp::ToolAllowlist* allowlist) {
             if (req.contains("id")) id = req["id"];
         } catch (const nlohmann::json::parse_error&) {
         }
-        if (id.is_null()) continue;
+        if (id.is_null()) return;
         nlohmann::json envelope = {
             {"jsonrpc", "2.0"},
             {"id", id},
@@ -140,9 +130,72 @@ int run_mcp_bridge(Client& client, const mcp::ToolAllowlist* allowlist) {
               {"message", "bridge to index server failed: " +
                               (st < 0 ? err
                                       : "HTTP " + std::to_string(st))}}}};
-        std::cout << envelope.dump() << '\n';
-        std::cout.flush();
+        write_frame(envelope.dump());
+    };
+
+    // Two lanes, as in McpServer's own stdio loop: tools/call frames are
+    // forwarded in arrival order from one worker thread, every other frame
+    // (initialize, ping, tools/list, notifications) inline. A tool call can
+    // wait server-side for the whole index build; on a single lane it held
+    // every later frame, liveness pings included, behind it.
+    struct PendingCall {
+        std::string line;
+        std::string tool;
+    };
+    std::mutex calls_mu;
+    std::condition_variable calls_cv;
+    std::deque<PendingCall> calls;
+    bool stdin_closed = false;
+    std::thread call_lane([&] {
+        for (;;) {
+            PendingCall call;
+            {
+                std::unique_lock<std::mutex> lock(calls_mu);
+                calls_cv.wait(lock,
+                              [&] { return stdin_closed || !calls.empty(); });
+                if (calls.empty()) return;
+                call = std::move(calls.front());
+                calls.pop_front();
+            }
+            forward(call.line, false, call.tool);
+        }
+    });
+
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (line.empty()) continue;
+        auto request = nlohmann::json::parse(line, nullptr,
+                                             /*allow_exceptions=*/false);
+        if (allowlist) {
+            if (std::string refused = allowlist->refused_call_frame(request);
+                !refused.empty()) {
+                write_frame(refused);
+                continue;
+            }
+        }
+        const bool is_object = request.is_object() && request.contains("method");
+        if (is_object && request["method"] == "tools/call") {
+            std::string called_tool;
+            if (request.contains("params") && request["params"].is_object() &&
+                request["params"].contains("name") &&
+                request["params"]["name"].is_string()) {
+                called_tool = request["params"]["name"].get<std::string>();
+            }
+            {
+                std::lock_guard<std::mutex> lock(calls_mu);
+                calls.push_back({std::move(line), std::move(called_tool)});
+            }
+            calls_cv.notify_one();
+            continue;
+        }
+        forward(line, is_object && request["method"] == "tools/list", {});
     }
+    {
+        std::lock_guard<std::mutex> lock(calls_mu);
+        stdin_closed = true;
+    }
+    calls_cv.notify_one();
+    call_lane.join();
     return 0;
 }
 
@@ -196,7 +249,10 @@ int run_mcp(const GlobalFlags& flags, const McpOptions& options) {
         std::getenv("LCI_ERROR_REPORT") != nullptr;
     if (!has_local_overrides) {
         std::string ensure_err;
-        if (auto client = ensure_server_running(cfg, ensure_err)) {
+        // Listening is enough: the server's readiness gate holds tool calls
+        // until its index is built, and the handshake must not wait on it.
+        if (auto client = ensure_server_running(cfg, GlobalFlags{}, ensure_err,
+                                                ServerWait::Listening)) {
             int code = run_mcp_bridge(*client, allowlist_ptr);
             if (code >= 0) return code;
             std::cerr << "Warning: index server does not host MCP (older "

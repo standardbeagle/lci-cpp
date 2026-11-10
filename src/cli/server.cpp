@@ -122,7 +122,8 @@ bool unlink_socket_if_identity(const std::string& path,
 
 std::unique_ptr<Client> ensure_server_running(const Config& cfg,
                                               const GlobalFlags& flags,
-                                              std::string& error) {
+                                              std::string& error,
+                                              ServerWait wait) {
     std::string socket_path = get_socket_path_for_root(cfg.project.root);
     auto client = std::make_unique<Client>(socket_path);
 
@@ -252,6 +253,10 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
     if (!listening) {
         error = "server process did not start listening within 30s";
         return nullptr;
+    }
+    if (wait == ServerWait::Listening) {
+        std::fprintf(stderr, "Index server listening; indexing continues\n");
+        return client;
     }
 
     // Phase 2 — index-ready: wait_for_ready's timeout bounds STALL, not

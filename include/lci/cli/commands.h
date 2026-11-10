@@ -52,11 +52,21 @@ std::vector<std::string> build_server_spawn_argv(const std::string& exe,
                                                  const Config& cfg,
                                                  const GlobalFlags& flags);
 
+/// What ensure_server_running waits for after it spawns a server.
+enum class ServerWait {
+    /// The index is built: callers that query the index directly.
+    IndexReady,
+    /// The socket answers: callers whose requests wait out the index on the
+    /// server side (the MCP bridge, whose tool calls block on the server's
+    /// readiness gate), so a handshake never waits on the corpus.
+    Listening,
+};
+
 /// Ensures the index server is running, starting it if necessary.
 /// Returns a connected Client, or sets error and returns nullptr.
-std::unique_ptr<Client> ensure_server_running(const Config& cfg,
-                                              const GlobalFlags& flags,
-                                              std::string& error);
+std::unique_ptr<Client> ensure_server_running(
+    const Config& cfg, const GlobalFlags& flags, std::string& error,
+    ServerWait wait = ServerWait::IndexReady);
 
 /// Overload for callers that carry no global flags (spawn gets none).
 std::unique_ptr<Client> ensure_server_running(const Config& cfg,
