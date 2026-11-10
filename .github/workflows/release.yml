@@ -77,12 +77,11 @@ jobs:
       - name: Build
         run: cmake --build build/release --parallel
 
-      # Gate on the green unit suite (lci_tests). The full ctest suite has
-      # pre-existing integration failures triaged separately (see MEMORY /
-      # ci.yml, where full ctest is likewise disabled); the unit suite is the
-      # project's enforced green bar.
-      - name: Test (unit suite)
-        run: ./build/release/tests/lci_tests
+      # Same gate as ci.yml's Linux leg: the full ctest preset (unit,
+      # integration goldens, soak), so a tag cannot ship a binary that only
+      # the unit suite has seen.
+      - name: Test (full ctest preset)
+        run: ctest --preset release --parallel "${CTEST_PARALLEL_LEVEL:-4}"
 
       - name: Binary reports the tag's version
         run: |
