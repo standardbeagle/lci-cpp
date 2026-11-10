@@ -843,6 +843,46 @@ TEST_F(McpStdioTest, TransportAnswersPingsWhileToolCallWaitsOnGate) {
                      .empty());
 }
 
+TEST_F(McpStdioTest, ToolCallsPastTheQueueCapAreRefused) {
+    // A client that pipelines tool calls without reading results grew the
+    // worker queue without bound. Past kMaxQueuedToolCalls each excess call
+    // is answered at once with a queue-full error; the queued ones still
+    // run. The gate parks the worker on its first call for 1 s so the
+    // transport reads every in-memory frame first (microseconds each).
+    std::atomic<bool> parked{false};
+    server_->set_readiness_gate([&](std::string&) {
+        if (!parked.exchange(true)) {
+            std::this_thread::sleep_for(std::chrono::seconds{1});
+        }
+        return true;
+    });
+    const int sent = static_cast<int>(kMaxQueuedToolCalls) + 10;
+    std::vector<nlohmann::json> requests{make_request("initialize", 0)};
+    for (int i = 1; i <= sent; ++i) {
+        requests.push_back(make_request(
+            "tools/call", i,
+            {{"name", "info"}, {"arguments", nlohmann::json::object()}}));
+    }
+
+    auto responses = exchange(requests);
+
+    ASSERT_EQ(responses.size(), static_cast<size_t>(sent) + 1);
+    int refused = 0;
+    int answered = 0;
+    for (const auto& r : responses) {
+        if (r.contains("error") && r["error"].value("code", 0) == -32000) {
+            ++refused;
+        } else if (r.contains("result") && r["id"] != 0) {
+            ++answered;
+        }
+    }
+    // One call runs in the gate (or is still queued if the worker had not
+    // popped it yet), at most the cap wait behind it.
+    EXPECT_GE(refused, sent - 1 - static_cast<int>(kMaxQueuedToolCalls));
+    EXPECT_LE(refused, sent - static_cast<int>(kMaxQueuedToolCalls));
+    EXPECT_EQ(refused + answered, sent);
+}
+
 TEST_F(McpStdioTest, FailedReadinessGateReportsInsteadOfServingHalfIndex) {
     server_->set_readiness_gate([](std::string& error) {
         error = "index build failed";
