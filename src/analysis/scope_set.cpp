@@ -251,13 +251,24 @@ ScopeSet scope_from_unified_diff(std::string_view diff_text) {
     ScopeSet s;
     std::string current_file;
     std::string unquote_scratch;
+    // New-side lines the current hunk still holds. An added line whose own
+    // text starts with "++ " renders as "+++ ..." and must stay content, so a
+    // "+++ " header is recognised only once the hunk's new side is consumed.
+    // Only the new side is counted ('+' and context lines): headers can only
+    // be confused with '+' lines, and a "diff " line resets the count, so a
+    // hunk whose count overstates its body cannot swallow the next file.
+    int new_side_left = 0;
     size_t pos = 0;
     while (pos < diff_text.size()) {
         size_t eol = diff_text.find('\n', pos);
         std::string_view line = diff_text.substr(
             pos, eol == std::string_view::npos ? std::string_view::npos
                                                : eol - pos);
-        if (line.rfind("+++ ", 0) == 0) {
+        if (line.rfind("diff ", 0) == 0) new_side_left = 0;
+        if (new_side_left > 0 &&
+            (line.empty() || line[0] == '+' || line[0] == ' ')) {
+            --new_side_left;
+        } else if (line.rfind("+++ ", 0) == 0) {
             std::string_view target = line.substr(4);
             // git appends a TAB to the header of a path holding a space
             // (quoted or not) so patch(1) can find the end of the name. A
@@ -287,6 +298,7 @@ ScopeSet scope_from_unified_diff(std::string_view diff_text) {
                         std::from_chars(p1 + 1, rest.data() + rest.size(),
                                         count);
                     }
+                    new_side_left = std::max(count, 0);
                     if (count > 0) {
                         s.add_lines(current_file,
                                     LineRange{start, start + count - 1});
