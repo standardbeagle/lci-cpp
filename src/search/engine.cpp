@@ -725,9 +725,9 @@ std::vector<SearchResult> SearchEngine::search(
         }
     }
 
-    // Symbol-type filter runs INSIDE the collection loop (before selection):
-    // filtering after collection let non-matching results consume the budget,
-    // silently starving matching files that sorted later.
+    // Symbol-type filter runs inside process_file, per line, before a row is
+    // counted or competes for a retained slot: filtering after collection let
+    // excluded rows consume the per-file cap and inflate total_found.
     std::shared_ptr<const ReferenceTracker::Snapshot> type_filter_snap;
     if (!options.symbol_types.empty()) {
         type_filter_snap = index_.ref_tracker().pin();
@@ -796,23 +796,8 @@ std::vector<SearchResult> SearchEngine::search(
         file_rows.clear();
         int file_matches =
             process_file(fid, path, pattern, options, retain, file_rows,
-                         *file_snap);
+                         *file_snap, type_filter_snap.get());
         if (file_matches <= 0) continue;
-
-        if (type_filter_snap) {
-            file_rows.erase(
-                std::remove_if(
-                    file_rows.begin(), file_rows.end(),
-                    [&](const CandidateRow& r) {
-                        auto sym = type_filter_snap->get_symbol_at_line(
-                            r.file_id, r.line);
-                        if (sym == nullptr) return true;
-                        return !symbol_type_matches_filter(
-                            options.symbol_types,
-                            to_string(sym->symbol.type));
-                    }),
-                file_rows.end());
-        }
 
         // Counts are over all matches, not the retained subset.
         total_matches += file_matches;
@@ -1285,7 +1270,8 @@ int SearchEngine::process_file(
     const SearchOptions& options,
     int per_file_cap,
     std::vector<CandidateRow>& out,
-    const FileSnapshot& snap) const {
+    const FileSnapshot& snap,
+    const ReferenceTracker::Snapshot* type_filter) const {
 
     auto content_sv = index_.file_content_store().get_content(file_id);
     // LRU-evicted-but-searchable: the file is still a trigram/postings
@@ -1401,6 +1387,12 @@ int SearchEngine::process_file(
     std::vector<PendingRow> pending;
     if (per_file_cap > 0) pending.reserve(static_cast<size_t>(per_file_cap));
 
+    // Line -> innermost symbol, built on the file's first matched line and
+    // only under a symbol_types filter: one pass over the file's symbols
+    // instead of one per matched line.
+    std::vector<const EnhancedSymbol*> symbol_at_line;
+    bool symbol_at_line_built = false;
+
     // The worst retained slot is cached and recomputed only after a
     // replacement. Every occurrence in the file reaches keep_pending, so a
     // per-call rescan would cost O(occurrences x per_file_cap) on a dense
@@ -1507,6 +1499,22 @@ int SearchEngine::process_file(
             if (line_is_comment_only_with_spans(
                     content_sv, cursor_line_start, line_end, file_lang,
                     comment_spans, comment_span_pos)) {
+                continue;
+            }
+        }
+
+        if (type_filter != nullptr) {
+            if (!symbol_at_line_built) {
+                symbol_at_line = type_filter->innermost_symbol_by_line(file_id);
+                symbol_at_line_built = true;
+            }
+            const EnhancedSymbol* sym =
+                static_cast<size_t>(line) < symbol_at_line.size()
+                    ? symbol_at_line[static_cast<size_t>(line)]
+                    : nullptr;
+            if (sym == nullptr ||
+                !symbol_type_matches_filter(options.symbol_types,
+                                            to_string(sym->symbol.type))) {
                 continue;
             }
         }

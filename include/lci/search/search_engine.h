@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <lci/core/file_content_store.h>
+#include <lci/core/reference_tracker.h>
 #include <lci/scope.h>
 #include <lci/search/search_options.h>
 #include <lci/semantic/synonym_table.h>
@@ -197,14 +198,18 @@ class SearchEngine {
     /// the total number of matching rows found in the file, including those not
     /// retained, so the caller can report the true count and directory
     /// histogram. `per_file_cap <= 0` retains every match. `path` is the
-    /// file's pinned path view, stored in each CandidateRow.
+    /// file's pinned path view, stored in each CandidateRow. `type_filter`,
+    /// when non-null, drops every line whose symbol fails
+    /// `options.symbol_types` BEFORE it is counted or competes for a retained
+    /// slot, so neither the count nor the cap sees excluded rows.
     int process_file(FileID file_id,
                      std::string_view path,
                      std::string_view pattern,
                      const SearchOptions& options,
                      int per_file_cap,
                      std::vector<CandidateRow>& out,
-                     const FileSnapshot& snap) const;
+                     const FileSnapshot& snap,
+                     const ReferenceTracker::Snapshot* type_filter) const;
 };
 
 // -- Search coordinator -------------------------------------------------------
