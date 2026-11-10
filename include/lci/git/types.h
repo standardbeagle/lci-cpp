@@ -2,7 +2,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <absl/container/flat_hash_map.h>
@@ -31,6 +33,17 @@ constexpr std::string_view to_string(AnalysisScope s) {
         case AnalysisScope::Range: return "range";
     }
     return "unknown";
+}
+
+/// Parses a scope name as to_string spells it; nullopt for anything else,
+/// so every surface refuses a misspelt scope instead of guessing one.
+constexpr std::optional<AnalysisScope> parse_analysis_scope(
+    std::string_view name) {
+    for (AnalysisScope s : {AnalysisScope::Staged, AnalysisScope::WIP,
+                            AnalysisScope::Commit, AnalysisScope::Range}) {
+        if (to_string(s) == name) return s;
+    }
+    return std::nullopt;
 }
 
 /// Configures the git change analysis.

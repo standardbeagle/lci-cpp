@@ -661,14 +661,8 @@ void IndexServer::handle_git_analyze(const httplib::Request& req,
     }
 
     git::AnalysisParams params = git::AnalysisParams::defaults();
-    if (scope == "staged") {
-        params.scope = git::AnalysisScope::Staged;
-    } else if (scope == "wip") {
-        params.scope = git::AnalysisScope::WIP;
-    } else if (scope == "commit") {
-        params.scope = git::AnalysisScope::Commit;
-    } else if (scope == "range") {
-        params.scope = git::AnalysisScope::Range;
+    if (auto parsed = git::parse_analysis_scope(scope)) {
+        params.scope = *parsed;
     } else {
         error_response(res, 400, "invalid scope");
         return;

@@ -366,14 +366,8 @@ ToolResult handle_git_analysis(const nlohmann::json& params,
     // the CLI/HTTP surface; mirrors IndexServer::handle_git_analyze.
     git::AnalysisParams ga = git::AnalysisParams::defaults();
     auto scope = params.value("scope", std::string("staged"));
-    if (scope == "staged") {
-        ga.scope = git::AnalysisScope::Staged;
-    } else if (scope == "wip") {
-        ga.scope = git::AnalysisScope::WIP;
-    } else if (scope == "commit") {
-        ga.scope = git::AnalysisScope::Commit;
-    } else if (scope == "range") {
-        ga.scope = git::AnalysisScope::Range;
+    if (auto parsed = git::parse_analysis_scope(scope)) {
+        ga.scope = *parsed;
     } else {
         return make_error_response("git_analysis", "invalid scope: " + scope);
     }
