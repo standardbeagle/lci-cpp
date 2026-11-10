@@ -1,7 +1,11 @@
 #include <lci/core/subprocess.h>
 
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
+#include <thread>
 
 #if defined(_WIN32)
 
@@ -145,7 +149,7 @@ HANDLE spawn(const std::vector<std::string>& argv, const std::string& cwd,
 }  // namespace
 
 bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
-                 std::string& out) {
+                 std::string& out, const CaptureLimits& /*limits*/) {
     out.clear();
     if (argv.empty()) return false;
 
@@ -240,7 +244,7 @@ std::vector<char*> to_cargv(const std::vector<std::string>& argv) {
 }  // namespace
 
 bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
-                 std::string& out) {
+                 std::string& out, const CaptureLimits& /*limits*/) {
     out.clear();
     if (argv.empty()) return false;
 

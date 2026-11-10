@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -7,13 +8,21 @@
 namespace lci {
 namespace subprocess {
 
+/// Bounds on one run_capture child.
+struct CaptureLimits {
+    /// Wall-clock budget from spawn to exit.
+    std::chrono::milliseconds timeout{std::chrono::minutes(5)};
+    /// Largest stdout accepted.
+    std::size_t max_output_bytes{std::size_t{256} << 20};
+};
+
 /// Runs argv[0] (PATH-searched) with the given args in `cwd` (empty =
 /// inherit), capturing stdout into `out`. stderr is discarded. No shell is
 /// involved on any platform — args are passed verbatim, so there is no
 /// quoting/injection surface. Returns true iff the process spawned and
 /// exited 0.
 bool run_capture(const std::vector<std::string>& argv, const std::string& cwd,
-                 std::string& out);
+                 std::string& out, const CaptureLimits& limits = {});
 
 /// Runs argv inheriting stdio. Returns the child's exit code, or -1 if the
 /// process could not be spawned (or died on a signal).
