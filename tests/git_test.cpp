@@ -2086,6 +2086,63 @@ TEST(GitReportToJson, AbsolutePathOutsideProjectRootIsPreserved) {
     EXPECT_NE(path.find("x.cpp"), std::string::npos);
 }
 
+// diff-tree prints NOTHING for a merge commit unless told which diff to
+// show, so commit scope on a merge reported "No changes to analyze". The
+// analyzer reads the old side from `<ref>^` (the first parent), so the
+// matching diff is first-parent.
+TEST(GitAnalysis, CommitScopeOnAMergeAnalyzesTheFirstParentDiff) {
+    namespace fs = std::filesystem;
+    fs::path repo = fs::temp_directory_path() /
+                    ("lci_git_merge_" +
+                     std::to_string(std::chrono::steady_clock::now()
+                                        .time_since_epoch()
+                                        .count()));
+    fs::create_directories(repo);
+    const std::string commit =
+        "-c user.email=fixture@lci.test -c user.name=lci-fixture "
+        "-c commit.gpgsign=false ";
+    ASSERT_TRUE(lci::test::run_git(repo, "init -q"));
+    std::ofstream(repo / "main.go")
+        << "package main\nfunc Original() int { return 1 }\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(repo, commit + "commit -q -m one"));
+    ASSERT_TRUE(lci::test::run_git(repo, "checkout -q -b side"));
+    std::ofstream(repo / "main.go")
+        << "package main\nfunc Original() int { return 2 }\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(repo, commit + "commit -q -m side"));
+    ASSERT_TRUE(lci::test::run_git(repo, "checkout -q -"));
+    std::ofstream(repo / "other.go")
+        << "package main\nfunc Other() int { return 3 }\n";
+    ASSERT_TRUE(lci::test::run_git(repo, "add -A"));
+    ASSERT_TRUE(lci::test::run_git(repo, commit + "commit -q -m trunk"));
+    ASSERT_TRUE(lci::test::run_git(
+        repo, commit + "merge -q --no-ff side -m merge"));
+
+    std::string raw;
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "diff-tree", "--root", "--no-commit-id",
+         "--name-status", "-r", "HEAD", "--"},
+        "", raw));
+    ASSERT_TRUE(raw.empty()) << "default diff-tree must be silent on a merge "
+                                "for this test to bite: " << raw;
+
+    Provider p;
+    ASSERT_TRUE(Provider::create(repo.string(), p));
+    Config cfg = make_default_config();
+    cfg.project.root = repo.string();
+    MasterIndex index(cfg);
+    Analyzer analyzer(p, index);
+    AnalysisParams params = AnalysisParams::defaults();
+    params.scope = AnalysisScope::Commit;  // base_ref empty -> HEAD
+    AnalysisReport report;
+    ASSERT_TRUE(analyzer.analyze(params, report));
+    EXPECT_EQ(report.summary.files_changed, 1);
+    EXPECT_EQ(report.summary.symbols_modified, 1);
+
+    fs::remove_all(repo);
+}
+
 }  // namespace
 }  // namespace git
 }  // namespace lci
