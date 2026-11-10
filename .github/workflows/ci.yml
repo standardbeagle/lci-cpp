@@ -139,6 +139,26 @@ jobs:
           esac
           ctest --preset ${{ matrix.preset }} --parallel "$jobs"
 
+      # gtest's GTEST_SKIP exits 0, so a suite whose corpora are absent
+      # (real_projects/*, smoke corpora: untracked, wiped by checkout) reads
+      # as passed. Surface every skip as an annotation so a green run cannot
+      # be mistaken for one that exercised those suites.
+      - name: Report skipped tests
+        if: ${{ always() && (!matrix.main_only || github.ref == 'refs/heads/main') }}
+        run: |
+          log="build/${{ matrix.preset }}/Testing/Temporary/LastTest.log"
+          [ -f "$log" ] || { echo "no ctest log at $log"; exit 0; }
+          # gtest prints each skipped name twice (inline and in the summary
+          # list); count distinct names.
+          names=$(grep -o '^\[  SKIPPED \] [A-Za-z_][A-Za-z0-9_./]*' "$log" \
+                    | sed 's/^\[  SKIPPED \] //' | sort -u || true)
+          skipped=$(printf '%s' "$names" | grep -c . || true)
+          echo "skipped gtest cases: $skipped"
+          if [ "$skipped" -gt 0 ]; then
+            printf '%s\n' "$names" | head -50
+            echo "::warning title=tests skipped::$skipped gtest cases skipped (missing corpora?); see the 'Report skipped tests' step"
+          fi
+
       - name: Build diff-engine unit tests
         if: matrix.preset == 'release'
         run: cmake --build build/release --target parity_unit_tests --parallel
