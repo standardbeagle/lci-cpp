@@ -416,6 +416,39 @@ TEST(FileWatcherTest, RenameEmitsRemoveForOldPath) {
     EXPECT_NE(events[1].first.find("new_name.go"), std::string::npos);
 }
 
+// The scanner prunes a directory the moment `.gitignore` (or an exclude)
+// matches it, so nothing below it is ever indexed. The watcher judged a file
+// event by the file's own path only, and a slash-free pattern such as
+// `secrets` matches a directory name, never `secrets/key.go`: the watcher
+// indexed the file incrementally even though a full scan never would.
+TEST(FileWatcherTest, FileUnderIgnoredDirectoryIsNotDispatched) {
+    TempDir tmp;
+    tmp.write_file(".gitignore", "secrets\n");
+    tmp.write_file("secrets/key.go", "package secrets\n");
+    tmp.write_file("pkg/build/out.go", "package build\n");
+    tmp.write_file("pkg/main.go", "package pkg\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = tmp.path().string();
+    cfg.exclude.push_back("build/**");
+
+    std::vector<std::string> dispatched;
+    FileWatcher watcher(cfg);
+    watcher.set_callback([&](const std::string& path, FileEventType) {
+        dispatched.push_back(path);
+    });
+
+    watcher.on_efsw_event(tmp.path().string() + "/secrets/", "key.go",
+                          FileEventType::Create);
+    watcher.on_efsw_event(tmp.path().string() + "/pkg/build/", "out.go",
+                          FileEventType::Create);
+    watcher.on_efsw_event(tmp.path().string() + "/pkg/", "main.go",
+                          FileEventType::Create);
+
+    ASSERT_EQ(dispatched.size(), 1u) << "only pkg/main.go may dispatch";
+    EXPECT_NE(dispatched[0].find("pkg/main.go"), std::string::npos);
+}
+
 // Pins the directory-delete fix: a Remove of a directory that still exists
 // as a directory (the existing-dir branch) must dispatch instead of being
 // swallowed; recursive deletes deliver no per-child events.
