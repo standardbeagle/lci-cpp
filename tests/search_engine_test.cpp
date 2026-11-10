@@ -1370,6 +1370,40 @@ TEST(SearchSymbolTypeFilter, FilterAppliesBeforeTheCapAndTheCount) {
         << "total_found counted rows the type filter excludes";
 }
 
+// The invert branch of process_file returned before the per-line type check
+// that replaced the post-collection filter, so flags=iv with symbol_types
+// returned and counted every non-matching line, including lines in no
+// function at all.
+TEST(SearchSymbolTypeFilter, FilterAppliesToInvertedMatches) {
+    TempDir dir;
+    dir.write_file("a.py",
+        "x = 1\n"
+        "def keep():\n"
+        "    return 2\n"
+        "y = 3\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.symbol_types = {"function"};
+    opts.invert_match = true;
+
+    SearchStats stats;
+    auto results = engine.search("x", opts, &stats);
+
+    std::vector<int> lines;
+    for (const auto& r : results) lines.push_back(r.line);
+    std::sort(lines.begin(), lines.end());
+    EXPECT_EQ(lines, (std::vector<int>{2, 3}))
+        << "inverted rows outside a function survived symbol_types";
+    EXPECT_EQ(stats.total_found, 2)
+        << "total_found counted inverted rows the type filter excludes";
+}
+
 // Alias canonicalization is a pure table lookup; pin it directly so a future
 // edit to the table cannot quietly drop an advertised alias.
 TEST(SymbolTypeAlias, CanonicalizesAdvertisedAliases) {
