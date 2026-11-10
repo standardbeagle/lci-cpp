@@ -244,9 +244,12 @@ class Parser {
     const std::string& error() const { return error_; }
 
   private:
+    static constexpr int kMaxNestingDepth = 256;
+
     Lexer lex_;
     Token cur_;
     std::string error_;
+    int depth_{};
 
     void advance() { cur_ = lex_.next(); }
 
@@ -313,8 +316,18 @@ class Parser {
 
         if (cur_.kind == TokenKind::LBrace) {
             const int opening_line = cur_.line;
+            // One stack frame pair per `{`: unbounded nesting overflowed
+            // the stack. Real configs nest three or four deep.
+            if (depth_ >= kMaxNestingDepth) {
+                error_ = "line " + std::to_string(opening_line) +
+                         ": blocks nested deeper than " +
+                         std::to_string(kMaxNestingDepth);
+                return node;
+            }
             advance();
+            ++depth_;
             node.children = parse_document();
+            --depth_;
             if (!error_.empty()) return node;
             if (cur_.kind != TokenKind::RBrace) {
                 error_ = "line " + std::to_string(opening_line) +
