@@ -859,5 +859,147 @@ TEST(FileWatcherTest, WiredPipelineFollowsDirectoryRename) {
     EXPECT_NE(index.path_to_id(root + "/root.ts"), FileID{0});
 }
 
+// A directory moved into the project arrives as ONE event, and each of its
+// files used to go through index_file: a full file-snapshot copy, a whole
+// reference re-resolve and a publish per file. The batch publishes once.
+TEST(FileWatcherTest, WiredPipelineIndexesAMovedInDirectoryInOnePublish) {
+    TempDir tmp;
+    TempDir outside;
+    tmp.write_file("root.ts", "export function stays() {}\n");
+    constexpr int kFiles = 8;
+    for (int i = 0; i < kFiles; ++i) {
+        outside.write_file("pkg/f" + std::to_string(i) + ".ts",
+                           "export function batch_fn" + std::to_string(i) +
+                               "() {}\n");
+    }
+
+    Config cfg = make_default_config();
+    cfg.project.root = tmp.path().string();
+    cfg.index.watch_mode = true;
+    cfg.index.watch_debounce_ms = 100;
+
+    MasterIndex index(cfg);
+    ASSERT_TRUE(index.index_directory(tmp.path().string()));
+    const std::string root = tmp.path().generic_string();
+
+    WatchPipeline pipeline(cfg, index);
+    ASSERT_TRUE(pipeline.start());
+    const uint64_t publishes_before = index.snapshot_publish_count();
+
+    fs::rename(outside.path() / "pkg", tmp.path() / "pkg");
+
+    auto settled = [&] {
+        for (int i = 0; i < kFiles; ++i) {
+            if (index.path_to_id(root + "/pkg/f" + std::to_string(i) + ".ts") ==
+                FileID{0}) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{3};
+    while (!settled() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{25});
+    }
+    pipeline.stop();
+    ASSERT_TRUE(settled()) << "the moved-in directory was never indexed";
+    EXPECT_EQ(index.snapshot_publish_count(), publishes_before + 1)
+        << "each file of the moved-in directory published its own snapshot";
+}
+
+// `mv lib old_lib && mv next lib` inside one debounce window leaves `lib`
+// existing at rebuild time, so it looked like a fresh directory: files
+// already indexed under that path kept their OLD bytes, and a file the new
+// tree no longer holds stayed in the index as a ghost.
+TEST(FileWatcherTest, WiredPipelineReconcilesASameNameDirectorySwap) {
+    TempDir tmp;
+    tmp.write_file("lib/a.ts", "export function swap_old() {}\n");
+    tmp.write_file("lib/gone.ts", "export function swap_ghost() {}\n");
+    tmp.write_file("next/a.ts", "export function swap_new() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = tmp.path().string();
+    cfg.index.watch_mode = true;
+    cfg.index.watch_debounce_ms = 300;
+
+    MasterIndex index(cfg);
+    ASSERT_TRUE(index.index_directory(tmp.path().string()));
+    const std::string root = tmp.path().generic_string();
+
+    WatchPipeline pipeline(cfg, index);
+    ASSERT_TRUE(pipeline.start());
+
+    fs::rename(tmp.path() / "lib", tmp.path() / "old_lib");
+    fs::rename(tmp.path() / "next", tmp.path() / "lib");
+
+    auto new_symbol_in_lib = [&] {
+        const FileID lib_a = index.path_to_id(root + "/lib/a.ts");
+        if (lib_a == FileID{0}) return false;
+        for (const auto& h :
+             index.ref_tracker().pin()->find_symbols_by_name("swap_new")) {
+            if (h && h->symbol.file_id == lib_a) return true;
+        }
+        return false;
+    };
+    auto settled = [&] {
+        return new_symbol_in_lib() &&
+               index.path_to_id(root + "/lib/gone.ts") == FileID{0} &&
+               index.path_to_id(root + "/next/a.ts") == FileID{0} &&
+               index.path_to_id(root + "/old_lib/gone.ts") != FileID{0};
+    };
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{4};
+    while (!settled() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{25});
+    }
+    pipeline.stop();
+    EXPECT_TRUE(new_symbol_in_lib())
+        << "lib/a.ts kept the swapped-out directory's bytes";
+    EXPECT_EQ(index.path_to_id(root + "/lib/gone.ts"), FileID{0})
+        << "a file the new tree does not hold stayed indexed";
+    EXPECT_EQ(index.path_to_id(root + "/next/a.ts"), FileID{0});
+    EXPECT_NE(index.path_to_id(root + "/old_lib/a.ts"), FileID{0});
+    EXPECT_NE(index.path_to_id(root + "/old_lib/gone.ts"), FileID{0});
+}
+
+// A file truncated to zero bytes is one the scanner would not index, but the
+// watcher handed its empty content to update_file, which rejects empty
+// content before touching anything: the old symbols stayed searchable.
+TEST(FileWatcherTest, WiredPipelineDropsAFileTruncatedToEmpty) {
+    TempDir tmp;
+    tmp.write_file("a.ts", "export function truncated_fn() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = tmp.path().string();
+    cfg.index.watch_mode = true;
+    cfg.index.watch_debounce_ms = 100;
+
+    MasterIndex index(cfg);
+    ASSERT_TRUE(index.index_directory(tmp.path().string()));
+    ASSERT_FALSE(index.ref_tracker()
+                     .pin()
+                     ->find_symbols_by_name("truncated_fn")
+                     .empty());
+
+    WatchPipeline pipeline(cfg, index);
+    ASSERT_TRUE(pipeline.start());
+    tmp.write_file("a.ts", "");
+
+    auto gone = [&] {
+        return index.ref_tracker()
+            .pin()
+            ->find_symbols_by_name("truncated_fn")
+            .empty();
+    };
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{3};
+    while (!gone() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{25});
+    }
+    pipeline.stop();
+    EXPECT_TRUE(gone()) << "an emptied file kept its old symbols";
+}
+
 }  // namespace
 }  // namespace lci
