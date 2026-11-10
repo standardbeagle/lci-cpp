@@ -1329,6 +1329,37 @@ TEST_F(ServerTest, BrowseFileEndpoint) {
     EXPECT_EQ(j["file"]["language"], "go");
 }
 
+// /browse-file resolved a basename by breaking at the first suffix match in
+// get_all_file_ids() hash order, so "util.go" over two directories named a
+// different file per server process, and said nothing about the other.
+class ServerAmbiguousBrowseTest : public ServerTest {
+  protected:
+    void SetUp() override {
+        const char* src = "package p\n\nfunc helper() int { return 1 }\n";
+        tmp_.write_file("zeta/util.go", src);
+        tmp_.write_file("alpha/util.go", src);
+        ServerTest::SetUp();
+    }
+};
+
+TEST_F(ServerAmbiguousBrowseTest, BasenamePicksSmallestPathAndListsTheRest) {
+    auto j = post("/browse-file", {{"file", "util.go"}});
+    ASSERT_TRUE(j.contains("file")) << j.dump();
+    const std::string picked = j["file"]["path"].get<std::string>();
+    EXPECT_NE(picked.find("alpha/util.go"), std::string::npos) << picked;
+    ASSERT_TRUE(j.contains("ambiguous")) << j.dump();
+    ASSERT_EQ(j["ambiguous"].size(), 2u) << j.dump();
+    EXPECT_NE(j["ambiguous"][0].get<std::string>().find("alpha/util.go"),
+              std::string::npos);
+    EXPECT_NE(j["ambiguous"][1].get<std::string>().find("zeta/util.go"),
+              std::string::npos);
+
+    // An exact path is never ambiguous.
+    auto exact = post("/browse-file",
+                      {{"file", (tmp_.path() / "zeta" / "util.go").string()}});
+    EXPECT_FALSE(exact.contains("ambiguous")) << exact.dump();
+}
+
 TEST_F(ServerTest, BrowseFileWithStats) {
     auto j = post("/browse-file", {
         {"file", "main.go"},
