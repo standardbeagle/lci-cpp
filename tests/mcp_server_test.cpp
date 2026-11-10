@@ -16,6 +16,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -620,6 +621,83 @@ TEST_F(McpStdioTest, GetContextSymbolPathHintPassesTheGuard) {
     auto text =
         responses[1]["result"]["content"][0]["text"].get<std::string>();
     EXPECT_EQ(text.find("unknown parameter"), std::string::npos) << text;
+}
+
+// docs/TOOLS.md is the human contract for every tool; its parameter tables
+// drifted from the live schema (a `languages` row code_insight rejects,
+// get_context knobs and the find_files/browse_file `path` aliases missing).
+// Every schema property must have a row, and every row must name a key the
+// tool accepts: a schema property, or an alias the unknown-parameter guard
+// admits (probed through the guard itself, beside a key it always refuses,
+// so the handler never runs).
+TEST_F(McpStdioTest, ToolsMdParamTablesMatchTheLiveSchema) {
+    const auto doc_path = std::filesystem::path(LCI_TESTS_SOURCE_DIR) / ".." /
+                          "docs" / "TOOLS.md";
+    std::ifstream doc(doc_path);
+    ASSERT_TRUE(doc) << doc_path;
+    // tool name -> keys named in the first cell of its parameter-table rows
+    std::map<std::string, std::set<std::string>> documented;
+    std::string section;
+    for (std::string line; std::getline(doc, line);) {
+        if (line.rfind("## ", 0) == 0) {
+            section = line.substr(3);
+            continue;
+        }
+        if (section.empty() || line.rfind("| `", 0) != 0) continue;
+        const auto cell_end = line.find(" |", 2);
+        const std::string cell = line.substr(2, cell_end - 2);
+        for (size_t open = cell.find('`'); open != std::string::npos;) {
+            const size_t close = cell.find('`', open + 1);
+            if (close == std::string::npos) break;
+            documented[section].insert(cell.substr(open + 1, close - open - 1));
+            open = cell.find('`', close + 1);
+        }
+    }
+
+    auto responses = exchange({make_request("initialize", 1),
+                               make_request("tools/list", 2)});
+    ASSERT_EQ(responses.size(), 2u);
+    int next_id = 3;
+    for (const auto& tool : responses[1]["result"]["tools"]) {
+        const auto name = tool["name"].get<std::string>();
+        ASSERT_TRUE(documented.count(name))
+            << "docs/TOOLS.md has no parameter table under '## " << name << "'";
+        std::set<std::string> live;
+        const auto props =
+            tool["inputSchema"].value("properties", nlohmann::json::object());
+        for (auto it = props.begin(); it != props.end(); ++it) {
+            live.insert(it.key());
+        }
+        for (const auto& key : live) {
+            EXPECT_TRUE(documented[name].count(key))
+                << name << "." << key << " is in the schema but has no row";
+        }
+        for (const auto& key : documented[name]) {
+            if (live.count(key)) continue;
+            // search validates its own arguments and skips the guard, so a
+            // row the schema lacks cannot be an alias there.
+            ASSERT_NE(name, "search")
+                << "search." << key << " has a row but is not in the schema";
+            const std::string probe = "zz_refused_probe";
+            auto call = exchange(
+                {make_request("initialize", 1),
+                 make_request("tools/call", next_id++,
+                              {{"name", name},
+                               {"arguments", {{key, 1}, {probe, 1}}}})});
+            ASSERT_EQ(call.size(), 2u);
+            const auto text =
+                call[1]["result"]["content"][0]["text"].get<std::string>();
+            const auto list_begin = text.find("unknown parameter(s): ");
+            const auto list_end = text.find(". Allowed:");
+            ASSERT_NE(list_begin, std::string::npos) << text;
+            const std::string refused =
+                ", " + text.substr(list_begin + 22, list_end - list_begin - 22) +
+                ",";
+            EXPECT_EQ(refused.find(", " + key + ","), std::string::npos)
+                << name << "." << key
+                << " has a row but the tool refuses it: " << text;
+        }
+    }
 }
 
 TEST_F(McpStdioTest, ToolsList) {
