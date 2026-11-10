@@ -863,10 +863,13 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
         if (mode == "git_analyze") {
             git::AnalysisParams ga = git::AnalysisParams::defaults();
             auto scope = params.value("scope", std::string("staged"));
-            if (scope == "wip") ga.scope = git::AnalysisScope::WIP;
-            else if (scope == "commit") ga.scope = git::AnalysisScope::Commit;
-            else if (scope == "range") ga.scope = git::AnalysisScope::Range;
-            else ga.scope = git::AnalysisScope::Staged;
+            if (auto parsed = git::parse_analysis_scope(scope))
+                ga.scope = *parsed;
+            else
+                return make_error_response(
+                    "code_insight",
+                    "invalid git_analyze scope '" + scope +
+                        "', must be staged, wip, commit, or range");
             ga.base_ref = params.value("base_ref", std::string());
             ga.target_ref = params.value("target_ref", std::string());
 
