@@ -34,7 +34,11 @@ function assetMatcher() {
     return (name) => name.endsWith('Linux.tar.gz');
   }
   if (platform === 'darwin') {
-    // Universal binary serves both x64 and arm64.
+    // The only macOS artifact is built natively on arm64 (release.yml
+    // build-macos); a universal binary is a tracked follow-up.
+    if (arch !== 'arm64') {
+      fail(`unsupported architecture for macOS: ${arch} (only Apple Silicon has a release artifact; build from source)`);
+    }
     return (name) => name.endsWith('Darwin.tar.gz');
   }
   if (platform === 'win32') {

@@ -70,7 +70,13 @@ def _asset_matcher():
             )
         return lambda name: name.endswith("Linux.tar.gz")
     if sys.platform == "darwin":
-        # Universal binary serves both Intel and Apple Silicon.
+        # The only macOS artifact is built natively on arm64 (release.yml
+        # build-macos); a universal binary is a tracked follow-up.
+        if machine not in ("arm64", "aarch64"):
+            raise InstallError(
+                f"unsupported architecture for macOS: {machine} "
+                "(only Apple Silicon has a release artifact; build from source)"
+            )
         return lambda name: name.endswith("Darwin.tar.gz")
     if sys.platform == "win32":
         if not x86:
