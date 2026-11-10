@@ -166,17 +166,24 @@ bool Analyzer::analyze(const AnalysisParams& params, AnalysisReport& out) {
 
     absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> pre_names;
     absl::flat_hash_map<std::string, std::string> pre_content;
+    // Only files the analyzer parses are read: a vendored archive or data
+    // blob contributes no symbols, and reading every changed blob of any
+    // size held all of them in memory at once. Old content is kept only
+    // for Deleted files — the rename pairing below is its sole reader.
     for (const auto& file : files) {
         if (file.status != FileChangeStatus::Modified &&
             file.status != FileChangeStatus::Deleted)
             continue;
+        if (!is_analysis_supported_file(file.path)) continue;
         std::string old_content;
         if (!provider_.get_file_content(base_ref, file.path, old_content))
             continue;
         absl::flat_hash_set<std::string> names;
         if (!extract_symbol_names(old_content, file.path, names)) continue;
         for (auto& n : names) pre_names[file.path].insert(std::move(n));
-        pre_content.emplace(file.path, std::move(old_content));
+        if (file.status == FileChangeStatus::Deleted) {
+            pre_content.emplace(file.path, std::move(old_content));
+        }
     }
     // Cancel rename pairs: identical pre/post content means the file moved, so
     // its symbols must not surface as added+deleted. Pair each Deleted file
@@ -187,7 +194,9 @@ bool Analyzer::analyze(const AnalysisParams& params, AnalysisReport& out) {
     const std::string target_ref = provider_.get_target_ref(params);
     absl::flat_hash_map<std::string, std::string> added_content;
     for (const auto& add : files) {
+        if (pre_content.empty()) break;  // nothing to pair an add with
         if (add.status != FileChangeStatus::Added) continue;
+        if (!is_analysis_supported_file(add.path)) continue;
         std::string new_content;
         if (provider_.get_file_content(target_ref, add.path, new_content))
             added_content.emplace(add.path, std::move(new_content));
