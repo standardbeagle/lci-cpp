@@ -98,6 +98,46 @@ std::string wait_for_text(const fs::path& p, const std::string& needle) {
 }
 }  // namespace
 
+// A hung child (a git credential prompt, a stuck hook, a network mount)
+// wedged run_capture forever, and with it the MCP handler that called it.
+TEST(SubprocessTest, RunCaptureKillsAChildPastItsTimeout) {
+    subprocess::CaptureLimits limits;
+    limits.timeout = std::chrono::milliseconds(300);
+    std::string out;
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_FALSE(subprocess::run_capture({"sleep", "8"}, "", out, limits));
+    const auto took = std::chrono::steady_clock::now() - start;
+    EXPECT_LT(took, std::chrono::seconds(5)) << "the timeout did not fire";
+}
+
+// A grandchild that inherited the pipe keeps it open after the child dies,
+// so killing only the child still blocks the read. The whole process group
+// must go.
+TEST(SubprocessTest, RunCaptureTimeoutKillsGrandchildrenHoldingThePipe) {
+    subprocess::CaptureLimits limits;
+    limits.timeout = std::chrono::milliseconds(300);
+    std::string out;
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_FALSE(subprocess::run_capture({"sh", "-c", "sleep 8 & wait"}, "",
+                                         out, limits));
+    const auto took = std::chrono::steady_clock::now() - start;
+    EXPECT_LT(took, std::chrono::seconds(5))
+        << "a grandchild holding the pipe outlived the timeout";
+}
+
+// Output past the cap is a failure, not a partial answer that grows memory
+// without bound. The producer is finite (4 MiB) so a pre-fix run fails on
+// the assertions instead of buffering an endless stream: an unbounded `yes`
+// reached 15.9 GB RSS in a minute before the cap existed.
+TEST(SubprocessTest, RunCaptureRefusesOutputPastTheCap) {
+    subprocess::CaptureLimits limits;
+    limits.max_output_bytes = 1 << 20;
+    std::string out;
+    EXPECT_FALSE(subprocess::run_capture(
+        {"head", "-c", "4194304", "/dev/zero"}, "", out, limits));
+    EXPECT_LE(out.size(), limits.max_output_bytes);
+}
+
 // The daemon's stderr is the only channel for its own exit reason (RSS
 // self-cap, bind failure). On the null device nobody ever saw it. The log is
 // owner-only and appended to: replacing it per spawn raced concurrent starts
