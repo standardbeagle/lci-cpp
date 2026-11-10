@@ -4,6 +4,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdlib>
+#include <string>
+
 #include <lci/kdl.h>
 
 namespace lci {
@@ -184,6 +187,33 @@ TEST(KdlTest, MalformedNumberIsAParseError) {
         EXPECT_NE(error.find("malformed number"), std::string::npos)
             << src << " -> " << error;
     }
+}
+
+// The block parser recursed once per `{` with no bound, so a .lci.kdl
+// holding a few hundred thousand nested blocks (or a corrupt/hostile one)
+// overflowed the stack and killed every lci command that loads config.
+// Death-test style keeps a pre-fix stack overflow from taking the whole
+// test binary down with it.
+TEST(KdlDeathTest, DeepNestingIsAParseErrorNotAStackOverflow) {
+    std::string src;
+    for (int i = 0; i < 200000; ++i) src += "a {\n";
+    EXPECT_EXIT(
+        {
+            std::string error;
+            kdl::parse(src, error);
+            std::exit(error.find("nested deeper than") != std::string::npos
+                          ? 0
+                          : 1);
+        },
+        ::testing::ExitedWithCode(0), "");
+}
+
+TEST(KdlTest, ModerateNestingStillParses) {
+    std::string src;
+    for (int i = 0; i < 32; ++i) src += "a {\n";
+    for (int i = 0; i < 32; ++i) src += "}\n";
+    auto nodes = parse_ok(src);
+    ASSERT_EQ(nodes.size(), 1u);
 }
 
 }  // namespace
