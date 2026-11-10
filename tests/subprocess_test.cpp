@@ -100,7 +100,8 @@ std::string wait_for_text(const fs::path& p, const std::string& needle) {
 
 // The daemon's stderr is the only channel for its own exit reason (RSS
 // self-cap, bind failure). On the null device nobody ever saw it. The log is
-// owner-only and replaces an earlier daemon's log rather than appending.
+// owner-only and appended to: replacing it per spawn raced concurrent starts
+// on one root and orphaned a live daemon's log (see the next test).
 TEST(SubprocessTest, SpawnDetachedWritesStderrToTheLog) {
     const fs::path dir = fs::temp_directory_path() /
                          ("lci_spawn_log_" + std::to_string(::getpid()));
@@ -118,11 +119,54 @@ TEST(SubprocessTest, SpawnDetachedWritesStderrToTheLog) {
     const std::string content = wait_for_text(log, "daemon-exit-reason");
     EXPECT_NE(content.find("daemon-exit-reason"), std::string::npos)
         << "the daemon's stderr never reached the log: '" << content << "'";
-    EXPECT_EQ(content.find("stale line"), std::string::npos)
-        << "an earlier daemon's log was appended to, not replaced";
+    EXPECT_EQ(content.rfind("stale line\n", 0), 0u)
+        << "an earlier daemon's lines were dropped: '" << content << "'";
     struct stat st {};
     ASSERT_EQ(::lstat(log.c_str(), &st), 0);
     EXPECT_EQ(st.st_mode & 0777, 0600u) << "the daemon log is not owner-only";
+    fs::remove_all(dir);
+}
+
+// Two cold starts on one root race: each spawns, one daemon wins the lock.
+// Replacing the log per spawn either failed the second spawn (its O_EXCL
+// open lost to the first's) or unlinked the live first daemon's log, so its
+// later exit reason went to an unlinked inode. Both must share one log.
+TEST(SubprocessTest, SpawnDetachedSecondSpawnKeepsTheFirstDaemonsLog) {
+    const fs::path dir = fs::temp_directory_path() /
+                         ("lci_spawn_two_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const fs::path log = dir / "daemon.log";
+
+    ASSERT_TRUE(subprocess::spawn_detached(
+        {"sh", "-c", "sleep 1; echo first-daemon-late >&2"}, log.string()));
+    ASSERT_TRUE(subprocess::spawn_detached(
+        {"sh", "-c", "echo second-daemon >&2"}, log.string()));
+    const std::string content = wait_for_text(log, "first-daemon-late");
+    EXPECT_NE(content.find("first-daemon-late"), std::string::npos)
+        << "the first daemon's stderr no longer reaches the log: '" << content
+        << "'";
+    EXPECT_NE(content.find("second-daemon"), std::string::npos) << content;
+    fs::remove_all(dir);
+}
+
+// Appending must stay bounded: a log past the cap is truncated at the next
+// spawn. Guard, not a RED: replacing the log per spawn also kept it small.
+TEST(SubprocessTest, SpawnDetachedTruncatesAnOversizedLog) {
+    const fs::path dir = fs::temp_directory_path() /
+                         ("lci_spawn_cap_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const fs::path log = dir / "daemon.log";
+    {
+        std::ofstream big(log);
+        big << std::string(2u << 20, 'x');
+    }
+    ASSERT_TRUE(subprocess::spawn_detached(
+        {"sh", "-c", "echo after-cap >&2"}, log.string()));
+    const std::string content = wait_for_text(log, "after-cap");
+    EXPECT_NE(content.find("after-cap"), std::string::npos);
+    EXPECT_LT(content.size(), 1u << 20) << "the oversized log was kept";
     fs::remove_all(dir);
 }
 
