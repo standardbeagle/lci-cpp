@@ -1,8 +1,12 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+#include <absl/container/flat_hash_set.h>
 
 #include <lci/core/file_content_store.h>
 #include <lci/core/reference_tracker.h>
@@ -143,6 +147,9 @@ class ContextExtractor {
 // -- Search engine ------------------------------------------------------------
 
 /// Orchestrates trigram + symbol search with ranking and scoring.
+/// (file id, line) of each navigable definition of a bare-identifier query.
+using DefinitionSites = absl::flat_hash_set<std::pair<uint64_t, int>>;
+
 class SearchEngine {
   public:
     explicit SearchEngine(MasterIndex& index,
@@ -202,6 +209,9 @@ class SearchEngine {
     /// when non-null, drops every line whose symbol fails
     /// `options.symbol_types` BEFORE it is counted or competes for a retained
     /// slot, so neither the count nor the cap sees excluded rows.
+    /// `definition_sites` (file id, line) rows carry kDefinitionBonus in the
+    /// quality they compete for the per-file slots with, so a definition is
+    /// never dropped before its bonus ranks it.
     int process_file(FileID file_id,
                      std::string_view path,
                      std::string_view pattern,
@@ -209,7 +219,8 @@ class SearchEngine {
                      int per_file_cap,
                      std::vector<CandidateRow>& out,
                      const FileSnapshot& snap,
-                     const ReferenceTracker::Snapshot* type_filter) const;
+                     const ReferenceTracker::Snapshot* type_filter,
+                     const DefinitionSites& definition_sites) const;
 };
 
 // -- Search coordinator -------------------------------------------------------

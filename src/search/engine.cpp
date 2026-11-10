@@ -693,7 +693,7 @@ std::vector<SearchResult> SearchEngine::search(
     // compound name has no single symbol it defines. This is what makes
     // `search SearchEngine` return the defining header at the top instead of
     // the lexicographically-first file that happens to mention it (MCP-2).
-    absl::flat_hash_set<std::pair<uint64_t, int>> definition_sites;
+    DefinitionSites definition_sites;
     if (!options.use_regex && !options.invert_match &&
         pattern.find_first_of(" \t\r\n") == std::string_view::npos) {
         auto sym_snap = index_.ref_tracker().pin();
@@ -796,21 +796,14 @@ std::vector<SearchResult> SearchEngine::search(
         file_rows.clear();
         int file_matches =
             process_file(fid, path, pattern, options, retain, file_rows,
-                         *file_snap, type_filter_snap.get());
+                         *file_snap, type_filter_snap.get(), definition_sites);
         if (file_matches <= 0) continue;
 
         // Counts are over all matches, not the retained subset.
         total_matches += file_matches;
         dir_hist.add(relative_to_root(path, proj_root), file_matches);
 
-        for (auto& r : file_rows) {
-            if (!definition_sites.empty() &&
-                definition_sites.contains(
-                    {static_cast<uint64_t>(r.file_id), r.line})) {
-                r.score += kDefinitionBonus;
-            }
-            topk.offer(r);
-        }
+        for (auto& r : file_rows) topk.offer(r);
     }
 
     // Materialize only the survivors. match_text is sliced from the winning
@@ -1277,7 +1270,8 @@ int SearchEngine::process_file(
     int per_file_cap,
     std::vector<CandidateRow>& out,
     const FileSnapshot& snap,
-    const ReferenceTracker::Snapshot* type_filter) const {
+    const ReferenceTracker::Snapshot* type_filter,
+    const DefinitionSites& definition_sites) const {
 
     auto content_sv = index_.file_content_store().get_content(file_id);
     // LRU-evicted-but-searchable: the file is still a trigram/postings
@@ -1408,11 +1402,19 @@ int SearchEngine::process_file(
     // per-call rescan would cost O(occurrences x per_file_cap) on a dense
     // file; quality takes a handful of discrete values, so replacements --
     // the only rescans -- are bounded by per_file_cap x those levels.
+    // Worst = lowest quality, and among equals the LATEST line: equal-score
+    // rows rank earlier lines first (candidate_before), so that is the row a
+    // capped answer gives up. Slots hold rows out of line order once
+    // replacements happen, so the tie compares lines, not positions.
     size_t worst_slot = 0;
     auto rescan_worst = [&]() {
         worst_slot = 0;
         for (size_t i = 1; i < pending.size(); ++i) {
-            if (pending[i].quality < pending[worst_slot].quality) worst_slot = i;
+            const PendingRow& w = pending[worst_slot];
+            if (pending[i].quality < w.quality ||
+                (pending[i].quality == w.quality && pending[i].line > w.line)) {
+                worst_slot = i;
+            }
         }
     };
     auto keep_pending = [&](PendingRow row) {
@@ -1558,6 +1560,10 @@ int SearchEngine::process_file(
             ++trimmed_start;
         }
         if (match_start == trimmed_start) quality += kLineStartBonus;
+        if (!definition_sites.empty() &&
+            definition_sites.contains({static_cast<uint64_t>(file_id), line})) {
+            quality += kDefinitionBonus;
+        }
         if (match.end > match.start && match.end <= content_len &&
             content_sv.substr(static_cast<size_t>(match.start),
                               static_cast<size_t>(match.end - match.start)) ==
