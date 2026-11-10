@@ -70,6 +70,20 @@ class FileScanner {
     /// pass relative paths; new callers must do the same.
     static bool match_glob(std::string_view pattern, std::string_view path);
 
+    /// True when a scan never descends into the directory at `rel_dir`
+    /// (repo-relative): a hidden directory no include names, a gitignored
+    /// one, or one an exclude pattern matches. The watcher asks this same
+    /// question, so incremental updates cannot admit what a scan prunes.
+    bool directory_pruned(std::string_view rel_dir) const;
+
+    /// True when a scan would index the regular file at `path` /
+    /// `rel_path`, size aside: no ancestor directory is pruned and the file
+    /// rules (binary extension, gitignore, exclude/include, attributes) pass.
+    /// The scan itself checks ancestors as it descends; this is the
+    /// single-path form for event-driven callers.
+    bool file_admitted(const std::filesystem::path& path,
+                       std::string_view rel_path) const;
+
   private:
     /// The attribute set in force (shipped ruleset + this project's
     /// `attributes` block). The Index capability decides whether a scanned
@@ -105,6 +119,10 @@ class FileScanner {
                         const std::string& rel_prefix,
                         absl::flat_hash_set<uint64_t>& visited_inodes,
                         std::vector<FileTask>& out);
+
+    /// The per-file rules of file_admitted, without the ancestor walk.
+    bool file_rules_pass(const std::filesystem::path& path,
+                         std::string_view rel_path) const;
 
     /// Returns true if the path matches any exclusion pattern.
     bool should_exclude(std::string_view rel_path) const;

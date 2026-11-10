@@ -63,8 +63,8 @@ struct FileWatcher::WatcherState {
 
 // -- Construction / Destruction ----------------------------------------------
 
-FileWatcher::FileWatcher(const Config& config) : config_(config) {
-    gitignore_.load_gitignore(config.project.root);
+FileWatcher::FileWatcher(const Config& config)
+    : config_(config), scanner_(config) {
     std::error_code ec;
     const fs::path resolved = fs::canonical(config.project.root, ec);
     if (!ec && resolved != fs::path(config.project.root).lexically_normal()) {
@@ -119,54 +119,24 @@ void FileWatcher::stop() {
 
 // -- Directory / path filtering ----------------------------------------------
 
-bool FileWatcher::should_ignore_dir(const std::string& path) const {
-    std::string basename = fs::path(path).filename().string();
+// Both predicates delegate to the FileScanner a full scan uses, so an
+// incremental event is admitted exactly when a rescan would index the path:
+// one rule set (hidden dirs, gitignore, excludes including manifest-derived
+// ones, includes, binary extensions, attributes), never a second copy.
 
+std::string FileWatcher::root_relative(const std::string& path) const {
     std::error_code rel_ec;
     auto rel = fs::relative(path, config_.project.root, rel_ec);
-    std::string rel_str = rel_ec ? basename : rel.generic_string();
+    return rel_ec ? fs::path(path).filename().generic_string()
+                  : rel.generic_string();
+}
 
-    for (const auto& pattern : config_.exclude) {
-        std::string dir_pattern = pattern;
-        if (dir_pattern.ends_with("/**")) {
-            dir_pattern = dir_pattern.substr(0, dir_pattern.size() - 3);
-        }
-        if (FileScanner::match_glob(dir_pattern, basename)) return true;
-        if (FileScanner::match_glob(pattern, rel_str)) return true;
-    }
-
-    if (config_.index.respect_gitignore) {
-        if (gitignore_.should_ignore(rel_str, true)) return true;
-    }
-
-    return false;
+bool FileWatcher::should_ignore_dir(const std::string& path) const {
+    return scanner_.directory_pruned(root_relative(path));
 }
 
 bool FileWatcher::should_process_path(const std::string& path) const {
-    std::string basename = fs::path(path).filename().string();
-
-    std::error_code rel_ec;
-    auto rel = fs::relative(path, config_.project.root, rel_ec);
-    std::string rel_str = rel_ec ? basename : rel.generic_string();
-
-    for (const auto& pattern : config_.exclude) {
-        if (FileScanner::match_glob(pattern, basename)) return false;
-        if (FileScanner::match_glob(pattern, rel_str)) return false;
-    }
-
-    if (config_.index.respect_gitignore) {
-        if (gitignore_.should_ignore(rel_str, false)) return false;
-    }
-
-    if (!config_.include.empty()) {
-        for (const auto& pattern : config_.include) {
-            if (FileScanner::match_glob(pattern, rel_str)) return true;
-            if (FileScanner::match_glob(pattern, basename)) return true;
-        }
-        return false;
-    }
-
-    return true;
+    return scanner_.file_admitted(path, root_relative(path));
 }
 
 std::string FileWatcher::under_configured_root(std::string path) const {

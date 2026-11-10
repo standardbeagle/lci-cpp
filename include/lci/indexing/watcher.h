@@ -9,7 +9,7 @@
 #include <string>
 
 #include <lci/config.h>
-#include <lci/config/gitignore.h>
+#include <lci/indexing/pipeline_scanner.h>
 #include <lci/indexing/debounced_rebuilder.h>
 #include <lci/indexing/deleted_file_tracker.h>
 #include <lci/indexing/pipeline_scanner.h>
@@ -82,11 +82,12 @@ class FileWatcher {
   private:
     bool should_ignore_dir(const std::string& path) const;
     bool should_process_path(const std::string& path) const;
+    std::string root_relative(const std::string& path) const;
     void dispatch_event(const std::string& path, FileEventType type);
     std::string under_configured_root(std::string path) const;
 
     const Config& config_;
-    GitignoreParser gitignore_;
+    FileScanner scanner_;
     // project.root with symlinks resolved, set only when that differs from
     // project.root. FSEvents reports resolved paths (/private/var/... for
     // /var/...) while the index keys files under project.root.

@@ -194,25 +194,7 @@ void FileScanner::walk_directory(
         if (entry.is_directory(ec)) {
             if (ec) continue;
 
-            // Skip hidden directories, UNLESS an explicit include pattern
-            // names this hidden path — otherwise `--include`/`include {}`
-            // can never reach ".github/**" or similar, no matter what the
-            // user writes. "Names it" means the pattern text mentions the
-            // directory's own name (rel_path or dirname), not the bare
-            // wildcard-all default (an empty inclusions_ list, which the
-            // hidden-dir skip must still win against).
-            auto dirname = entry.path().filename().string();
-            if (!dirname.empty() && dirname[0] == '.' &&
-                !hidden_path_explicitly_included(rel_path, dirname)) {
-                continue;
-            }
-
-            // Check gitignore for directory
-            if (config_.index.respect_gitignore &&
-                gitignore_parser_.should_ignore(rel_path, true))
-                continue;
-
-            if (should_exclude(rel_path)) continue;
+            if (directory_pruned(rel_path)) continue;
 
             walk_directory(entry.path(), rel_path, visited_inodes, out);
             continue;
@@ -283,6 +265,36 @@ bool FileScanner::matches_compiled(const CompiledGlob& glob,
     return match_glob(glob.pattern, rel_path);
 }
 
+bool FileScanner::directory_pruned(std::string_view rel_dir) const {
+    const size_t slash = rel_dir.rfind('/');
+    const std::string_view dirname =
+        slash == std::string_view::npos ? rel_dir : rel_dir.substr(slash + 1);
+    // Skip hidden directories, UNLESS an explicit include pattern names this
+    // hidden path — otherwise `--include`/`include {}` can never reach
+    // ".github/**" or similar, no matter what the user writes. "Names it"
+    // means the pattern text mentions the directory's own name (rel_dir or
+    // dirname), not the bare wildcard-all default (an empty inclusions_
+    // list, which the hidden-dir skip must still win against).
+    if (!dirname.empty() && dirname[0] == '.' &&
+        !hidden_path_explicitly_included(rel_dir, dirname)) {
+        return true;
+    }
+    if (config_.index.respect_gitignore &&
+        gitignore_parser_.should_ignore(rel_dir, true)) {
+        return true;
+    }
+    return should_exclude(rel_dir);
+}
+
+bool FileScanner::file_admitted(const std::filesystem::path& path,
+                                std::string_view rel_path) const {
+    for (size_t i = rel_path.find('/'); i != std::string_view::npos;
+         i = rel_path.find('/', i + 1)) {
+        if (directory_pruned(rel_path.substr(0, i))) return false;
+    }
+    return file_rules_pass(path, rel_path);
+}
+
 bool FileScanner::should_exclude(std::string_view rel_path) const {
     for (const auto& pattern : exclusions_) {
         if (matches_compiled(pattern, rel_path)) return true;
@@ -314,7 +326,12 @@ bool FileScanner::should_process_file(
     const std::filesystem::path& path,
     std::string_view rel_path,
     int64_t file_size) const {
+    return file_rules_pass(path, rel_path) &&
+           file_size <= config_.index.max_file_size;
+}
 
+bool FileScanner::file_rules_pass(const std::filesystem::path& path,
+                                  std::string_view rel_path) const {
     if (binary_detector_.is_binary_by_extension(path.string())) return false;
 
     if (config_.index.respect_gitignore &&
@@ -332,9 +349,6 @@ bool FileScanner::should_process_file(
                                   Capability::Index)) {
         return false;
     }
-
-    if (file_size > config_.index.max_file_size) return false;
-
     return true;
 }
 
