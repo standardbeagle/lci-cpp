@@ -282,6 +282,41 @@ TEST(ReferenceTrackerTest, GetSymbolAtLineReturnsInnermostContainer) {
     EXPECT_EQ(name_at(200), "<none>");
 }
 
+// The search symbol_types filter resolves every matched line through
+// innermost_symbol_by_line (one pass per file) instead of get_symbol_at_line
+// (one symbol scan per line). The two must pick the same symbol on every
+// line, including full ties (two symbols with one span), which the scan
+// breaks toward the first in file order.
+TEST(ReferenceTrackerTest, InnermostSymbolByLineMatchesGetSymbolAtLine) {
+    ReferenceTracker rt;
+    std::vector<Symbol> symbols = {
+        make_sym("lci", SymbolType::Namespace, 1, 1, 100),
+        make_sym("Engine", SymbolType::Class, 1, 5, 60),
+        make_sym("run", SymbolType::Method, 1, 10, 20),
+        make_sym("count", SymbolType::Variable, 1, 12, 12),
+        make_sym("twin_a", SymbolType::Function, 1, 30, 40),
+        make_sym("twin_b", SymbolType::Method, 1, 30, 40),
+        make_sym("inner", SymbolType::Struct, 1, 32, 34),
+        make_sym("helper", SymbolType::Function, 1, 70, 80),
+        make_sym("v1", SymbolType::Variable, 1, 90, 95),
+        make_sym("v2", SymbolType::Variable, 1, 92, 93),
+        make_sym("kGlobal", SymbolType::Variable, 1, 120, 120),
+    };
+    rt.process_file(1, "engine.cpp", symbols, {}, {});
+    auto snapshot = rt.pin();
+
+    const auto by_line = snapshot->innermost_symbol_by_line(1);
+    ASSERT_EQ(by_line.size(), 121u);
+    for (int line = 0; line <= 125; ++line) {
+        auto scanned = snapshot->get_symbol_at_line(1, line);
+        const EnhancedSymbol* painted =
+            static_cast<size_t>(line) < by_line.size() ? by_line[line]
+                                                       : nullptr;
+        EXPECT_EQ(scanned.get(), painted) << "line " << line;
+    }
+    EXPECT_TRUE(snapshot->innermost_symbol_by_line(2).empty());
+}
+
 TEST(ReferenceTrackerTest, RemoveFile) {
     ReferenceTracker rt;
 

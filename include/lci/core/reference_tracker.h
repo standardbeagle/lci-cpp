@@ -707,6 +707,13 @@ class ReferenceTracker {
         // during a concurrent reindex and resolve a reused ID to the wrong
         // symbol.
         SymbolHandle get_symbol_at_line(FileID file_id, int line) const;
+        /// get_symbol_at_line for every line of a file in one pass:
+        /// element `line` is what get_symbol_at_line(file_id, line) returns,
+        /// nullptr where no symbol covers the line. Cost is the sum of the
+        /// file's symbol spans instead of a full symbol scan per line. The
+        /// pointers live as long as this snapshot does.
+        std::vector<const EnhancedSymbol*> innermost_symbol_by_line(
+            FileID file_id) const;
     };
 
     /// Pins the current published snapshot. Symbol and line-map queries return

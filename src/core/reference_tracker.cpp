@@ -12,6 +12,16 @@
 namespace lci {
 
 namespace {
+
+// get_symbol_at_line's preference among symbols covering one line: the
+// narrower line span, and on equal spans the later start (the nested one).
+bool covers_more_narrowly(const EnhancedSymbol& a, const EnhancedSymbol& b) {
+    const int span_a = a.symbol.end_line - a.symbol.line;
+    const int span_b = b.symbol.end_line - b.symbol.line;
+    if (span_a != span_b) return span_a < span_b;
+    return a.symbol.line > b.symbol.line;
+}
+
 ReferenceTracker::LangFamily language_family_for_path(std::string_view path);
 bool is_low_quality_path(const PathAttrRegistry& registry,
                          std::string_view path);
@@ -472,27 +482,69 @@ ReferenceTracker::Snapshot::get_symbol_at_line(
     // container; one is returned only when nothing else covers the line.
     const EnhancedSymbol* best = nullptr;
     const EnhancedSymbol* best_variable = nullptr;
-    auto narrower = [](const EnhancedSymbol* a, const EnhancedSymbol* b) {
-        if (b == nullptr) return true;
-        const int span_a = a->symbol.end_line - a->symbol.line;
-        const int span_b = b->symbol.end_line - b->symbol.line;
-        if (span_a != span_b) return span_a < span_b;
-        return a->symbol.line > b->symbol.line;
-    };
     for (SymbolID sid : symbols.get_symbols_by_file(file_id)) {
         const auto* s = symbols.get(sid);
         if (s == nullptr || s->symbol.line > line || line > s->symbol.end_line) {
             continue;
         }
         if (s->symbol.type == SymbolType::Variable) {
-            if (narrower(s, best_variable)) best_variable = s;
-        } else if (narrower(s, best)) {
+            if (best_variable == nullptr ||
+                covers_more_narrowly(*s, *best_variable)) {
+                best_variable = s;
+            }
+        } else if (best == nullptr || covers_more_narrowly(*s, *best)) {
             best = s;
         }
     }
     if (best == nullptr) best = best_variable;
     if (best == nullptr) return nullptr;
     return {shared_from_this(), best};
+}
+
+std::vector<const EnhancedSymbol*>
+ReferenceTracker::Snapshot::innermost_symbol_by_line(FileID file_id) const {
+    // Same pick as get_symbol_at_line, by painting: each symbol paints its
+    // line span, painted so that the one get_symbol_at_line would choose
+    // paints last. Within a class that is narrowest last (covers_more_narrowly)
+    // and, on a full tie, the earliest in file order last, because the scan
+    // keeps the first of equals. Variables paint first so any container
+    // covering the line overwrites them.
+    struct Painter {
+        const EnhancedSymbol* sym;
+        size_t file_order;
+    };
+    std::vector<Painter> painters;
+    int max_line = 0;
+    size_t order = 0;
+    for (SymbolID sid : symbols.get_symbols_by_file(file_id)) {
+        const auto* s = symbols.get(sid);
+        ++order;
+        if (s == nullptr || s->symbol.end_line < s->symbol.line ||
+            s->symbol.end_line < 0) {
+            continue;
+        }
+        painters.push_back({s, order});
+        max_line = std::max(max_line, s->symbol.end_line);
+    }
+    if (painters.empty()) return {};
+    std::sort(painters.begin(), painters.end(),
+              [](const Painter& a, const Painter& b) {
+                  const bool var_a = a.sym->symbol.type == SymbolType::Variable;
+                  const bool var_b = b.sym->symbol.type == SymbolType::Variable;
+                  if (var_a != var_b) return var_a;
+                  if (covers_more_narrowly(*b.sym, *a.sym)) return true;
+                  if (covers_more_narrowly(*a.sym, *b.sym)) return false;
+                  return a.file_order > b.file_order;
+              });
+    std::vector<const EnhancedSymbol*> by_line(
+        static_cast<size_t>(max_line) + 1, nullptr);
+    for (const Painter& p : painters) {
+        const int first = std::max(p.sym->symbol.line, 0);
+        for (int l = first; l <= p.sym->symbol.end_line; ++l) {
+            by_line[static_cast<size_t>(l)] = p.sym;
+        }
+    }
+    return by_line;
 }
 
 // ---------------------------------------------------------------------------
