@@ -610,6 +610,33 @@ ExpansionEngine::ExpansionResult ExpansionEngine::apply_expansions(
 
 namespace {
 
+enum class HydrateStep { Emitted, Skipped, CapReached };
+
+// Hydrates one target into `results` unless its identity is already emitted
+// (recorded in tally.deduped) or the shared visited cap is spent.
+HydrateStep hydrate_one(ExpansionEngine& engine, SymbolID id, std::string label,
+                        const std::string& project_root, FormatType format,
+                        ExpansionTally& tally,
+                        std::vector<HydratedRef>& results) {
+    auto result = engine.hydrate_symbol_id(id, format);
+    if (!result.error.empty()) return HydrateStep::Skipped;
+
+    std::string key = engine.identity_key(result.ref, project_root);
+    if (tally.emitted_keys && tally.emitted_keys->contains(key)) {
+        tally.deduped.emplace_back(std::move(key), std::move(label));
+        return HydrateStep::Skipped;
+    }
+    if (tally.visited_used >= tally.visited_cap) {
+        tally.traversal_truncated = true;
+        return HydrateStep::CapReached;
+    }
+    ++tally.visited_used;
+    if (tally.emitted_keys) tally.emitted_keys->insert(std::move(key));
+    if (!label.empty()) result.ref.provenance.push_back(std::move(label));
+    results.push_back(std::move(result.ref));
+    return HydrateStep::Emitted;
+}
+
 /// Hydrate candidate SymbolIDs into NEW, deduplicated expansion refs. Each
 /// target is resolved by its exact SymbolID (never re-derived by name), so an
 /// expansion sibling cannot be substituted by, or made ambiguous against, a
@@ -636,22 +663,45 @@ std::vector<HydratedRef> hydrate_symbol_ids(
         std::string label = (i < labels.size() && !labels[i].empty())
                                 ? labels[i]
                                 : tally.relationship;
-        auto result = engine.hydrate_symbol_id(ids[i], format);
-        if (!result.error.empty()) continue;
-
-        std::string key = engine.identity_key(result.ref, project_root);
-        if (tally.emitted_keys && tally.emitted_keys->contains(key)) {
-            tally.deduped.emplace_back(std::move(key), label);
-            continue;
-        }
-        if (tally.visited_used >= tally.visited_cap) {
-            tally.traversal_truncated = true;
+        if (hydrate_one(engine, ids[i], std::move(label), project_root, format,
+                        tally, results) == HydrateStep::CapReached) {
             break;
         }
-        ++tally.visited_used;
-        if (tally.emitted_keys) tally.emitted_keys->insert(std::move(key));
-        if (!label.empty()) result.ref.provenance.push_back(std::move(label));
-        results.push_back(std::move(result.ref));
+    }
+    return results;
+}
+
+// Level-order walk up to `depth` hops from `start`, deduped, so "callers:2"
+// reaches callers-of-callers. Each node is hydrated as it is reached, so the
+// shared visited cap bounds the WALK: it stops the moment the cap is spent,
+// and the last level's neighbours are never fetched. `seen` excludes the
+// start symbol, which the caller already emitted as a primary.
+template <class Neighbours>
+std::vector<HydratedRef> walk_and_hydrate(ExpansionEngine& engine,
+                                          SymbolID start, int depth,
+                                          Neighbours&& neighbours,
+                                          const std::string& project_root,
+                                          FormatType format,
+                                          ExpansionTally& tally) {
+    absl::flat_hash_set<SymbolID> seen;
+    seen.insert(start);
+    std::vector<HydratedRef> results;
+    std::vector<SymbolID> frontier = neighbours(start);
+    for (int d = 0; d < depth && !frontier.empty(); ++d) {
+        const bool last_level = d + 1 == depth;
+        std::vector<SymbolID> next;
+        for (auto id : frontier) {
+            if (!seen.insert(id).second) continue;
+            ++tally.walked;
+            if (hydrate_one(engine, id, tally.relationship, project_root,
+                            format, tally, results) == HydrateStep::CapReached) {
+                return results;
+            }
+            if (last_level) continue;
+            auto more = neighbours(id);
+            next.insert(next.end(), more.begin(), more.end());
+        }
+        frontier = std::move(next);
     }
     return results;
 }
@@ -679,27 +729,10 @@ std::vector<HydratedRef> ExpansionEngine::expand_callers(
     auto sym = rt_snap->get_enhanced_symbol(rs.id);
     if (!sym) return {};
 
-    // Level-order walk up to `depth` hops, deduped, so "callers:2" reaches
-    // callers-of-callers. `seen` is the BFS dedup set (and excludes the start
-    // symbol, which the caller already emitted as a primary); the shared
-    // cross-set dedup happens in hydrate_symbol_ids.
-    absl::flat_hash_set<SymbolID> seen;
-    seen.insert(sym->id);
-    std::vector<SymbolID> ordered;
-    std::vector<SymbolID> frontier = tracker.get_caller_symbols(sym->id);
-    for (int d = 0; d < depth && !frontier.empty(); ++d) {
-        std::vector<SymbolID> next;
-        for (auto id : frontier) {
-            if (!seen.insert(id).second) continue;
-            ordered.push_back(id);
-            ++tally.walked;
-            auto up = tracker.get_caller_symbols(id);
-            next.insert(next.end(), up.begin(), up.end());
-        }
-        frontier = std::move(next);
-    }
-
-    return hydrate_symbol_ids(*this, ordered, project_root, format, tally);
+    return walk_and_hydrate(
+        *this, sym->id, depth,
+        [&](SymbolID id) { return tracker.get_caller_symbols(id); },
+        project_root, format, tally);
 }
 
 std::vector<HydratedRef> ExpansionEngine::expand_callees(
@@ -715,23 +748,10 @@ std::vector<HydratedRef> ExpansionEngine::expand_callees(
     auto sym = rt_snap->get_enhanced_symbol(rs.id);
     if (!sym) return {};
 
-    absl::flat_hash_set<SymbolID> seen;
-    seen.insert(sym->id);
-    std::vector<SymbolID> ordered;
-    std::vector<SymbolID> frontier = tracker.get_callee_symbols(sym->id);
-    for (int d = 0; d < depth && !frontier.empty(); ++d) {
-        std::vector<SymbolID> next;
-        for (auto id : frontier) {
-            if (!seen.insert(id).second) continue;
-            ordered.push_back(id);
-            ++tally.walked;
-            auto down = tracker.get_callee_symbols(id);
-            next.insert(next.end(), down.begin(), down.end());
-        }
-        frontier = std::move(next);
-    }
-
-    return hydrate_symbol_ids(*this, ordered, project_root, format, tally);
+    return walk_and_hydrate(
+        *this, sym->id, depth,
+        [&](SymbolID id) { return tracker.get_callee_symbols(id); },
+        project_root, format, tally);
 }
 
 std::vector<HydratedRef> ExpansionEngine::expand_references(
