@@ -1544,6 +1544,64 @@ TEST_F(ServerTest, SocketLockSymlinkIsNotFollowed) {
     ::close(tfd);
 }
 
+TEST_F(ServerTest, TransientLockHolderIsWaitedOutNotBypassed) {
+    // A held socket lock with no live listener has two causes: a zombie
+    // holder (its socket unlinked under it, holds forever) or a transient
+    // one (the stale-socket reaper or a server mid-start, gone in moments).
+    // Pre-fix the starter slept 2 s blind and then started UNGUARDED either
+    // way, so a transient holder left it serving without the lock and a
+    // second starter could bind the same path. Observable: after start, a
+    // fresh open of the lock file can still flock it.
+    server_->shutdown();
+    std::error_code ec;
+    std::filesystem::remove(socket_path_, ec);
+    const std::string lock_path = socket_path_ + ".lock";
+    int hfd = ::open(lock_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+    ASSERT_GE(hfd, 0);
+    ASSERT_EQ(::flock(hfd, LOCK_EX | LOCK_NB), 0);
+    std::thread releaser([hfd] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        ::flock(hfd, LOCK_UN);
+        ::close(hfd);
+    });
+    const bool started = server_->start();
+    releaser.join();
+    ASSERT_TRUE(started);
+
+    int pfd = ::open(lock_path.c_str(), O_RDWR | O_CLOEXEC);
+    ASSERT_GE(pfd, 0);
+    EXPECT_NE(::flock(pfd, LOCK_EX | LOCK_NB), 0)
+        << "server started without holding its socket lock";
+    ::close(pfd);
+}
+
+TEST_F(ServerTest, StaleSocketReaperKeepsTheLockFile) {
+    // Unlinking a lock file another process may have open is the classic
+    // flock race: a holder of the unlinked inode and a later opener of a
+    // fresh one both "own" the lock. The reaper may remove a dead socket,
+    // never its lock file.
+    namespace fs = std::filesystem;
+    const fs::path dir = user_runtime_dir();
+    const std::string stem = "lci-" + std::to_string(::getuid()) +
+                             "-reapertest" + std::to_string(::getpid());
+    const fs::path dead_sock = dir / (stem + ".sock");
+    const fs::path dead_lock = dir / (stem + ".sock.lock");
+    { std::ofstream f(dead_sock); }
+    { std::ofstream f(dead_lock); }
+
+    server_->shutdown();
+    std::error_code ec;
+    fs::remove(socket_path_, ec);
+    ASSERT_TRUE(server_->start());  // start() runs the reaper
+
+    const bool sock_gone = !fs::exists(dead_sock);
+    const bool lock_kept = fs::exists(dead_lock);
+    fs::remove(dead_sock, ec);
+    fs::remove(dead_lock, ec);
+    EXPECT_TRUE(sock_gone) << "control: the reaper did not run";
+    EXPECT_TRUE(lock_kept) << "the reaper unlinked a lock file";
+}
+
 TEST_F(ServerTest, SocketModeIsOwnerOnlyUnderPermissiveUmask) {
     // The socket mode is the only guard keeping other local users off the
     // server. Even with a permissive process umask the bound socket must
