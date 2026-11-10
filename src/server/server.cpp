@@ -857,7 +857,8 @@ bool IndexServer::shutdown_locked() {
 
     // Release the socket-path claim last: a successor blocked in start()'s
     // flock proceeds only once our socket file is gone. The lock file
-    // itself stays (stable path; reaped with the socket when dead).
+    // itself is never unlinked: a successor that locked a fresh inode while
+    // an earlier server still held the old one would run beside it.
     if (socket_lock_fd_ >= 0) {
         ::close(socket_lock_fd_);
         socket_lock_fd_ = -1;
