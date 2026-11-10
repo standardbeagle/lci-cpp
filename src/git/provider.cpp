@@ -139,9 +139,11 @@ bool Provider::get_commit_files(std::string_view commit_ref,
     if (ref.empty()) ref = "HEAD";
     if (!is_safe_ref(ref)) return false;
 
+    // diff-tree prints nothing for a merge unless told which diff to show.
+    // First-parent matches the old side the analyzer reads (`<ref>^`).
     std::string output;
-    if (!run_git({"diff-tree", "--root", "--no-commit-id", "--name-status",
-                  "-z", "-r", ref, "--"},
+    if (!run_git({"diff-tree", "--diff-merges=first-parent", "--root",
+                  "--no-commit-id", "--name-status", "-z", "-r", ref, "--"},
                  output)) {
         return false;
     }
@@ -279,8 +281,9 @@ bool Provider::get_changed_scope(const AnalysisParams& params,
             std::string ref = params.base_ref;
             if (ref.empty()) ref = "HEAD";
             if (!is_safe_ref(ref)) return false;
-            args = {"diff-tree", "--root", "--no-commit-id", "-U0",
-                    "--no-renames", "--no-prefix", "-r", "-p", ref, "--"};
+            args = {"diff-tree", "--diff-merges=first-parent", "--root",
+                    "--no-commit-id", "-U0", "--no-renames", "--no-prefix",
+                    "-r", "-p", ref, "--"};
             break;
         }
         case AnalysisScope::Range: {
@@ -315,8 +318,8 @@ bool Provider::get_diff_stats(const AnalysisParams& params, DiffStats& out) cons
             std::string ref = params.base_ref;
             if (ref.empty()) ref = "HEAD";
             if (!is_safe_ref(ref)) return false;
-            args = {"diff-tree", "--root", "--no-commit-id", "--numstat",
-                    "-r", ref, "--"};
+            args = {"diff-tree", "--diff-merges=first-parent", "--root",
+                    "--no-commit-id", "--numstat", "-r", ref, "--"};
             break;
         }
         case AnalysisScope::Range: {
