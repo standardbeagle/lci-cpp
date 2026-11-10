@@ -86,6 +86,13 @@ class SideEffectAnalyzer;
 ///     clear->publish window rather than racing it (the INVARIANT in
 ///     master_index.cpp). Lock order is bulk_mu_ -> snapshot_mu_.
 ///   - clear() holds both mu_ and snapshot_mu_.
+/// One watch batch for MasterIndex::apply_file_changes: paths to drop, and
+/// paths to index from disk (fresh, or re-read and replaced when indexed).
+struct FileChangeBatch {
+    std::vector<std::string> removed;
+    std::vector<std::string> indexed;
+};
+
 class MasterIndex {
   public:
     explicit MasterIndex(const Config& config);
@@ -121,6 +128,15 @@ class MasterIndex {
 
     /// Removes a file from the index.
     bool remove_file(const std::string& path);
+
+    /// Applies a batch as ONE composite write: the sub-indexes stage, the
+    /// references re-resolve once and the file snapshot publishes once,
+    /// where index_file/remove_file pay a snapshot copy, a re-resolve and a
+    /// publish per file. Removals apply first. An indexed path whose bytes are
+    /// unchanged is left alone; one now empty or past max_file_size is
+    /// removed, as a scan would skip it. Returns the paths whose index state
+    /// changed. Same locking as the single-file writes.
+    size_t apply_file_changes(const FileChangeBatch& batch);
 
     // -- Lifecycle -------------------------------------------------------------
 
@@ -354,8 +370,26 @@ class MasterIndex {
     // the update path). Both guarded by snapshot_mu_.
     /// Shared full re-parse for the single-file write APIs (index_file /
     /// update_file). Caller holds snapshot_mu_; content already stored.
-    void reparse_file_symbols(const std::string& path, FileID file_id,
+    /// Returns true when symbols were integrated, and the caller then runs
+    /// ref_tracker_.process_all_references() once.
+    bool reparse_file_symbols(const std::string& path, FileID file_id,
                               int64_t size);
+
+    // Bodies of the write APIs. Caller holds bulk_mu_ then snapshot_mu_.
+    // Each mutates `work`, the file snapshot the caller publishes (copied
+    // from the live one on first need), and leaves reference resolution to
+    // the caller via `parsed`.
+    bool index_file_locked(const std::string& path,
+                           std::shared_ptr<FileSnapshot>& work, bool& parsed);
+    bool update_file_locked(const std::string& path, std::string_view content,
+                            std::shared_ptr<FileSnapshot>& work, bool& parsed);
+    bool remove_file_locked(const std::string& path,
+                            std::shared_ptr<FileSnapshot>& work);
+    FileSnapshot& draft_snapshot(std::shared_ptr<FileSnapshot>& work) const;
+    FileID draft_lookup(const std::shared_ptr<FileSnapshot>& work,
+                        const std::string& path) const;
+    /// Opens/closes the sub-indexes' staging windows for apply_file_changes.
+    void set_write_staging(bool enabled);
 
     std::unique_ptr<FileProcessor> single_processor_;
     std::unique_ptr<FileIntegrator> single_integrator_;
@@ -388,9 +422,8 @@ class MasterIndex {
 
     // Helpers
     void set_bulk_indexing(bool enabled);
-    void update_snapshot_for_file(const std::string& path,
-                                  FileID new_id, FileID old_id,
-                                  bool existed);
+    void record_file_in_snapshot(FileSnapshot& next, const std::string& path,
+                                 FileID new_id, FileID old_id, bool existed);
     void remove_file_from_indexes(FileID file_id, const std::string& path);
 
     // Search helpers (in master_index_search.cpp)

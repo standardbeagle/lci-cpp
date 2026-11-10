@@ -167,6 +167,17 @@ void MasterIndex::set_bulk_indexing(bool enabled) {
     postings_index_.set_bulk_indexing(enabled);
 }
 
+void MasterIndex::set_write_staging(bool enabled) {
+    // The sub-indexes' staging windows alone. The reference tracker gets
+    // set_staged_writes, not set_bulk_indexing: bulk mode also makes its
+    // resolve pass rebuild the import graph from the queued files only,
+    // which would drop every other file's imports in an incremental batch.
+    trigram_index_.set_bulk_indexing(enabled);
+    ref_tracker_.set_staged_writes(enabled);
+    symbol_location_index_.set_bulk_indexing(enabled);
+    postings_index_.set_bulk_indexing(enabled);
+}
+
 void MasterIndex::run_exclusive_of_index_writes(
     const std::function<void()>& fn) {
     std::lock_guard<std::mutex> bulk_lock(bulk_mu_);
@@ -511,9 +522,10 @@ MasterIndex::IndexingProgressSnapshot MasterIndex::get_progress() const {
 // Shared full re-parse for the single-file write APIs (index_file /
 // update_file): runs the same extraction the bulk pipeline uses and merges
 // through a symbols-only FileIntegrator wired to ref_tracker_ /
-// symbol_location_index_, then re-resolves references. Caller holds
-// snapshot_mu_ and has already stored the content under `file_id`.
-void MasterIndex::reparse_file_symbols(const std::string& path, FileID file_id,
+// symbol_location_index_. Caller holds snapshot_mu_, has already stored the
+// content under `file_id`, and re-resolves references (process_all_references)
+// once when this returns true — once per write, or once per batch.
+bool MasterIndex::reparse_file_symbols(const std::string& path, FileID file_id,
                                        int64_t size) {
     if (!single_processor_) {
         single_processor_ = std::make_unique<FileProcessor>(
@@ -529,12 +541,9 @@ void MasterIndex::reparse_file_symbols(const std::string& path, FileID file_id,
     task.size = size;
     task.preloaded_id = file_id;
     auto processed = single_processor_->process_single(task);
-    if (!processed.has_error && processed.file_id != FileID{0}) {
-        single_integrator_->integrate_file(processed);
-        // Re-resolve so this file's references bind to targets (and stale
-        // edges into the old generation of this file are rebuilt).
-        ref_tracker_.process_all_references();
-    }
+    if (processed.has_error || processed.file_id == FileID{0}) return false;
+    single_integrator_->integrate_file(processed);
+    return true;
 }
 
 namespace {
@@ -550,6 +559,23 @@ std::string generic_path(std::string p) {
 }
 }  // namespace
 
+FileSnapshot& MasterIndex::draft_snapshot(
+    std::shared_ptr<FileSnapshot>& work) const {
+    if (!work) work = std::make_shared<FileSnapshot>(*load_snapshot());
+    return *work;
+}
+
+FileID MasterIndex::draft_lookup(const std::shared_ptr<FileSnapshot>& work,
+                                 const std::string& path) const {
+    if (work) {
+        auto it = work->file_map.find(path);
+        return it == work->file_map.end() ? FileID{0} : it->second;
+    }
+    auto snap = load_snapshot();
+    auto it = snap->file_map.find(path);
+    return it == snap->file_map.end() ? FileID{0} : it->second;
+}
+
 bool MasterIndex::index_file(const std::string& path_arg) {
     // bulk_mu_ first: the bulk clear->publish span in index_directory must
     // never observe a concurrent incremental write (see the INVARIANT at
@@ -557,7 +583,22 @@ bool MasterIndex::index_file(const std::string& path_arg) {
     // bulk window; callers that cannot block (the efsw callback thread)
     // must route through a debouncer instead of calling this directly.
     std::lock_guard<std::mutex> bulk_lock(bulk_mu_);
-    const std::string path = generic_path(path_arg);
+    // snapshot_mu_ serializes the whole single-file composite write (per-index
+    // publish + file-snapshot swap) as a unit, so a concurrent reader never
+    // sees a file present in one index but missing from the file map. Reads are
+    // lock-free (RCU snapshots).
+    std::lock_guard<std::mutex> snap_lock(snapshot_mu_);
+    std::shared_ptr<FileSnapshot> work;
+    bool parsed = false;
+    const bool indexed = index_file_locked(generic_path(path_arg), work, parsed);
+    if (parsed) ref_tracker_.process_all_references();
+    if (work) publish_snapshot(std::move(work));
+    return indexed;
+}
+
+bool MasterIndex::index_file_locked(const std::string& path,
+                                    std::shared_ptr<FileSnapshot>& work,
+                                    bool& parsed) {
     if (path.empty()) return false;
     if (!std::filesystem::exists(path)) return false;
     // Same admission rule as the bulk scanner: a watch event for a symlink
@@ -585,23 +626,16 @@ bool MasterIndex::index_file(const std::string& path_arg) {
     auto content_sv = file_content_store_->get_content(file_id);
     if (content_sv.empty()) return false;
 
-    // snapshot_mu_ serializes the whole single-file composite write (per-index
-    // publish + file-snapshot swap) as a unit, so a concurrent reader never
-    // sees a file present in one index but missing from the file map. Reads are
-    // lock-free (RCU snapshots); the old IndexLockManager is retired — its
-    // ReadGuards had no remaining callers after execute_search went lock-free
-    // (01KSWHQ742), and its WriteGuards only duplicated this mutex.
-    std::lock_guard<std::mutex> snap_lock(snapshot_mu_);
-
     trigram_index_.index_file(file_id, content_sv);
     postings_index_.index_file(file_id, content_sv,
                                data_cap(config_, path, content_sv));
     // Full re-parse: index_file shared update_file's defect — it indexed
     // text (trigram+postings) but never extracted symbols, so a file added
     // through this API was invisible to every symbol endpoint.
-    reparse_file_symbols(path, file_id,
-                         static_cast<int64_t>(content_sv.size()));
-    update_snapshot_for_file(path, file_id, FileID{0}, false);
+    parsed |= reparse_file_symbols(path, file_id,
+                                   static_cast<int64_t>(content_sv.size()));
+    record_file_in_snapshot(draft_snapshot(work), path, file_id, FileID{0},
+                            false);
 
     processed_files_.fetch_add(1, std::memory_order_relaxed);
     return true;
@@ -611,7 +645,21 @@ bool MasterIndex::update_file(const std::string& path_arg,
                               std::string_view content) {
     // bulk_mu_ first: mutual exclusion with the bulk window (see index_file).
     std::lock_guard<std::mutex> bulk_lock(bulk_mu_);
-    const std::string path = generic_path(path_arg);
+    // snapshot_mu_ serializes the whole composite write (see index_file).
+    std::lock_guard<std::mutex> snap_lock(snapshot_mu_);
+    std::shared_ptr<FileSnapshot> work;
+    bool parsed = false;
+    const bool updated =
+        update_file_locked(generic_path(path_arg), content, work, parsed);
+    if (parsed) ref_tracker_.process_all_references();
+    if (work) publish_snapshot(std::move(work));
+    return updated;
+}
+
+bool MasterIndex::update_file_locked(const std::string& path,
+                                     std::string_view content,
+                                     std::shared_ptr<FileSnapshot>& work,
+                                     bool& parsed) {
     if (path.empty() || content.empty()) return false;
     if (!std::filesystem::exists(path)) return false;
     if (!path_admissible_for_index(path, config_.project.root,
@@ -623,20 +671,9 @@ bool MasterIndex::update_file(const std::string& path_arg,
         return false;
     }
 
-    // snapshot_mu_ serializes the whole composite write (see index_file).
-    // IndexLockManager retired — RCU reads need no lock; these WriteGuards only
-    // duplicated this mutex.
-    std::lock_guard<std::mutex> snap_lock(snapshot_mu_);
-
-    auto snap = load_snapshot();
-    auto it = snap->file_map.find(path);
-    FileID old_id{0};
-    bool existed = false;
-    if (it != snap->file_map.end()) {
-        old_id = it->second;
-        existed = true;
-        remove_file_from_indexes(old_id, path);
-    }
+    const FileID old_id = draft_lookup(work, path);
+    const bool existed = old_id != FileID{0};
+    if (existed) remove_file_from_indexes(old_id, path);
 
     FileID new_id = file_content_store_->add_file(path, content);
     if (new_id == FileID{0}) return false;
@@ -649,38 +686,107 @@ bool MasterIndex::update_file(const std::string& path_arg,
     // every update permanently dropped the file's symbols, references and
     // scopes (remove_file_from_indexes above erased them and nothing re-added
     // them).
-    reparse_file_symbols(path, new_id, static_cast<int64_t>(content.size()));
+    parsed |= reparse_file_symbols(path, new_id,
+                                   static_cast<int64_t>(content.size()));
 
-    update_snapshot_for_file(path, new_id, old_id, existed);
+    record_file_in_snapshot(draft_snapshot(work), path, new_id, old_id,
+                            existed);
     return true;
 }
 
 bool MasterIndex::remove_file(const std::string& path_arg) {
     // bulk_mu_ first: mutual exclusion with the bulk window (see index_file).
     std::lock_guard<std::mutex> bulk_lock(bulk_mu_);
-    const std::string path = generic_path(path_arg);
     // snapshot_mu_ serializes the whole composite write and spans the file_map
-    // lookup so two concurrent removals can't both act on the same id. RCU
-    // reads need no lock; the old IndexLockManager WriteGuards are retired.
+    // lookup so two concurrent removals can't both act on the same id.
     std::lock_guard<std::mutex> snap_lock(snapshot_mu_);
+    std::shared_ptr<FileSnapshot> work;
+    remove_file_locked(generic_path(path_arg), work);
+    if (work) publish_snapshot(std::move(work));
+    return true;
+}
 
-    auto snap = load_snapshot();
-    auto it = snap->file_map.find(path);
-    if (it == snap->file_map.end()) return true;
-
-    FileID file_id = it->second;
+bool MasterIndex::remove_file_locked(const std::string& path,
+                                     std::shared_ptr<FileSnapshot>& work) {
+    const FileID file_id = draft_lookup(work, path);
+    if (file_id == FileID{0}) return false;
 
     remove_file_from_indexes(file_id, path);
     file_content_store_->invalidate_file(path);
 
-    auto new_snap = std::make_shared<FileSnapshot>(*snap);
-    new_snap->file_map.erase(path);
-    new_snap->reverse_file_map.erase(file_id);
-    new_snap->file_attrs.erase(file_id);
-    publish_snapshot(std::move(new_snap));
+    FileSnapshot& next = draft_snapshot(work);
+    next.file_map.erase(path);
+    next.reverse_file_map.erase(file_id);
+    next.file_attrs.erase(file_id);
 
     processed_files_.fetch_sub(1, std::memory_order_relaxed);
     return true;
+}
+
+namespace {
+bool read_file_bytes(const std::string& path, std::string& out) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+    out.assign(std::istreambuf_iterator<char>(in),
+               std::istreambuf_iterator<char>());
+    return in.good() || in.eof();
+}
+}  // namespace
+
+size_t MasterIndex::apply_file_changes(const FileChangeBatch& batch) {
+    if (batch.removed.empty() && batch.indexed.empty()) return 0;
+    // Same lock order as the single-file writes: bulk_mu_ -> snapshot_mu_.
+    std::lock_guard<std::mutex> bulk_lock(bulk_mu_);
+    std::lock_guard<std::mutex> snap_lock(snapshot_mu_);
+
+    // Stage every sub-index, so the batch costs each one snapshot copy and one
+    // publish rather than one per file. A throw closes the windows and leaves
+    // the file snapshot unpublished, so a half-written file stays invisible.
+    set_write_staging(true);
+    struct CloseStaging {
+        MasterIndex* self;
+        ~CloseStaging() {
+            if (self) self->set_write_staging(false);
+        }
+    } close_staging{this};
+
+    std::shared_ptr<FileSnapshot> work;
+    bool parsed = false;
+    size_t changed = 0;
+    for (const auto& removed : batch.removed) {
+        if (remove_file_locked(generic_path(removed), work)) ++changed;
+    }
+    std::string bytes;
+    for (const auto& indexed : batch.indexed) {
+        const std::string path = generic_path(indexed);
+        const FileID id = draft_lookup(work, path);
+        if (id == FileID{0}) {
+            if (index_file_locked(path, work, parsed)) ++changed;
+            continue;
+        }
+        // Already indexed: index what a scan would. An emptied or oversized
+        // file is one the scanner skips, so it leaves the index instead of
+        // serving its old bytes; unchanged bytes cost no re-parse.
+        std::error_code ec;
+        const auto size = std::filesystem::file_size(path, ec);
+        if (ec) continue;
+        if (size == 0 ||
+            static_cast<int64_t>(size) > config_.index.max_file_size) {
+            if (remove_file_locked(path, work)) ++changed;
+            continue;
+        }
+        if (!read_file_bytes(path, bytes)) continue;
+        if (bytes == file_content_store_->get_content(id)) continue;
+        if (update_file_locked(path, bytes, work, parsed)) ++changed;
+    }
+    if (parsed) ref_tracker_.process_all_references();
+
+    // Sub-indexes publish first, then the file snapshot: the order the
+    // single-file writes publish in.
+    close_staging.self = nullptr;
+    set_write_staging(false);
+    if (work) publish_snapshot(std::move(work));
+    return changed;
 }
 
 // -- Lifecycle ----------------------------------------------------------------
@@ -842,28 +948,24 @@ void MasterIndex::publish_snapshot(std::shared_ptr<FileSnapshot> snap) {
     snapshot_.store(std::move(snap), std::memory_order_release);
 }
 
-void MasterIndex::update_snapshot_for_file(const std::string& path,
-                                            FileID new_id, FileID old_id,
-                                            bool existed) {
-    auto old_snap = load_snapshot();
-    auto new_snap = std::make_shared<FileSnapshot>(*old_snap);
-
+void MasterIndex::record_file_in_snapshot(FileSnapshot& next,
+                                          const std::string& path,
+                                          FileID new_id, FileID old_id,
+                                          bool existed) {
     if (existed) {
-        new_snap->file_map.erase(path);
-        new_snap->reverse_file_map.erase(old_id);
-        new_snap->file_attrs.erase(old_id);
+        next.file_map.erase(path);
+        next.reverse_file_map.erase(old_id);
+        next.file_attrs.erase(old_id);
     }
 
-    new_snap->file_map[path] = new_id;
-    new_snap->reverse_file_map[new_id] = path;
+    next.file_map[path] = new_id;
+    next.reverse_file_map[new_id] = path;
     PathAttrId attr = classify_file_attr(path, new_id);
     if (attr != kFallbackAttr) {
-        new_snap->file_attrs[new_id] = attr;
+        next.file_attrs[new_id] = attr;
     } else {
-        new_snap->file_attrs.erase(new_id);
+        next.file_attrs.erase(new_id);
     }
-
-    publish_snapshot(std::move(new_snap));
 }
 
 void MasterIndex::remove_file_from_indexes(FileID file_id,

@@ -538,6 +538,13 @@ class ReferenceTracker {
     /// PostingsIndex / FileContentStore.
     void set_bulk_indexing(bool enabled);
 
+    /// The staging half of set_bulk_indexing alone: writes accumulate in the
+    /// private snapshot and publish once on close, while process_all_references
+    /// keeps its incremental rule (replace the queued files' imports) instead
+    /// of rebuilding the import graph from the queued files. For incremental
+    /// batches such as MasterIndex::apply_file_changes.
+    void set_staged_writes(bool enabled);
+
     /// Applies parser-only metadata enrichment (complexity, signature, doc
     /// comment) to already-processed symbols. Replaces the old mutable
     /// symbol_store_mut() accessor: under the RCU model the SymbolStore lives

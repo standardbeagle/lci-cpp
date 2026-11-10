@@ -578,8 +578,12 @@ void ReferenceTracker::write_snapshot(Fn&& fn) {
 }
 
 void ReferenceTracker::set_bulk_indexing(bool enabled) {
-    std::lock_guard<std::mutex> lk(write_mu_);
     bulk_indexing.store(enabled ? 1 : 0, std::memory_order_release);
+    set_staged_writes(enabled);
+}
+
+void ReferenceTracker::set_staged_writes(bool enabled) {
+    std::lock_guard<std::mutex> lk(write_mu_);
     if (enabled) {
         if (!staging_) {
             staging_ = std::make_shared<Snapshot>(
