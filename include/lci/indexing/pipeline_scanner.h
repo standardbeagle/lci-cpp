@@ -72,7 +72,9 @@ class FileScanner {
 
     /// True when a scan never descends into the directory at `rel_dir`
     /// (repo-relative): a hidden directory no include names, a gitignored
-    /// one, or one an exclude pattern matches. The watcher asks this same
+    /// one, or one an exclude pattern matches — as a path, or as a
+    /// directory whose whole contents a trailing `/**` or `/*` covers
+    /// (`**/node_modules/**` prunes `node_modules`). The watcher asks this same
     /// question, so incremental updates cannot admit what a scan prunes.
     bool directory_pruned(std::string_view rel_dir) const;
 

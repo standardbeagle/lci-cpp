@@ -283,7 +283,17 @@ bool FileScanner::directory_pruned(std::string_view rel_dir) const {
         gitignore_parser_.should_ignore(rel_dir, true)) {
         return true;
     }
-    return should_exclude(rel_dir);
+    if (should_exclude(rel_dir)) return true;
+    // An exclude whose last segment is a wildcard under this directory
+    // ("**/node_modules/**", "out/*") covers everything inside it but never
+    // matches the directory's own path, so the walk used to enter the tree
+    // and reject it file by file. Against "<dir>/" the trailing wildcard
+    // matches empty: the walk stops here. Sound for `*` too: every child
+    // file matches it and every child directory is pruned by it.
+    std::string dir_with_slash;
+    dir_with_slash.reserve(rel_dir.size() + 1);
+    dir_with_slash.append(rel_dir).push_back('/');
+    return should_exclude(dir_with_slash);
 }
 
 bool FileScanner::file_admitted(const std::filesystem::path& path,
