@@ -265,17 +265,19 @@ bool Provider::get_changed_scope(const AnalysisParams& params,
                                  ScopeSet& out) const {
     // Porcelain `git diff` (Staged/WIP/Range) honours the repo's
     // diff.external and color.diff=always even into a pipe; either one
-    // replaces the unified diff this parser reads. --no-ext-diff and
-    // --no-color pin the plumbing format diff-tree already emits.
+    // replaces the unified diff this parser reads. It also runs textconv
+    // filters, whose output renumbers the hunks against text the index
+    // never parsed. --no-ext-diff, --no-color and --no-textconv pin the
+    // plumbing format diff-tree already emits.
     std::vector<std::string> args;
     switch (params.scope) {
         case AnalysisScope::Staged:
             args = {"diff", "--cached", "-U0", "--no-renames",
-                    "--no-prefix", "--no-ext-diff", "--no-color", "--"};
+                    "--no-prefix", "--no-ext-diff", "--no-color", "--no-textconv", "--"};
             break;
         case AnalysisScope::WIP:
             args = {"diff", "HEAD", "-U0", "--no-renames", "--no-prefix",
-                    "--no-ext-diff", "--no-color", "--"};
+                    "--no-ext-diff", "--no-color", "--no-textconv", "--"};
             break;
         case AnalysisScope::Commit: {
             std::string ref = params.base_ref;
@@ -294,7 +296,7 @@ bool Provider::get_changed_scope(const AnalysisParams& params,
                 return false;
             std::string range_spec = params.base_ref + ".." + target;
             args = {"diff", "-U0", "--no-renames", "--no-prefix",
-                    "--no-ext-diff", "--no-color", range_spec, "--"};
+                    "--no-ext-diff", "--no-color", "--no-textconv", range_spec, "--"};
             break;
         }
     }
