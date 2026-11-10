@@ -129,8 +129,13 @@ async function main() {
     fail(`download failed: ${e.message}`);
   }
 
-  // Verify integrity against the release SHA256SUMS when present.
+  // Verify integrity against the release SHA256SUMS. Every release
+  // publishes one (release.yml), so its absence is refused unless the
+  // caller opts out, matching install.sh.
   const sums = (release.assets || []).find((a) => a.name === 'SHA256SUMS');
+  if (!sums && process.env.LCI_INSTALL_SKIP_VERIFY !== '1') {
+    fail('release has no SHA256SUMS asset; refusing to install an unverified download (set LCI_INSTALL_SKIP_VERIFY=1 to override)');
+  }
   if (sums) {
     let sumsText;
     try {
@@ -138,15 +143,23 @@ async function main() {
     } catch (e) {
       fail(`failed to fetch SHA256SUMS: ${e.message}`);
     }
-    const line = sumsText.split('\n').find((l) => l.trim().endsWith(asset.name));
-    if (!line) fail(`SHA256SUMS has no entry for ${asset.name}`);
-    const expected = line.trim().split(/\s+/)[0].toLowerCase();
+    // `<hex>  <name>` or `<hex> *<name>`; the name must match whole, never
+    // by suffix, or a lookalike entry could supply the hash.
+    let expected = null;
+    for (const l of sumsText.split('\n')) {
+      const m = /^([0-9A-Fa-f]+)\s+\*?(.+)$/.exec(l.trim());
+      if (m && m[2] === asset.name) {
+        expected = m[1].toLowerCase();
+        break;
+      }
+    }
+    if (!expected) fail(`SHA256SUMS has no entry for ${asset.name}`);
     const actual = crypto.createHash('sha256').update(data).digest('hex');
     if (actual !== expected) {
       fail(`checksum mismatch for ${asset.name} (expected ${expected}, got ${actual})`);
     }
   } else {
-    console.warn('lci: release has no SHA256SUMS; skipping integrity check');
+    console.warn('lci: release has no SHA256SUMS; LCI_INSTALL_SKIP_VERIFY=1 set, skipping integrity check');
   }
 
   fs.writeFileSync(tarball, data);

@@ -91,6 +91,24 @@ def _asset_matcher():
     raise InstallError(f"unsupported platform: {sys.platform}")
 
 
+def _expected_sha256(sums_text: str, asset_name: str):
+    """The hash SHA256SUMS lists for exactly `asset_name`, or None.
+
+    Lines are `<hex>  <name>` (text mode) or `<hex> *<name>` (binary mode);
+    the name must match whole, never by suffix.
+    """
+    for line in sums_text.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) != 2:
+            continue
+        digest, name = parts
+        if name.startswith("*"):
+            name = name[1:]
+        if name == asset_name:
+            return digest.lower()
+    return None
+
+
 class _GitHubOnlyRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if not _is_allowed_url(newurl):
@@ -138,18 +156,21 @@ def _download_binary(dest: Path, version: str) -> None:
         except Exception as exc:  # noqa: BLE001
             raise InstallError(f"download failed: {exc}") from exc
 
-        # Verify integrity against the release SHA256SUMS when present.
+        # Verify integrity against the release SHA256SUMS. Every release
+        # publishes one (release.yml), so its absence is refused unless the
+        # caller opts out, matching install.sh.
         sums = next((a for a in release.get("assets", []) if a["name"] == "SHA256SUMS"), None)
+        if sums is None and os.environ.get("LCI_INSTALL_SKIP_VERIFY") != "1":
+            raise InstallError(
+                "release has no SHA256SUMS asset; refusing to install an "
+                "unverified download (set LCI_INSTALL_SKIP_VERIFY=1 to override)"
+            )
         if sums is not None:
             try:
                 sums_text = _http_get(sums["browser_download_url"]).decode("utf-8")
             except Exception as exc:  # noqa: BLE001
                 raise InstallError(f"failed to fetch SHA256SUMS: {exc}") from exc
-            expected = None
-            for line in sums_text.splitlines():
-                if line.strip().endswith(asset["name"]):
-                    expected = line.split()[0].lower()
-                    break
+            expected = _expected_sha256(sums_text, asset["name"])
             if expected is None:
                 raise InstallError(f"SHA256SUMS has no entry for {asset['name']}")
             actual = hashlib.sha256(data).hexdigest()
@@ -159,7 +180,8 @@ def _download_binary(dest: Path, version: str) -> None:
                     f"(expected {expected}, got {actual})"
                 )
         else:
-            print("lci: release has no SHA256SUMS; skipping integrity check", file=sys.stderr)
+            print("lci: release has no SHA256SUMS; LCI_INSTALL_SKIP_VERIFY=1 set, "
+                  "skipping integrity check", file=sys.stderr)
 
         tarball.write_bytes(data)
 
