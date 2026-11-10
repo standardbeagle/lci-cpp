@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -4505,7 +4506,53 @@ TEST_F(CliMcpToolsTest, WithoutToolsFlagEveryToolIsServed) {
     EXPECT_TRUE(listed.count("callers"));
     EXPECT_TRUE(listed.count("search"));
 }
+
+// An --include/--exclude regex that does not compile used to print a
+// warning and return every row unfiltered with exit 0: a script asking for
+// "only src/" got the whole repo and no failure to notice.
+TEST(CliPathFilterTest, InvalidPathRegexFailsTheCommand) {
+    namespace fs = std::filesystem;
+    const auto lci_bin = lci::test::lci_binary_path();
+    ASSERT_TRUE(fs::exists(lci_bin)) << lci_bin;
+    const auto root = lci::test::unique_temp_dir("lci_bad_path_re_");
+    fs::create_directories(root);
+    write_corpus_file(root, "src/alpha.cpp", "int needle_here = 1;\n");
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string flag;
+    };
+    const std::vector<Case> cases = {
+        {{"search", "needle_here", "--include", "(", "-r", root.string()},
+         "--include"},
+        {{"search", "needle_here", "--exclude", "(", "-r", root.string()},
+         "--exclude"},
+        {{"grep", "needle_here", "--exclude", "(", "-r", root.string()},
+         "--exclude"},
+    };
+    for (const auto& c : cases) {
+        std::string out;
+        const int code = run_cli_merged(lci_bin, c.args, out);
+        EXPECT_NE(code, 0) << c.args[0] << " " << c.flag << "\n" << out;
+        EXPECT_NE(out.find("invalid " + c.flag + " regex"), std::string::npos)
+            << out;
+        EXPECT_EQ(out.find("src/alpha.cpp"), std::string::npos)
+            << "no unfiltered rows\n" << out;
+    }
+
+    shutdown_lci_server(lci_bin, root);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
 #endif  // _WIN32
+
+TEST(GrepFiltersApplyPathFilters, InvalidRegexThrowsInsteadOfPassingAll) {
+    nlohmann::json rows = nlohmann::json::array();
+    rows.push_back({{"path", "src/a.cpp"}, {"line", 1}});
+    EXPECT_THROW(gf::apply_path_filters(rows, "", "("), std::invalid_argument);
+    EXPECT_THROW(gf::apply_path_filters(rows, "(", ""), std::invalid_argument);
+    EXPECT_EQ(gf::apply_path_filters(rows, "", "^src/").size(), 1u);
+}
 
 }  // namespace
 }  // namespace cli
