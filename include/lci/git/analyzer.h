@@ -74,6 +74,10 @@ class RepoPathMapper {
     /// outside both roots stays as normalize_rel leaves it.
     std::string to_repo_rel(const std::string& index_path) const;
 
+    /// The project root relative to the repo root; "" when the project is
+    /// the repo root (or lies outside it).
+    const std::string& repo_prefix() const { return repo_prefix_; }
+
   private:
     std::string project_root_;
     std::string repo_root_;

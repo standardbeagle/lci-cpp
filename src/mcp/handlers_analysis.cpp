@@ -892,6 +892,9 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             git::ChangeFrequencyParams fp = git::ChangeFrequencyParams::defaults();
             fp.time_window = params.value("time_window", std::string("30d"));
             fp.file_pattern = params.value("file_pattern", std::string());
+            fp.path_scope = git::RepoPathMapper(std::string(project_root),
+                                                provider.repo_root())
+                                .repo_prefix();
             git::TimeWindow win = git::parse_time_window(fp.time_window);
 
             git::FrequencyAnalyzer freq(provider);

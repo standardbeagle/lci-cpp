@@ -257,7 +257,8 @@ bool should_exclude_from_churn(std::string_view file_path,
 // ============================================================================
 
 ChangeFrequencyParams ChangeFrequencyParams::defaults() {
-    return {"30d", "file", {"all"}, {}, {}, {}, 2, 2, 50, {}, {}, false};
+    return {.time_window = "30d", .granularity = "file", .focus = {"all"},
+            .min_changes = 2, .min_contributors = 2, .top_n = 50};
 }
 
 bool ChangeFrequencyParams::has_focus(FrequencyFocus f) const {
@@ -551,6 +552,10 @@ bool FrequencyAnalyzer::analyze(const ChangeFrequencyParams& params,
     } else if (!params.file_pattern.empty()) {
         ok = history_.get_repo_history(since, params.file_pattern, commits,
                                        &out.metadata.notice);
+    } else if (!params.path_scope.empty()) {
+        // A project rooted in a repo subdirectory: whole-repo history would
+        // rank sibling directories' files above the project's own.
+        ok = history_.get_commit_history(since, commits, {params.path_scope});
     } else {
         ok = history_.get_repo_history(since, "", commits);
     }

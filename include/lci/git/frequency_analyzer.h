@@ -177,6 +177,9 @@ struct ChangeFrequencyParams {
     std::string file_pattern;
     std::string file_path;
     std::string symbol_name;
+    // Repo-relative directory the whole-repo history is confined to: the
+    // project root's place in its repo. Empty: the project IS the repo root.
+    std::string path_scope;
     int min_changes{2};
     int min_contributors{2};
     int top_n{50};
