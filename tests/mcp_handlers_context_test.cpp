@@ -1174,6 +1174,53 @@ TEST_F(ContextBudgetFixture, UnboundedLoadStillClampsTraversalDepth) {
            "unbounded load: " << j.dump();
 }
 
+// The visited cap bounds the caller WALK, not only what is hydrated after it.
+// Pre-fix expand_callers collected the whole depth-bounded closure (and fetched
+// the last level's callers into a vector nobody read) before hydrate_symbol_ids
+// applied visited_cap, so a symbol with many callers cost a walk over all of
+// them for a capped handful of results.
+TEST(ContextExpansionWalk, VisitedCapBoundsTheCallerWalk) {
+    const auto dir = lci::test::unique_temp_dir("lci_ctx_walk_");
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream out(dir / "walk.go");
+        out << "package main\n\nfunc target() {}\n";
+        for (int i = 0; i < 40; ++i) {
+            out << "\nfunc c" << i << "() {\n\ttarget()\n}\n";
+        }
+    }
+    Config config;
+    config.project.root = dir.string();
+    MasterIndex index(config);
+    index.index_directory(dir.string());
+
+    ExpansionEngine engine(index);
+    ContextRef ref;
+    ref.file = "walk.go";
+    ref.symbol = "target";
+    ref.expansions = {"callers:2"};
+    auto primary = engine.hydrate_reference(ref, FormatType::Full, dir.string());
+    ASSERT_TRUE(primary.error.empty()) << primary.error;
+
+    absl::flat_hash_set<std::string> emitted;
+    emitted.insert(engine.identity_key(primary.ref, dir.string()));
+    ExpansionTally tally;
+    tally.emitted_keys = &emitted;
+    tally.max_depth = kHydrationMaxExpansionDepth;
+    tally.visited_cap = 5;
+    auto result = engine.apply_expansions(ref, primary.ref, FormatType::Full,
+                                          dir.string(), tally);
+
+    EXPECT_EQ(result.expanded.size(), 5u);
+    EXPECT_TRUE(tally.traversal_truncated);
+    EXPECT_LE(tally.walked, tally.visited_cap + 1)
+        << "the walk reached " << tally.walked << " of 40 callers for a cap of "
+        << tally.visited_cap;
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
 // Excess request inputs are rejected for a bounded load rather than silently
 // traversed: more than the documented input-ref cap returns a typed error.
 TEST_F(ContextBudgetFixture, ExcessInputRefsAreRejected) {
