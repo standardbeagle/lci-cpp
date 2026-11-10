@@ -1516,6 +1516,17 @@ TEST_F(CodeInsightGitTest, GitAnalyzeSurfacesRealChanges) {
     EXPECT_NE(result.text.find("Huge"), std::string::npos);
 }
 
+// A misspelt scope ("wpi") silently analysed the staged set and reported it
+// as the answer; analysis=impact already refuses an unknown scope.
+TEST_F(CodeInsightGitTest, GitAnalyzeRefusesAnUnknownScope) {
+    nlohmann::json params;
+    params["mode"] = "git_analyze";
+    params["scope"] = "wpi";
+    auto result = handle_code_insight(params, *engine_, *indexer_);
+    ASSERT_TRUE(result.is_error) << result.text;
+    EXPECT_NE(result.text.find("wpi"), std::string::npos) << result.text;
+}
+
 TEST_F(CodeInsightGitTest, GitHotspotsSurfacesRealChurn) {
     nlohmann::json params;
     params["mode"] = "git_hotspots";
