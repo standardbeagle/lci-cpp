@@ -179,6 +179,11 @@ CI gates the synthetic suite against
 `tests/benchmarks/baseline/linux-x64.json` via `scripts/bench_gate.py`
 (fails on >1.5x regression); regenerate the baseline on the benchmark
 runner with `scripts/bench_gate.py --update` when benchmarks change.
+The gate only judges a quiet machine: when the runner's 1-minute load
+average before the run exceeds `--max-load` (default 2.0), it prints the
+numbers, reports SKIPPED with a workflow warning, and exits 0 without
+enforcing anything. A green benchmark job is therefore not evidence of no
+regression unless its log says `bench_gate: OK`.
 
 The suite covers unit tests, integration tests (bundled per-binary for
 in-process cache amortization), real-project tests (chi, fastapi, trpc,

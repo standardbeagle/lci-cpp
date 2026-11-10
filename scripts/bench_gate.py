@@ -140,6 +140,11 @@ def cmd_check(baseline: dict, current: dict, threshold: float,
             "did not run. Re-run on a quiet machine to enforce.",
             file=sys.stderr,
         )
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            # A skipped gate exits 0, so surface it on the run summary;
+            # otherwise a green job reads as "no regression".
+            print(f"::warning title=bench_gate skipped::load {load:.2f} > "
+                  f"{max_load:.2f}; regressions were not enforced")
 
     base = baseline["benchmarks"]
     cur = extract_times_ns(current)
