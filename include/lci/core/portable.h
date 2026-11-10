@@ -54,8 +54,8 @@ bool set_env(const char* name, const char* value);
 /// created temp file beside it (never an existing name, never through a
 /// symlink), then renames it over `path`. A predictable `<path>.tmp` opened
 /// with ofstream follows a planted symlink and overwrites its target; this
-/// helper exists so no writer does that. `mode` is the POSIX permission of
-/// the result (ignored on Windows). Returns an empty string on success, else
+/// helper exists so no writer does that. `mode` is the requested POSIX
+/// permission, masked by the umask as with open(2) (ignored on Windows). Returns an empty string on success, else
 /// the reason, with the temp file removed.
 std::string write_file_atomically(const std::filesystem::path& path,
                                   std::string_view data, unsigned mode);

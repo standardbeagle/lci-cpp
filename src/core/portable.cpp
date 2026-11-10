@@ -172,14 +172,26 @@ std::string write_file_atomically(const std::filesystem::path& path,
     }
     return {};
 #else
-    // mkstemp creates with O_CREAT|O_EXCL: an existing name, a symlink
-    // included, is never opened.
-    std::string tmpl =
-        (dir / ("." + path.filename().string() + ".tmp.XXXXXX")).string();
-    int fd = ::mkstemp(tmpl.data());
+    // O_CREAT|O_EXCL never opens an existing name, a symlink included, and
+    // open(2) masks `mode` with the umask. mkstemp would fix the mode at
+    // 0600, and an fchmod after it would ignore the umask.
+    std::random_device rd;
+    std::string tmpl;
+    int fd = -1;
+    for (int attempt = 0; attempt < 16 && fd < 0; ++attempt) {
+        tmpl = (dir / ("." + path.filename().string() + ".tmp." +
+                       std::to_string(rd())))
+                   .string();
+        fd = ::open(tmpl.c_str(),
+                    O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                    static_cast<mode_t>(mode));
+        if (fd < 0 && errno != EEXIST) {
+            return "cannot create temp file beside " + path.string() + ": " +
+                   std::strerror(errno);
+        }
+    }
     if (fd < 0) {
-        return "cannot create temp file beside " + path.string() + ": " +
-               std::strerror(errno);
+        return "cannot create a unique temp file beside " + path.string();
     }
     auto fail = [&](const std::string& what) {
         int err = errno;
@@ -187,9 +199,6 @@ std::string write_file_atomically(const std::filesystem::path& path,
         ::unlink(tmpl.c_str());
         return what + ": " + std::strerror(err);
     };
-    if (::fchmod(fd, static_cast<mode_t>(mode)) != 0) {
-        return fail("cannot set mode on " + tmpl);
-    }
     size_t off = 0;
     while (off < data.size()) {
         ssize_t n = ::write(fd, data.data() + off, data.size() - off);
