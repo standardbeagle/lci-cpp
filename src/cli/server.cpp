@@ -26,6 +26,20 @@
 #include <cstdlib>
 
 namespace lci {
+
+namespace {
+// Where a detached daemon's stderr goes: beside its socket, inside the
+// owner-only runtime directory user_runtime_dir() verified. Empty on
+// Windows, where spawn_detached does not honour a log yet.
+std::string daemon_log_path(const std::string& socket_path) {
+#ifdef _WIN32
+    (void)socket_path;
+    return {};
+#else
+    return socket_path + ".log";
+#endif
+}
+}  // namespace
 namespace cli {
 
 namespace fs = std::filesystem;
@@ -209,7 +223,7 @@ std::unique_ptr<Client> ensure_server_running(const Config& cfg,
     std::vector<std::string> argv =
         build_server_spawn_argv(exe.string(), cfg, flags);
 
-    if (!subprocess::spawn_detached(argv)) {
+    if (!subprocess::spawn_detached(argv, daemon_log_path(socket_path))) {
         error = "failed to spawn background server process";
         return nullptr;
     }
@@ -304,11 +318,18 @@ int run_server(const GlobalFlags& flags, bool daemon, bool foreground) {
             build_server_spawn_argv(exe.string(), cfg, flags);
         argv.push_back("--foreground");
 
-        if (!subprocess::spawn_detached(argv)) {
+        const std::string log_path = daemon_log_path(
+            get_socket_path_for_root(cfg.project.root));
+        if (!subprocess::spawn_detached(argv, log_path)) {
             std::cerr << "Error: failed to spawn background server process\n";
             return 1;
         }
-        std::printf("Index server starting in background\n");
+        if (log_path.empty()) {
+            std::printf("Index server starting in background\n");
+        } else {
+            std::printf("Index server starting in background (log: %s)\n",
+                        log_path.c_str());
+        }
         return 0;
     }
 

@@ -201,7 +201,7 @@ int run_status(const std::vector<std::string>& argv) {
 }
 
 bool spawn_detached(const std::vector<std::string>& argv,
-                    const std::string& /*stderr_log*/) {
+                    const std::string& /*stderr_log: POSIX only, see header*/) {
     if (argv.empty()) return false;
     HANDLE proc = spawn(argv, "", nullptr, /*detached=*/true);
     if (proc == nullptr) return false;
@@ -327,8 +327,17 @@ int run_status(const std::vector<std::string>& argv) {
 }
 
 bool spawn_detached(const std::vector<std::string>& argv,
-                    const std::string& /*stderr_log*/) {
+                    const std::string& stderr_log) {
     if (argv.empty()) return false;
+
+    // Replace, never reuse, the log entry: O_TRUNC on an existing file keeps
+    // its old mode and follows a planted symlink. Unlinking first and then
+    // creating with O_EXCL|O_NOFOLLOW yields a fresh owner-only inode; an
+    // entry that reappears in between fails the spawn instead of being used.
+    if (!stderr_log.empty() && ::unlink(stderr_log.c_str()) != 0 &&
+        errno != ENOENT) {
+        return false;
+    }
 
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
@@ -336,8 +345,14 @@ bool spawn_detached(const std::vector<std::string>& argv,
                                      0);
     posix_spawn_file_actions_addopen(&fa, STDOUT_FILENO, "/dev/null", O_WRONLY,
                                      0);
-    posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null", O_WRONLY,
-                                     0);
+    if (stderr_log.empty()) {
+        posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null",
+                                         O_WRONLY, 0);
+    } else {
+        posix_spawn_file_actions_addopen(
+            &fa, STDERR_FILENO, stderr_log.c_str(),
+            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+    }
 
     // Prepare all allocating state before fork. The launcher may be created
     // from a multithreaded process and must only call async-signal-safe

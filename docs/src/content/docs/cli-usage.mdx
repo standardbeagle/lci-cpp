@@ -78,6 +78,11 @@ on a Unix domain socket on Linux/macOS, or a loopback TCP port on Windows.
 CLI subcommands that need index state (`search`, `def`, `refs`, `tree`, …)
 transparently start or reuse this server.
 
+A server started in the background writes its stderr to `<socket>.log` beside
+the socket (owner-only, mode `0600`, recreated on every start), so a daemon
+that exits early leaves its reason behind. `lci server --daemon` prints the
+path. On Windows the background server's stderr is discarded.
+
 ## MCP server
 
 ```sh

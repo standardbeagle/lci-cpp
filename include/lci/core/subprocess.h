@@ -22,8 +22,13 @@ int run_status(const std::vector<std::string>& argv);
 /// no console on Windows; stdio redirected to the null device). Returns true
 /// on successful spawn. Used to launch the index server daemon.
 ///
-/// `stderr_log` names where the daemon's stderr should go; not yet honoured,
-/// stderr still goes to the null device.
+/// `stderr_log`, when non-empty, receives the daemon's stderr instead, so a
+/// daemon's own exit reason (RSS self-cap, bind failure) survives the
+/// detach. POSIX: any existing entry at that path is unlinked and a fresh
+/// file is created 0600 with O_EXCL|O_NOFOLLOW, so a planted symlink is
+/// never written through and an earlier daemon's log is replaced; if the
+/// file cannot be created the spawn fails. Windows: not yet honoured, stderr
+/// stays on the null device.
 bool spawn_detached(const std::vector<std::string>& argv,
                     const std::string& stderr_log = std::string());
 
