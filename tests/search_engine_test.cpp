@@ -1444,6 +1444,65 @@ TEST(SearchSymbolTypeFilter, FilterAppliesToInvertedMatches) {
         << "total_found counted inverted rows the type filter excludes";
 }
 
+// The definition bonus was added AFTER process_file had kept its per-file top
+// rows, so a definition tied with an earlier reference on match quality lost
+// its slot before the bonus could rank it first: max_results=1 returned the
+// call site, and only a larger cap exposed the definition.
+TEST(SearchRanking, DefinitionBonusCompetesForThePerFileSlots) {
+    TempDir dir;
+    dir.write_file("a.py",
+        "def caller():\n"
+        "    return target()\n"
+        "def target():\n"
+        "    return 1\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.max_results = 1;
+    auto results = engine.search("target", opts, nullptr);
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_EQ(results[0].line, 3) << "the call site took the definition's slot";
+}
+
+// Equal-score rows rank earlier lines first (candidate_before), so the
+// per-file slot to give up is the LATEST of the worst rows. rescan_worst took
+// the first minimum: a better line-3 row evicted line 1 and kept line 2, so
+// max_results=2 disagreed with the first two rows of an uncapped search.
+TEST(SearchRanking, PerFileCapEvictsTheLatestOfTiedWorstRows) {
+    TempDir dir;
+    dir.write_file("notes.txt",
+        "x token\n"
+        "x token\n"
+        "token\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions capped;
+    capped.max_results = 2;
+    std::vector<int> lines;
+    for (const auto& r : engine.search("token", capped, nullptr)) {
+        lines.push_back(r.line);
+    }
+    EXPECT_EQ(lines, (std::vector<int>{3, 1}));
+
+    SearchOptions all;
+    all.max_results = 10;
+    auto uncapped = engine.search("token", all, nullptr);
+    ASSERT_GE(uncapped.size(), 2u);
+    EXPECT_EQ(uncapped[0].line, lines[0]);
+    EXPECT_EQ(uncapped[1].line, lines[1])
+        << "a capped search must return the uncapped ranking's prefix";
+}
+
 // Alias canonicalization is a pure table lookup; pin it directly so a future
 // edit to the table cannot quietly drop an advertised alias.
 TEST(SymbolTypeAlias, CanonicalizesAdvertisedAliases) {
