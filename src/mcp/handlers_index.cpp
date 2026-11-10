@@ -1,6 +1,7 @@
 #include <lci/mcp/handlers_index.h>
 
 #include <algorithm>
+#include <tuple>
 #include <chrono>
 #include <string>
 #include <vector>
@@ -257,7 +258,12 @@ ToolResult handle_debug_info(const nlohmann::json& params,
 
         std::sort(all_refs.begin(), all_refs.end(),
                   [](const SymRef& a, const SymRef& b) {
-                      return a.incoming > b.incoming;
+                      // Full key: the max_results cut must not depend on
+                      // get_all_file_ids() hash order among ties.
+                      if (a.incoming != b.incoming)
+                          return a.incoming > b.incoming;
+                      return std::tie(a.path, a.name, a.type) <
+                             std::tie(b.path, b.name, b.type);
                   });
 
         if (static_cast<int>(all_refs.size()) > max_results) {
