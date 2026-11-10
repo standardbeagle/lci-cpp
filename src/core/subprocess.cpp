@@ -217,6 +217,7 @@ bool spawn_detached(const std::vector<std::string>& argv,
 #include <cerrno>
 #include <fcntl.h>
 #include <spawn.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -330,13 +331,29 @@ bool spawn_detached(const std::vector<std::string>& argv,
                     const std::string& stderr_log) {
     if (argv.empty()) return false;
 
-    // Replace, never reuse, the log entry: O_TRUNC on an existing file keeps
-    // its old mode and follows a planted symlink. Unlinking first and then
-    // creating with O_EXCL|O_NOFOLLOW yields a fresh owner-only inode; an
-    // entry that reappears in between fails the spawn instead of being used.
-    if (!stderr_log.empty() && ::unlink(stderr_log.c_str()) != 0 &&
-        errno != ENOENT) {
-        return false;
+    // Append to the log, never replace it: two cold starts on one root race,
+    // and replacing the entry per spawn either failed the second spawn or
+    // unlinked the winning daemon's live log. O_APPEND keeps every writer at
+    // the end, so a truncation by a later spawn loses only old lines.
+    int log_fd = -1;
+    if (!stderr_log.empty()) {
+        constexpr int kLogFlags =
+            O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC;
+        log_fd = ::open(stderr_log.c_str(), kLogFlags, 0600);
+        if (log_fd < 0 && errno == ELOOP) {
+            // A symlink planted at the log path: replace it, never follow it.
+            if (::unlink(stderr_log.c_str()) != 0) return false;
+            log_fd = ::open(stderr_log.c_str(), kLogFlags, 0600);
+        }
+        if (log_fd < 0) return false;
+        struct stat st {};
+        if (::fstat(log_fd, &st) != 0 || !S_ISREG(st.st_mode) ||
+            ::fchmod(log_fd, 0600) != 0 ||
+            (st.st_size > static_cast<off_t>(kMaxDaemonLogBytes) &&
+             ::ftruncate(log_fd, 0) != 0)) {
+            ::close(log_fd);
+            return false;
+        }
     }
 
     posix_spawn_file_actions_t fa;
@@ -345,13 +362,11 @@ bool spawn_detached(const std::vector<std::string>& argv,
                                      0);
     posix_spawn_file_actions_addopen(&fa, STDOUT_FILENO, "/dev/null", O_WRONLY,
                                      0);
-    if (stderr_log.empty()) {
+    if (log_fd < 0) {
         posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null",
                                          O_WRONLY, 0);
     } else {
-        posix_spawn_file_actions_addopen(
-            &fa, STDERR_FILENO, stderr_log.c_str(),
-            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+        posix_spawn_file_actions_adddup2(&fa, log_fd, STDERR_FILENO);
     }
 
     // Prepare all allocating state before fork. The launcher may be created
@@ -366,6 +381,7 @@ bool spawn_detached(const std::vector<std::string>& argv,
     pid_t launcher = fork();
     if (launcher < 0) {
         posix_spawn_file_actions_destroy(&fa);
+        if (log_fd >= 0) ::close(log_fd);
         return false;
     }
     if (launcher == 0) {
@@ -377,6 +393,7 @@ bool spawn_detached(const std::vector<std::string>& argv,
     }
 
     posix_spawn_file_actions_destroy(&fa);
+    if (log_fd >= 0) ::close(log_fd);
     int status = 0;
     while (waitpid(launcher, &status, 0) < 0) {
         if (errno != EINTR) return false;
