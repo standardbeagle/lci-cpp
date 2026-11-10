@@ -165,7 +165,7 @@ File-path search (like `find`/`fd`): fuzzy, glob, type filter.
 | `filter` | string | (empty) | Language name (`go`, `py`) or glob (`*.ts`). |
 | `flags` | string | (empty) | `ci` case-insensitive, `exact` exact-path only. |
 | `include_hidden` | boolean | false | Include dot-prefixed components. |
-| `directory` | string | (empty) | Restrict to a path prefix. |
+| `directory` / `path` | string | (empty) | Restrict to a path prefix. `path` is an alias, matching `search`'s parameter name. |
 
 **Output**: `{results[], total_matches, pattern}`. Each result: `path`, `score`,
 `match_type` (`exact`, `exact_filename`, `exact_filename_noext`, `substring`,
@@ -194,6 +194,8 @@ hierarchy and purity. `id` and `name` are mutually exclusive.
 | `include_call_hierarchy` | boolean | false | Adds `caller_names[]`/`callees[]`/`call_tree` (name path only); integer `callers` is unaffected. |
 | `max_depth` | int | 1 (or mode preset) | Call-tree depth, clamped [1, 10]. |
 | `include_sections` / `exclude_sections` | array | — | Whitelist/blacklist of `relationships`, `variables`, `semantic`, `structure`, `usage`, `ai`. |
+| `include_ai_text` | boolean | true (`quick`: false) | Fill the `ai` section's prose fields. |
+| `confidence_threshold` | number | 0.3 | Drop relationship references scored below it. Values outside [0, 1] are ignored. |
 | `symbol` + `path` | string | (empty) | Auto-search path: if both set with no `id`, returns a workflow hint, not context. |
 
 **Output** (id path): `{count, contexts[], errors[]}`. Each context:
@@ -315,7 +317,7 @@ Symbol outline for a single file, with optional stats.
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
-| `file` / `file_id` | string / int | — | One required (file path glob, or numeric id). |
+| `file` / `path` / `file_id` | string / int | — | One required (file path glob, or numeric id). `path` is an alias for `file`. |
 | `kind` | string | (empty) | Symbol-kind filter (as `list_symbols`). |
 | `exported` | boolean | (omit) | Export filter. |
 | `sort` | string | `line` | `line`, `name`, `type`, `complexity`, `refs`. |
@@ -492,6 +494,7 @@ I/O, throws), with transitive call-graph analysis.
 | `symbol_name` | string | (empty) | For `symbol` mode. |
 | `symbol_id` | string | (empty) | For `symbol` mode, instead of `symbol_name`. |
 | `file_path` | string | (empty) | For `file` mode (or symbol lookup). |
+| `file_id` | integer | (empty) | For `file` mode, instead of `file_path`. |
 | `category` | string | (empty) | For `category` mode. |
 | `include_reasons` | boolean | false | Impurity reason strings. Every impure result carries at least one: callee classification (names the callee + category), throw sites (line), writes, dynamic calls, or unresolved calls that block a pure verdict. |
 | `include_transitive` | boolean | false | Transitive effects from callees. |
@@ -539,7 +542,8 @@ session-startup workhorse.
 | `time_window` | string | `30d` | For `git_hotspots`: `7d`/`30d`/`90d`/`1y`. |
 | `file_pattern` | string | (empty) | For `git_hotspots`: glob filter. |
 | `max_results` | integer | per section (20-50) | Integer 1-10000; anything else is an error, not a clamp. Caps each listed section. |
-| `languages` | array | — | Language filter (aliases). Not a valid `analysis` value — `code_insight` has no `languages` analysis mode. |
+
+`code_insight` takes no language filter: a `languages` argument is refused as an unknown parameter.
 
 **Modes / sections**
 
