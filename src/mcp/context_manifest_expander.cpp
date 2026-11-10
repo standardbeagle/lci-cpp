@@ -692,6 +692,7 @@ std::vector<HydratedRef> ExpansionEngine::expand_callers(
         for (auto id : frontier) {
             if (!seen.insert(id).second) continue;
             ordered.push_back(id);
+            ++tally.walked;
             auto up = tracker.get_caller_symbols(id);
             next.insert(next.end(), up.begin(), up.end());
         }
@@ -723,6 +724,7 @@ std::vector<HydratedRef> ExpansionEngine::expand_callees(
         for (auto id : frontier) {
             if (!seen.insert(id).second) continue;
             ordered.push_back(id);
+            ++tally.walked;
             auto down = tracker.get_callee_symbols(id);
             next.insert(next.end(), down.begin(), down.end());
         }

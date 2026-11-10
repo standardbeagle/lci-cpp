@@ -66,6 +66,9 @@ struct ExpansionTally {
     /// directive, e.g. "callers"). The caller folds the relationship into the
     /// surviving entry's provenance instead of repeating the source.
     std::vector<std::pair<std::string, std::string>> deduped;
+    /// Graph nodes the callers/callees walk reached across the load. A
+    /// diagnostic: the visited cap must bound it, not only what is hydrated.
+    int walked = 0;
 };
 
 /// Resolves context references into hydrated source code.
