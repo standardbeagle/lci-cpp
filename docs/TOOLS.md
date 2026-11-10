@@ -530,7 +530,7 @@ session-startup workhorse.
 | `base_ref` / `target_ref` | string | (empty) | For `git_analyze` range. |
 | `time_window` | string | `30d` | For `git_hotspots`: `7d`/`30d`/`90d`/`1y`. |
 | `file_pattern` | string | (empty) | For `git_hotspots`: glob filter. |
-| `max_results` | integer | 50 | Passed to the engine. |
+| `max_results` | integer | per section (20-50) | Integer 1-10000; anything else is an error, not a clamp. Caps each listed section. |
 | `languages` | array | — | Language filter (aliases). Not a valid `analysis` value — `code_insight` has no `languages` analysis mode. |
 
 **Modes / sections**

@@ -53,6 +53,10 @@ namespace mcp {
 // -- SameNameCallGrouping -----------------------------------------------------
 
 namespace {
+// Upper bound on code_insight max_results. Far past any useful report and
+// small enough that no cap site can turn it into an unbounded dump.
+constexpr long long kMaxCodeInsightResults = 10000;
+
 
 /// Tail of a call-site spelling: the text after the last '.'/':' qualifier.
 /// Mirrors classify_same_name_calls' matching rule for bare-name queries.
@@ -439,6 +443,21 @@ ToolResult handle_code_insight(const nlohmann::json& raw_params,
             "code_insight",
             "invalid mode '" + mode + "', must be one of: overview, detailed, "
             "statistics, unified, structure, git_analyze, git_hotspots");
+    }
+
+    // Every cap site casts max_results to size_t: -1 became SIZE_MAX (an
+    // unlimited dump; clones resized to it) and 0 an empty report that read
+    // as "nothing found". Validated once here so no site can see either.
+    if (params.contains("max_results")) {
+        const auto& v = params["max_results"];
+        if (!v.is_number_integer() || v.get<long long>() < 1 ||
+            v.get<long long>() > kMaxCodeInsightResults) {
+            return make_error_response(
+                "code_insight",
+                "max_results must be an integer from 1 to " +
+                    std::to_string(kMaxCodeInsightResults) + ", got " +
+                    v.dump());
+        }
     }
 
     AnalysisScope scope;
