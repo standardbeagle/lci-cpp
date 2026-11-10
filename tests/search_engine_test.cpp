@@ -1337,6 +1337,39 @@ TEST(SearchSymbolTypeFilter, UnknownTypeIsAnErrorNotZeroResults) {
         << "stats.error was: '" << stats.error << "'";
 }
 
+// The symbol_types filter ran AFTER process_file had already applied the
+// per-file retention cap and counted the file's matches. Rows that outranked
+// the wanted one on match quality (line-start assignments here) filled the
+// cap, were then filtered away, and the matching `def` row was gone: an empty
+// answer with total_found counting rows the caller excluded.
+TEST(SearchSymbolTypeFilter, FilterAppliesBeforeTheCapAndTheCount) {
+    TempDir dir;
+    dir.write_file("a.py",
+        "Widget = 1\n"
+        "Widget = 2\n"
+        "Widget = 3\n"
+        "def Widget():\n"
+        "    pass\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+
+    SearchEngine engine(mi);
+    SearchOptions opts;
+    opts.symbol_types = {"function"};
+    opts.max_results = 1;
+
+    SearchStats stats;
+    auto results = engine.search("Widget", opts, &stats);
+
+    ASSERT_EQ(results.size(), 1u) << "the def row was cut by the cap";
+    EXPECT_EQ(results[0].line, 4);
+    EXPECT_EQ(stats.total_found, 1)
+        << "total_found counted rows the type filter excludes";
+}
+
 // Alias canonicalization is a pure table lookup; pin it directly so a future
 // edit to the table cannot quietly drop an advertised alias.
 TEST(SymbolTypeAlias, CanonicalizesAdvertisedAliases) {
