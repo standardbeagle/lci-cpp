@@ -1138,8 +1138,9 @@ TEST_F(ContextBudgetFixture, CyclicDeepExpansionIsBounded) {
     auto result = handle_context(params, *indexer_, temp_dir_.string());
     ASSERT_FALSE(result.is_error) << result.text;
     auto j = nlohmann::json::parse(result.text);
-    // Bounded traversal is surfaced, not silently swallowed.
-    EXPECT_TRUE(j["stats"].contains("traversal_truncated"))
+    // Bounded traversal is surfaced, not silently swallowed. The key is
+    // always emitted, so assert its value, not its presence.
+    EXPECT_TRUE(j["stats"].value("traversal_truncated", false))
         << "traversal truncation must be reported: " << j.dump();
     // Terminated (we are here) and every emitted ref is a distinct identity.
     absl::flat_hash_set<std::string> seen;
@@ -1151,6 +1152,26 @@ TEST_F(ContextBudgetFixture, CyclicDeepExpansionIsBounded) {
         EXPECT_TRUE(seen.insert(key).second)
             << "no identity may be emitted twice: " << j.dump();
     }
+}
+
+// The traversal caps bound the graph walk, not the token budget, so they hold
+// for the default unbounded load too. Pre-fix they applied only when
+// max_tokens > 0: a manifest loaded with the default (max_tokens omitted) and
+// `callers:1000000` walked the whole caller closure, hydrating source for
+// every symbol in it.
+TEST_F(ContextBudgetFixture, UnboundedLoadStillClampsTraversalDepth) {
+    nlohmann::json manifest = {
+        {"r", {{{"f", "cycle.go"},
+                {"s", "ping"},
+                {"x", nlohmann::json::array({"callers:1000000"})}}}}};
+    nlohmann::json params = {{"operation", "load"},
+                             {"from_string", manifest.dump()}};
+    auto result = handle_context(params, *indexer_, temp_dir_.string());
+    ASSERT_FALSE(result.is_error) << result.text;
+    auto j = nlohmann::json::parse(result.text);
+    EXPECT_TRUE(j["stats"].value("traversal_truncated", false))
+        << "an over-deep directive must be clamped and reported on an "
+           "unbounded load: " << j.dump();
 }
 
 // Excess request inputs are rejected for a bounded load rather than silently
