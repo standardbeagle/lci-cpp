@@ -857,6 +857,26 @@ TEST(GitAnalysis, RangeScopeIgnoresRepoColorDiffAlways) {
     fs::remove_all(repo);
 }
 
+// Porcelain `git diff` also runs a repo's diff.<driver>.textconv filter on
+// both sides, so hunk line numbers count the CONVERTED text, not the source
+// the index parsed. A filter that changes the line count (here: every line
+// doubled) moved the hunk off its function and the change went unscoped.
+TEST(GitAnalysis, RangeScopeIgnoresRepoTextconv) {
+    namespace fs = std::filesystem;
+    fs::path repo = make_one_change_repo("textconv", "main.go",
+                                         {"diff.dbl.textconv 'sed p'"});
+    fs::create_directories(repo / ".git" / "info");
+    std::ofstream(repo / ".git" / "info" / "attributes") << "*.go diff=dbl\n";
+    std::string raw;
+    ASSERT_TRUE(lci::subprocess::run_capture(
+        {"git", "-C", repo.string(), "diff", "-U0", "HEAD~1..HEAD", "--"}, "",
+        raw));
+    ASSERT_NE(raw.find("@@ -3,2 +3,2 @@"), std::string::npos)
+        << "textconv must shift the porcelain hunk for this to bite: " << raw;
+    EXPECT_EQ(range_symbols_modified(repo), 1);
+    fs::remove_all(repo);
+}
+
 // git appends a TAB to the ---/+++ header of any path containing a space
 // (diff.c, so patch(1) can find where the name ends). The parser kept the
 // TAB in the path, so "my file.go\t" matched no parsed symbol and the
