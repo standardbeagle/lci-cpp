@@ -393,6 +393,17 @@ ToolResult handle_get_context(const nlohmann::json& params,
             "parameter conflict: use either 'id' OR 'name', not both. "
             "Prefer 'id' with object IDs from search results");
     }
+    // A threshold is a probability; set_confidence_threshold drops anything
+    // else, which ran a caller's `30` (a percentage) at the default 0.3.
+    if (p.contains("confidence_threshold")) {
+        const auto& t = p["confidence_threshold"];
+        if (!t.is_number() || t.get<double>() < 0.0 || t.get<double>() > 1.0) {
+            return make_error_response(
+                "get_context",
+                "confidence_threshold must be a number in [0, 1], got " +
+                    t.dump());
+        }
+    }
 
     // Section filtering. Go accepts include_sections in both paths and never
     // errors on them (handlers.go: the compact path ignores sections it can't

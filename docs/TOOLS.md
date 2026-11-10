@@ -195,7 +195,7 @@ hierarchy and purity. `id` and `name` are mutually exclusive.
 | `max_depth` | int | 1 (or mode preset) | Call-tree depth, clamped [1, 10]. |
 | `include_sections` / `exclude_sections` | array | — | Whitelist/blacklist of `relationships`, `variables`, `semantic`, `structure`, `usage`, `ai`. |
 | `include_ai_text` | boolean | true (`quick`: false) | Fill the `ai` section's prose fields. |
-| `confidence_threshold` | number | 0.3 | Drop relationship references scored below it. Values outside [0, 1] are ignored. |
+| `confidence_threshold` | number | 0.3 | Drop relationship references scored below it. A value outside [0, 1] is an error. |
 | `symbol` + `path` | string | (empty) | Auto-search path: if both set with no `id`, returns a workflow hint, not context. |
 
 **Output** (id path): `{count, contexts[], errors[]}`. Each context:
