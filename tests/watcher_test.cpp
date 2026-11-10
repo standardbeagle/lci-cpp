@@ -474,11 +474,50 @@ TEST(FileWatcherTest, DirectoryRemoveDispatches) {
     EXPECT_EQ(events[0].second, FileEventType::Remove);
     EXPECT_NE(events[0].first.find("sub"), std::string::npos);
 
-    // Create of an existing directory stays suppressed (per-file events
-    // inside it arrive separately).
+    // Create of an existing directory dispatches: a tree moved or renamed
+    // into place arrives as this ONE event, with no per-file events, so the
+    // pipeline must index it from the directory.
     events.clear();
     watcher.on_efsw_event(tmp.path().string() + "/", "sub",
                           FileEventType::Create);
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].second, FileEventType::Create);
+
+    // An excluded directory stays suppressed.
+    std::filesystem::create_directories(tmp.path() / "node_modules");
+    events.clear();
+    watcher.on_efsw_event(tmp.path().string() + "/", "node_modules",
+                          FileEventType::Create);
+    EXPECT_TRUE(events.empty());
+}
+
+// A Remove for a path that is already gone cannot be classified as file or
+// directory. File include patterns (*.go) reject a directory name, so the
+// old name of a renamed or deleted directory was dropped and its indexed
+// files stayed in the index forever.
+TEST(FileWatcherTest, VanishedDirectoryRemoveSurvivesFileIncludes) {
+    TempDir tmp;
+    Config cfg = make_default_config();
+    cfg.project.root = tmp.path().string();
+    cfg.include = {"**/*.go"};
+    cfg.exclude = {"**/node_modules/**"};
+
+    std::vector<std::pair<std::string, FileEventType>> events;
+    FileWatcher watcher(cfg);
+    watcher.set_callback([&](const std::string& path, FileEventType type) {
+        events.emplace_back(path, type);
+    });
+
+    watcher.on_efsw_event(tmp.path().string() + "/", "pkg",
+                          FileEventType::Remove);
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].second, FileEventType::Remove);
+    EXPECT_EQ(events[0].first, tmp.path().string() + "/pkg");
+
+    // A path a scan would never have descended into is still dropped.
+    events.clear();
+    watcher.on_efsw_event(tmp.path().string() + "/node_modules/", "left-pad",
+                          FileEventType::Remove);
     EXPECT_TRUE(events.empty());
 }
 
@@ -771,6 +810,53 @@ TEST(FileWatcherTest, WiredPipelineRemovesDeletedFile) {
     pipeline.stop();
     EXPECT_TRUE(gone) << "deleted file's symbols survived the watch remove";
     EXPECT_TRUE(pipeline.deleted_files().is_deleted(fid));
+}
+
+// `mv pkg lib` is one rename of the directory entry: the kernel delivers
+// the old and new directory names and nothing for the files inside. The
+// files must move in the index with it — gone under pkg/, present under
+// lib/ — without a reindex.
+TEST(FileWatcherTest, WiredPipelineFollowsDirectoryRename) {
+    TempDir tmp;
+    tmp.write_file("pkg/a.ts", "export function moved_alpha() {}\n");
+    tmp.write_file("pkg/deep/b.ts", "export function moved_beta() {}\n");
+    tmp.write_file("root.ts", "export function stays() {}\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = tmp.path().string();
+    cfg.index.watch_mode = true;
+    cfg.index.watch_debounce_ms = 100;
+
+    MasterIndex index(cfg);
+    ASSERT_TRUE(index.index_directory(tmp.path().string()));
+    const std::string root = tmp.path().generic_string();
+    ASSERT_NE(index.path_to_id(root + "/pkg/a.ts"), FileID{0});
+    ASSERT_NE(index.path_to_id(root + "/pkg/deep/b.ts"), FileID{0});
+
+    WatchPipeline pipeline(cfg, index);
+    ASSERT_TRUE(pipeline.start());
+
+    fs::rename(tmp.path() / "pkg", tmp.path() / "lib");
+
+    auto settled = [&] {
+        return index.path_to_id(root + "/pkg/a.ts") == FileID{0} &&
+               index.path_to_id(root + "/pkg/deep/b.ts") == FileID{0} &&
+               index.path_to_id(root + "/lib/a.ts") != FileID{0} &&
+               index.path_to_id(root + "/lib/deep/b.ts") != FileID{0};
+    };
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{3};
+    while (!settled() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{25});
+    }
+    pipeline.stop();
+    EXPECT_EQ(index.path_to_id(root + "/pkg/a.ts"), FileID{0})
+        << "the old directory's files stayed in the index";
+    EXPECT_EQ(index.path_to_id(root + "/pkg/deep/b.ts"), FileID{0});
+    EXPECT_NE(index.path_to_id(root + "/lib/a.ts"), FileID{0})
+        << "the renamed directory's files were never indexed";
+    EXPECT_NE(index.path_to_id(root + "/lib/deep/b.ts"), FileID{0});
+    EXPECT_NE(index.path_to_id(root + "/root.ts"), FileID{0});
 }
 
 }  // namespace
