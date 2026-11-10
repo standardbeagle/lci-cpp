@@ -17,11 +17,13 @@ on:
   # merging to main — see the macos job's event-name guard below.
   workflow_dispatch:
 
-# Cancel superseded runs on the same ref. A force-push to a PR kills the
-# in-flight run instead of stacking a second full matrix.
+# Cancel superseded runs on the same PR ref. A force-push to a PR kills the
+# in-flight run instead of stacking a second full matrix. Never on main: the
+# ASan/TSan/benchmark legs run only there, and cancelling them on every
+# follow-up push meant a fast run of pushes left no commit sanitizer-checked.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ---------------------------------------------------------------------------
