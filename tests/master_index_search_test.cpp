@@ -169,6 +169,56 @@ TEST(MasterIndexSearchIntegrationTest, SearchStillFindsEvictedFileContent) {
     EXPECT_EQ(after[0].line, before[0].line);
 }
 
+#ifndef _WIN32
+// A path indexed as a regular file can later become a symlink (a branch
+// checkout swaps it). The eviction reload read it with a plain ifstream, so
+// the next search served the link target's bytes: an outside file that the
+// scanner and the watcher both refuse since cc31710c.
+TEST(MasterIndexSearchIntegrationTest, EvictedReloadRefusesAPathNowASymlink) {
+    TempDir dir;
+    TempDir outside;
+    dir.write_file("notes.txt", "harmless notes\n");
+    outside.write_file("secret.txt", "outside_secret_bytes\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    const std::string path = (dir.path() / "notes.txt").generic_string();
+    const FileID fid = mi.path_to_id(path);
+    ASSERT_NE(fid, FileID{0});
+
+    mi.file_content_store().invalidate_file(path);
+    std::filesystem::remove(dir.path() / "notes.txt");
+    std::filesystem::create_symlink(outside.path() / "secret.txt",
+                                    dir.path() / "notes.txt");
+    EXPECT_EQ(mi.reload_evicted_content(*mi.load_snapshot(), fid), "")
+        << "the reload followed a symlink out of the project root";
+}
+#endif
+
+// The reload had no size gate either: a file that grew past max_file_size
+// after indexing was read whole into a request-local buffer on every search
+// that reached it.
+TEST(MasterIndexSearchIntegrationTest, EvictedReloadRefusesAFileGrownPastTheCap) {
+    TempDir dir;
+    dir.write_file("main.go", "package main\n");
+
+    Config cfg = make_default_config();
+    cfg.project.root = dir.path().string();
+    cfg.index.max_file_size = 64;
+    MasterIndex mi(cfg);
+    ASSERT_TRUE(mi.index_directory(dir.path().string()));
+    const std::string path = (dir.path() / "main.go").generic_string();
+    const FileID fid = mi.path_to_id(path);
+    ASSERT_NE(fid, FileID{0});
+
+    mi.file_content_store().invalidate_file(path);
+    dir.write_file("main.go", std::string(1024, 'x'));
+    EXPECT_EQ(mi.reload_evicted_content(*mi.load_snapshot(), fid), "")
+        << "the reload read a file past max_file_size";
+}
+
 TEST(MasterIndexSearchIntegrationTest, IndexAndSearchText) {
     TempDir dir;
     dir.write_file("main.go",
