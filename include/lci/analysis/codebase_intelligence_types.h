@@ -156,7 +156,7 @@ struct PuritySummary {
 };
 
 /// One error-handling / resource finding, ready for LCF + JSON emission.
-/// (docs/plans/2026-08-17-error-handling-score-design.md)
+/// (site/src/content/docs/error-handling-score.mdx)
 struct EhFindingEntry {
     std::string severity;   ///< "high" / "med" / "low"
     std::string signal;     ///< e.g. "empty-catch", "leak-no-release"

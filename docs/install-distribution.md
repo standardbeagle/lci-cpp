@@ -1,7 +1,6 @@
-# Install & Update Distribution — Design
+# Install & Update Distribution
 
 Date: 2026-06-07
-Status: Approved
 
 ## Goal
 

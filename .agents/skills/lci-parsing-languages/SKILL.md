@@ -49,7 +49,7 @@ Entry -> parse -> extract -> index:
 - `src/core/semantic_annotator.cpp` — `@lci:` comment metadata.
 - `cmake/TreeSitterGrammars.cmake` — 13 grammar pins (`declare_ts_grammar`), scanner kinds, TypeScript/TSX and PHP sub-grammar builders; core tree-sitter in `CMakeLists.txt:451`.
 - Tests: `tests/language_extraction_test.cpp` (45: one `LanguageExtractionTest.<Lang>` per language, `ScopeTypeResolution.*`, `IndexProfile.StageBreakdown` env-gated), `tests/unified_extractor_test.cpp` (47), `tests/language_map_test.cpp` (8, incl. `ParserAgreesWithTable`, `GitLanguageAgreesWithTable`), `tests/parser_pool_test.cpp` (13), `tests/svelte_extraction_test.cpp` (8), `tests/side_effect_extraction_test.cpp` (166), `tests/integration/real_project_languages_test.cpp` (7 receiver-type checks on real corpora: gson, serilog, ripgrep, guzzle, okhttp, sinatra, zls; skip without corpora), goldens `tests/integration/goldens/mcp/index_stats/basic.json`, `tests/integration/goldens/http/fileinfo.json`.
-- Docs: `README.md:169` Languages section, `docs/src/content/docs/index.mdx:45`, `docs/plans/2026-06-17-scope-type-resolution.md` (receiver-type design + status), `docs/plans/2026-08-17-ast-retention-ir-design.md` (parse-and-discard vs IR), `docs/reviews/2026-09-03-review.md` S8 (parser findings).
+- Docs: `README.md:169` Languages section, `site/src/content/docs/index.mdx:45`, `docs/reviews/2026-09-03-review.md` S8 (parser findings).
 
 ## Per-language capability matrix
 
@@ -93,18 +93,17 @@ No config knob enables or disables a language; extension coverage is the compile
 - Every per-language dispatch reads `lang_`/`family_` set from `language_info` in `init()`, never raw `ext_` (`unified_extractor.h` field comment; `.claude/rules/bench-harness-oracle-independence.md` rule 8: `.hh` vs `.cpp` must produce identical output; pinned by `LanguageExtractionTest.MjsEmitsReferences/PyiImportProducesReferences/HhHeaderEmitsReferences`).
 - Nested function entry snapshots and restores `local_var_types_` (`unified_extractor.cpp:361`); Go `func_literal` is excluded on purpose (closures inherit). `kotlin_property_types_` is class-scoped and cleared on class entry (`_references.cpp:1179`); the review flagged clear-without-restore as observable across a local class (`bench-harness-oracle-independence.md` rule 8, second bullet).
 - `visit_node` depth guard at 512 frames sets `depth_limit_hit` and drops the subtree; symbols outside it are intact (`unified_extractor.h` `kMaxVisitDepth`).
-- tree-sitter-kotlin (fwcd 0.3.8) is fieldless: `name` field lookups return null; use `first_named_child_typed` (`docs/plans/2026-06-17-scope-type-resolution.md` prerequisite gaps).
-- Receiver-type resolution is the SCIP base case only: syntactic env, no type checker, unknown receiver degrades to the bare name, never a fabricated edge (`docs/plans/2026-06-17-scope-type-resolution.md`). `foreign_receiver` marks dynamic dispatch (`reference_tracker.h:364`).
+- tree-sitter-kotlin (fwcd 0.3.8) is fieldless: `name` field lookups return null; use `first_named_child_typed` (`2026-06-17-scope-type-resolution.md` (removed plan, in git history) prerequisite gaps).
+- Receiver-type resolution is the SCIP base case only: syntactic env, no type checker, unknown receiver degrades to the bare name, never a fabricated edge (`2026-06-17-scope-type-resolution.md` (removed plan, in git history)). `foreign_receiver` marks dynamic dispatch (`reference_tracker.h:364`).
 - Zero symbols is never silent: every skip sets `ParseSkipReason` (`pipeline_processor.cpp:32-38`), but `UnsupportedGrammar` is not reported as a warning (`pipeline.cpp:158-165`).
 - Cross-file import resolution is a separate LINE-BASED walker in `import_resolver.cpp`, not the tree-sitter `imports` vector. Families covered: Go, JsTs, Python, Rust, CSharp, CFamily, Php, Zig; Java, Kotlin, Ruby are not. `README.md:171-173` lists only six (omits PHP and Zig): doc drift.
 - `ExtractionResults.imports` (tree-sitter import symbols) has no consumer outside `src/parser/` and the unit tests (grep `.imports` in `src/` hits only `context_lookup_structure.cpp:296`, a different field). Two producers for one fact (`karpathy-principles.md` rule 4 class).
 - `src/mcp/handlers_search.cpp:109-128` keeps its own language->extension alias table (has `rake`, `gemspec`, `dart`, `vue`; python lacks `pyx`/`pxd`; `h` listed under `c` while `kLangMap` says Cpp). This is the drift class `language_map.h` was introduced to remove.
-- Findings from the 2026-09-08 mapping (fixed or filed): see `docs/reviews/2026-09-08-skill-mapping-findings.md`.
 - `pipeline_processor.cpp:110` and `git/analyzer.cpp:200` call `get_results()` (copies every vector); `take_results()` exists for exactly this caller (`unified_extractor.h` comment).
 - `tests/fixtures/sample_{cpp,go,js,py}.txt` are copied at build (`tests/CMakeLists.txt:440`) but no test reads them; language tests use inline `kGoSrc`-style constants.
 - Any test touching env/locale must use `tests/helpers/portable_env.h` and skip on `_WIN32`; the Windows leg runs the full `lci_tests` (`.claude/rules/test-iteration-discipline.md` rule 8, `.github/workflows/ci.yml`).
 - Known per-language gaps (from the plan status): Ruby bare no-paren calls are `identifier`, not emitted as calls; Kotlin/Zig constructor calls emit a bare Call on the type name. Real-project audit (`benchmarks/repo-qa/ANALYSIS-insight-verification.md` D2) found stdlib-name call collisions inflating reach (Kotlin `apply`, Zig `initCapacity`, C++ `find`).
-- Trees are never retained; AST re-query needs a re-parse (`docs/plans/2026-08-17-ast-retention-ir-design.md`, option B compact IR recommended, not built).
+- Trees are never retained; AST re-query needs a re-parse (`2026-08-17-ast-retention-ir-design.md` (removed plan, in git history), option B compact IR recommended, not built).
 - Dogfood gap: `lci def UnifiedExtractor` returns the header class line only; locating the per-TU member definitions still needs grep.
 
 ## Probe recipes
@@ -141,9 +140,9 @@ Build only what you run: `cmake --build build/release --parallel --target lci_te
 Comparable tools: universal-ctags (symbol extraction, 100+ languages, regex/parser mix), tree-sitter based matchers (ast-grep, semgrep), per-language LSP servers (gopls, pyright, rust-analyzer, clangd, jdtls, ...), Sourcegraph SCIP indexers (scip-go, scip-typescript, scip-python, scip-java, scip-clang, rust-analyzer SCIP), GitHub code navigation (tree-sitter tag queries + stack-graphs precise nav for a few languages), Serena MCP (LSP-backed).
 
 lci claims in this area:
-- "Tree-sitter parsing across 13 languages" (`README.md:4`, `:169-173`; `docs/src/content/docs/index.mdx:45-47`). Measure: `ParserTest.AllGrammarsLoad`, `LanguageExtractionTest.AllParsersCreate`, and `cmake/TreeSitterGrammars.cmake` pin list.
+- "Tree-sitter parsing across 13 languages" (`README.md:4`, `:169-173`; `site/src/content/docs/index.mdx:45-47`). Measure: `ParserTest.AllGrammarsLoad`, `LanguageExtractionTest.AllParsersCreate`, and `cmake/TreeSitterGrammars.cmake` pin list.
 - "Cross-file import resolution for Go, JavaScript, Python, Rust, C#, C/C++" (`README.md:171-173`). Measure: `import_resolver.cpp:22-31` family switch (code also covers PHP, Zig).
-- Receiver-type call resolution for all 13 languages (`docs/plans/2026-06-17-scope-type-resolution.md` Status). Measure: `ScopeTypeResolution.*` + `RealProjectLanguages.*`; precision numbers per corpus were not found in-repo beyond the pass/fail tests.
+- Receiver-type call resolution for all 13 languages (`2026-06-17-scope-type-resolution.md` (removed plan, in git history) Status). Measure: `ScopeTypeResolution.*` + `RealProjectLanguages.*`; precision numbers per corpus were not found in-repo beyond the pass/fail tests.
 - Parse cost share: "parse is ~58% of index CPU" (`include/lci/config.h:23`). Measure: `IndexProfile.StageBreakdown` with `LCI_PROFILE_DIR`; numbers in `docs/performance/` are suite timings, not per-language parse rates.
 
 | Axis | lci | How to check competitor | Notes |

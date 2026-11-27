@@ -1,5 +1,5 @@
 // Pure-logic tests for the error-handling / resource scoring model
-// (docs/plans/2026-08-17-error-handling-score-design.md).
+// (site/src/content/docs/error-handling-score.mdx).
 
 #include <lci/analysis/error_handling_analyzer.h>
 #include <lci/path_classifier.h>

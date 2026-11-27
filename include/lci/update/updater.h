@@ -7,7 +7,7 @@
 // Network/extract are delegated to system `curl` and `tar` — the same tools
 // install.sh already requires — so the self-updater adds no new build-time
 // dependency. The release JSON is parsed natively with nlohmann (no text
-// scraping). See docs/superpowers/specs/2026-06-07-install-update-distribution-design.md.
+// scraping). See docs/install-distribution.md.
 
 #include <filesystem>
 #include <optional>

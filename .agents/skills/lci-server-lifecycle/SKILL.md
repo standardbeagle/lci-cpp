@@ -24,7 +24,7 @@ Every `lci` command needing an index talks to a per-user, per-project-root index
 | Listener caps | `src/server/server.cpp:1128-1156` | 16 MiB body, 30 s read/write timeouts, keep-alive 64 requests, pool = max(hw threads, 64) workers, queue cap `kMaxQueuedRequests = 32` (`include/lci/server/server.h:306`). |
 | Client API | `class Client` `include/lci/server/client.h:20`; `src/server/client.cpp` | `is_server_running`, `ping`, `get_status`, `get_stats`, `shutdown(force)`, `reindex`, `wait_for_ready` (`:256`, stall-aware), `mcp_dispatch` (`:409`), `set_timeout`. |
 | Config `server { }` block | `apply_server` `src/config/config.cpp:309`; `struct ServerConfig` `include/lci/config.h:62` | Keys `idle_timeout_sec`, `max_instances`, `max_rss_mb`. |
-| Docs | `docs/src/content/docs/http-socket-api.mdx` (Transport `:12`, Endpoints `:27`, Lifecycle `:67`); `README.md:130` "Server lifecycle" | See drift notes under traps. |
+| Docs | `site/src/content/docs/http-socket-api.mdx` (Transport `:12`, Endpoints `:27`, Lifecycle `:67`); `README.md:130` "Server lifecycle" | See drift notes under traps. |
 
 ## Code map
 
@@ -75,7 +75,6 @@ Unknown keys inside `server { }` produce a warning, not an error (`warn_unknown`
 - `/reindex` path: `handle_reindex` calls `indexer_->clear()` before `index_directory()`, which `karpathy-principles.md` rule 3 flagged as cancelling the bulk-window fix for that path (filed `01M1PA4DNHVBWX1749E3KQJA5N`). Check current state before assuming it is closed.
 - Worker pool sizing is the concurrency cap (`kMaxQueuedRequests`); `/mcp` parks a worker on the warmup latch, so `/ping` and `/shutdown` must stay answerable (`ServerLifecycleTest.PingAnswersWhileMcpCallsParkedOnWarmup`).
 - `/stats.num_threads` is `std::thread::hardware_concurrency()` (`src/server/server_endpoints.cpp:462`), not the live thread count. `lci status` labels it "Threads".
-- Findings from the 2026-09-08 mapping (fixed or filed): see docs/reviews/2026-09-08-skill-mapping-findings.md.
 - Integration goldens embed absolute repo paths (`http_reindex`); a worktree at another path fails them spuriously (`.claude/rules/worktree-isolation-and-goldens.md` rule 2).
 - Dogfood: `lci def ensure_server_running` and `lci refs request_self_stop` both worked and were faster than grep for this map. Gap: no way to ask lci for the httplib route table (string literals in lambdas); grep was needed for `svr_.Post(`.
 

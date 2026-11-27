@@ -4,7 +4,7 @@
 // unsupported platform, network, or extraction error — no silent fallback.
 //
 // Contract: see
-// docs/superpowers/specs/2026-06-07-install-update-distribution-design.md
+// docs/install-distribution.md
 
 'use strict';
 

@@ -3,7 +3,7 @@
 // Drives UnifiedExtractor with a SideEffectAnalyzer sink over real parses
 // (Karpathy #5: no mocks — every case goes through the actual grammar) and
 // asserts the per-function ErrorHandlingInfo / findings the design doc
-// specifies (docs/plans/2026-08-17-error-handling-score-design.md):
+// specifies (site/src/content/docs/error-handling-score.mdx):
 //   - phase 1: returns_error / try_finally wiring + Go panic, Ruby
 //     raise/rescue, Kotlin throw, Zig try/errdefer grammar branches.
 //   - phase 2: swallow detection (empty-catch, catch-and-continue,

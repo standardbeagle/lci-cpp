@@ -54,7 +54,7 @@ Entry -> core -> storage/build:
 - Fuzz: `tests/fuzz/*.cpp`, `tests/CMakeLists.txt:384-395` (`LCI_FUZZ_TARGETS`, 8 targets), `tests/fuzz/README.md`.
 - Tests: `tests/updater_test.cpp` (asset selection, checksum parsing, URL/name safety, private workdir, platform detect), `tests/cli_test.cpp:3404` (`MemProfileTest`), `:3433-3502` (`CliDebugInfoTest`, `CliDebugValidateTest`, `CliDebugExportTest`), `:3526`, `:3552` (`CliStatusTest`). No test exercises `run_update` end to end (network).
 - Perf gate: `scripts/bench_gate.py` against `tests/benchmarks/baseline/linux-x64.json`.
-- Docs: `README.md:9-96` (install, update, from-source, ~28 MB claim), `docs/src/content/docs/getting-started.mdx`, `docs/src/content/docs/cli-usage.mdx:62-92`, `docs/superpowers/specs/2026-06-07-install-update-distribution-design.md`, `docs/performance/profiling-wsl2.md`, `docs/performance/test-suite-*.md`.
+- Docs: `README.md:9-96` (install, update, from-source, ~28 MB claim), `site/src/content/docs/getting-started.mdx`, `site/src/content/docs/cli-usage.mdx:62-92`, `docs/install-distribution.md`, `docs/performance/profiling-wsl2.md`, `docs/performance/test-suite-*.md`.
 - Memory notes (user memory dir `~/.claude/projects/-home-beagle-work-core-lci-cpp/memory/`): `self-contained-release-binary-traps.md`, `wsl2-profiling-setup.md`, `memprofile-attribution-traps.md`, `server-lifecycle-reaper.md`, `errlookup-lci-oom.md`.
 
 ## Config knobs
@@ -89,7 +89,6 @@ There is no `.lci.kdl` key for update channel, telemetry, or profiling; those ar
 - The Linux gate cannot see MSVC errors; Windows CI runs the full `lci_tests` binary, so tests touching env/time go through `tests/helpers/portable_env.h`. `.claude/rules/test-iteration-discipline.md` rule 8.
 - `RealProjectSearchLatencyTest.FastapiSearchUnder5ms` asserts absolute wall-clock inside the gate and fails under host load. `.claude/rules/test-iteration-discipline.md` rule 6.
 - WSL2 hardware PMU counting works on this host (folklore says otherwise); PEBS/perf-mem are bare-metal only. `docs/performance/profiling-wsl2.md`.
-- Findings from the 2026-09-08 mapping (fixed or filed): see `docs/reviews/2026-09-08-skill-mapping-findings.md`.
 - Homebrew formula exists at `Formula/lci.rb` (repo root, not under `packaging/`); check its pinned version against the release before citing it. No Scoop, winget, or AUR packaging in tree.
 - Dogfood: `lci def run_update` correctly returns both overloads; `lci def select_asset` found the anonymous-namespace function. No gap hit in this mapping.
 

@@ -5,7 +5,7 @@ is downloaded on first run and cached per version. Subsequent runs exec the
 cached binary directly.
 
 Contract: see
-docs/superpowers/specs/2026-06-07-install-update-distribution-design.md
+docs/install-distribution.md
 """
 
 from .installer import ensure_binary

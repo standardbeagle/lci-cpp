@@ -11,7 +11,7 @@
 #   LCI_NO_SLOP   set to 1 to skip registering the lci MCP server with slop-mcp
 #   LCI_AUTO_UPDATE  set to 1 to schedule a weekly `lci update` (systemd/cron)
 #
-# Contract: see docs/superpowers/specs/2026-06-07-install-update-distribution-design.md
+# Contract: see docs/install-distribution.md
 set -eu
 
 REPO="standardbeagle/lci-cpp"

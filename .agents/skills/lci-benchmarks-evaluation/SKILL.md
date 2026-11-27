@@ -58,7 +58,7 @@ Agent-level benchmark (`benchmarks/repo-qa/`):
 - `scripts/exploration_runner.py`, `exploration_corpus_forge.py`, `lint_exploration_leaks.py` — mutated-corpus exploration bank (30 tasks in `exploration/tasks/`).
 - `edits/` (24 tasks, oracles, patches), `comprehension/`, `toolcalling/` (16 tasks), `response-shape/` — the other banks, each with `predictions.json` where pre-registered.
 - `ANALYSIS-*.md` — conclusions per run; `results/` holds raw ledgers.
-- `docs/plans/2026-07-18-unbiased-benchmark-skills-design.md`, `docs/solutions/lci/*-2026-07-18.md` — why the two methodology skills exist.
+- `docs/solutions/lci/*-2026-07-18.md` — why the two methodology skills exist.
 
 Suite performance docs: `docs/performance/test-suite-baseline.md` (S1 measurement), `test-sharding.md` (no-change decision, keep `gtest_discover_tests`), `integration-index-cache.md` (no cache written), `test-suite-final.md` (180 s budget FAIL), `test-suite-tail-variance.md` (RUN_SERIAL for bundles), `profiling-wsl2.md` (PMU works on WSL2).
 
@@ -90,9 +90,8 @@ No `.lci.kdl` key or `include/lci/config.h` field governs benchmarking. The knob
 - Minefield tiers are computed by lci (`profile_repos.py`), so the difficulty axis shares a mechanism with the subject. Treat tier assignment as a hypothesis, not a control.
 - Program-level results: tiers 0-2 dead parity (base 0.96 vs lci 0.96); tier 3 +0.05 facts driven by completion-rate insurance on weak models; lci costs 1.5-2.5x tokens; discovery sweep found no beachhead and falsified the registered mechanism; every description rewrite lost to native tools. `ANALYSIS-discovery.md`, `ANALYSIS-discovery-sweep.md`, `ANALYSIS-toolcalling-descriptions.md`.
 - lci aims to cut agent context spend versus grep-style search; no committed measurement backs a specific percentage. Repo-qa tiers instead show lci costing 1.5-2.5x agent tokens (`ANALYSIS-discovery.md`).
-- "Sub-millisecond" (`README.md:3`, `docs/src/content/docs/mcp-server.mdx:141`) is backed only by in-process search benchmarks (`BM_SearchSmallIndex` 12.6 us, `BM_SearchMediumIndex` 13.2 us in the baseline) and the 10 ms real-project guard; no end-to-end CLI or MCP round-trip number is pinned.
+- "Sub-millisecond" (`README.md:3`, `site/src/content/docs/mcp-server.mdx:141`) is backed only by in-process search benchmarks (`BM_SearchSmallIndex` 12.6 us, `BM_SearchMediumIndex` 13.2 us in the baseline) and the 10 ms real-project guard; no end-to-end CLI or MCP round-trip number is pinned.
 - Dogfood gap: `lci def SKIP_IF_NO_REAL_PROJECT` finds nothing; preprocessor macros are not indexed as symbols.
-- Findings from the 2026-09-08 mapping (fixed or filed): see `docs/reviews/2026-09-08-skill-mapping-findings.md`.
 
 ## Probe recipes
 

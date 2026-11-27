@@ -36,7 +36,7 @@ Individual tool semantics live in the sibling skills listed at the end.
 | Pagination | `include/lci/pagination.h:25` (`normalize_page`), `:39` (`page_has_more`) | used by MCP `list_symbols` (`handlers_explore.cpp:675`) and HTTP `/list-symbols` (`server_endpoints_symbols.cpp:178`) |
 | Env `LCI_MCP_MODE` | `src/cli/cli_core.cpp:126` (`is_mcp_mode`) | forces MCP-mode detection; otherwise non-tty stdin implies MCP |
 | Contract doc | `docs/TOOLS.md` | per-tool reference; see drift notes below |
-| Client registration docs | `docs/src/content/docs/mcp-server.mdx`, `README.md:114-125` | `{"mcpServers":{"lci":{"command":"lci","args":["mcp"]}}}` |
+| Client registration docs | `site/src/content/docs/mcp-server.mdx`, `README.md:114-125` | `{"mcpServers":{"lci":{"command":"lci","args":["mcp"]}}}` |
 
 Registered tools (15, verified live via `tools/list` on this build, 0.10.1): `browse_file`,
 `callers`, `code_insight`, `context`, `debug_info`, `find_files`, `get_context`, `git_analysis`,
@@ -63,7 +63,7 @@ Entry to core to storage:
 - Tests: `tests/mcp_server_test.cpp` (36 tests: handshake, version negotiation, batch rejection, concurrent_ok locking, readiness gate, unknown param, UTF-8 lossy dump, `RegistersAll15Tools`, `EverySchemaParameterHasAReader`), `tests/mcp_validation_pagination_test.cpp` (30: validation shapes, CompactFormatter, PageWindow), `tests/json_schema_smoketest.cpp` (4), `tests/mcp_handlers_core_test.cpp` (`InfoHandler.*`, `InfoRegistryFixture.*`), `tests/mcp_handlers_explore_index_test.cpp`, `tests/server_test.cpp:1846` (/mcp dispatcher).
 - Integration: `tests/integration/spec_migration_test.cpp:420-440` (`IntegrationMcpSpec` walks `tests/integration/mcp/<tool>/<name>.spec.json`), goldens under `tests/integration/goldens/mcp/<tool>/` (27 json files, 19 tool dirs incl. `info`, `index_stats`, `debug_info`). `tests/integration/mcp/KNOWN_DIVERGENCE.md` records accepted divergences.
 - Benchmarks: `benchmarks/repo-qa/comprehension/surface/tool-surface.json` (committed tools/list snapshot, 15 tools), gated by `benchmarks/repo-qa/tests/test_tool_surface.py:45` (`test_manifest_equals_the_live_tools_list`); 14 readers under `benchmarks/` (`grep -rl tool-surface.json benchmarks`). `benchmarks/repo-qa/scripts/mock_lci_mcp.py` is the mock server for selection benches.
-- Docs: `docs/TOOLS.md`, `docs/src/content/docs/mcp-server.mdx`, `docs/src/content/docs/cli-usage.mdx:77`, `README.md:114`, `docs/reviews/2026-09-03-review.md:148-160` (S4 /mcp findings), `docs/plans/2026-07-18-hardcoded-response-shape-ab-design.md`.
+- Docs: `docs/TOOLS.md`, `site/src/content/docs/mcp-server.mdx`, `site/src/content/docs/cli-usage.mdx:77`, `README.md:114`, `docs/reviews/2026-09-03-review.md:148-160` (S4 /mcp findings).
 
 ## Config knobs
 
@@ -94,8 +94,7 @@ No config key controls the tool set (the per-session `lci mcp --tools` flag narr
 - A schema or description edit must re-pin `tool-surface.json` and `docs/TOOLS.md` and run `pytest benchmarks/repo-qa/tests/test_tool_surface.py`; ctest cannot see the drift (`.claude/rules/test-iteration-discipline.md:143`, `.claude/rules/bench-harness-oracle-independence.md:323`). `7949bc6` left that suite red for days.
 - The embedded index server inside `lci mcp` calls `enable_instance_registry` (`mcp.cpp:139-141`) so `lci servers` / `lci shutdown --all` see it. `README.md:150-153` still says it "stays out of it deliberately". A self-stop from the RSS cap or root deletion exits the whole process via `std::_Exit(0)` (`mcp.cpp:179-185`).
 - Bridge pool: parked /mcp calls during warmup consumed the default 8-worker pool and muted `/ping` and `/shutdown` (`docs/reviews/2026-09-03-review.md:155-157`); fixed by `kMinServerWorkerThreads = 2 * kMaxQueuedRequests` (`server.h:300-307`).
-- Doc gap: `docs/src/content/docs/http-socket-api.mdx` does not document POST /mcp.
-- Findings from the 2026-09-08 mapping (fixed or filed): see docs/reviews/2026-09-08-skill-mapping-findings.md.
+- Doc gap: `site/src/content/docs/http-socket-api.mdx` does not document POST /mcp.
 - `CompactFormatter` (`src/mcp/formatter_compact.cpp`) has zero production callers; the class the README calls LCF is not what ships.
 - `index_stats` accepts `include_watch_mode` but ignores it (`docs/TOOLS.md:302`).
 - Dogfood gap: `lci def dispatch_wire` returns "no definition" for a member defined out-of-class; `lci def McpServer::dispatch_wire` works. Bare member names need the qualified form.

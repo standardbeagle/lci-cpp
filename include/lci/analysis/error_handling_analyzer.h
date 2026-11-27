@@ -12,7 +12,7 @@ class MasterIndex;
 class SideEffectAnalyzer;
 
 /// Error-handling + resource-management scoring and rollup
-/// (docs/plans/2026-08-17-error-handling-score-design.md).
+/// (site/src/content/docs/error-handling-score.mdx).
 ///
 /// Consumes the per-function SideEffectAnalyzer records (findings were
 /// detected during the AST warmup pass), weights them by severity ×

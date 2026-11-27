@@ -284,7 +284,7 @@ struct ThrowSiteInfo {
 };
 
 /// Error-handling / resource finding signals (design:
-/// docs/plans/2026-08-17-error-handling-score-design.md). Syntactic + name
+/// site/src/content/docs/error-handling-score.mdx). Syntactic + name
 /// heuristics only (no CFG/dataflow) — every finding carries a confidence,
 /// never a verdict.
 /// How much of the caught error survives where it goes next.

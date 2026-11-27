@@ -37,9 +37,9 @@ real_projects/zig/
 worktrack-mcp.db
 
 # Docs site (Astro Starlight) build output + deps
-docs/node_modules/
-docs/dist/
-docs/.astro/
+site/node_modules/
+site/dist/
+site/.astro/
 .work/
 .xdg-cache-home/
 .xdg-data-home/

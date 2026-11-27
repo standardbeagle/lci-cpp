@@ -52,7 +52,7 @@ Entry -> engine -> index, top to bottom.
 - Goldens: `tests/integration/goldens/cli/search/` (basic, case-insensitive, compact, grep, json, no-results, regex), `tests/integration/goldens/cli/grep_compat/` (11 files), `tests/integration/goldens/mcp/search/` (basic, language-filter, unknown-param-guard), `tests/integration/goldens/mcp/search_definitions/basic.json`, `tests/integration/goldens/http/search.json`. `tests/integration/goldens/mcp/grep/basic.json` pins that `grep` is NOT an MCP tool (`unknown tool "grep"`).
 - Fuzz: `tests/fuzz/fuzz_search_input.cpp`, `fuzz_query_parser.cpp`, `fuzz_trigram_extract.cpp`.
 - Benchmarks: `tests/benchmarks/benchmark_main.cpp:114,130` (`BM_SearchSmallIndex`, `BM_SearchMediumIndex`), `tests/benchmarks/real_project_benchmarks.cpp:130,156` (chi, fastapi), `real_project_advanced_benchmarks.cpp:177`; baseline `tests/benchmarks/baseline/linux-x64.json`. Agent-level: `benchmarks/repo-qa/ANALYSIS-discovery-sweep.md`.
-- Docs: `docs/TOOLS.md` (search section 72-109), `docs/src/content/docs/cli-usage.mdx` (17-45), `mcp-server.mdx` (128-145), `http-socket-api.mdx` (36, 55-62), `docs/src/content/docs/synonym-split-naming.mdx`, `README.md:3-4,102`.
+- Docs: `docs/TOOLS.md` (search section 72-109), `site/src/content/docs/cli-usage.mdx` (17-45), `mcp-server.mdx` (128-145), `http-socket-api.mdx` (36, 55-62), `site/src/content/docs/synonym-split-naming.mdx`, `README.md:3-4,102`.
 
 ## Config knobs
 
@@ -87,7 +87,6 @@ MCP-side caps that are not config: `max` default 15 clamp 100 (`handlers_search.
 - `--rank-by` accepts Go aliases `proximity|similarity` that both map to `relevance` (`src/cli/rank_options.h`). `--compare-search` only prints a notice. `--light` and `enable_fuzzy` are parity shells.
 - Read path is lock-free (RCU snapshots); no mutex on `/search`. Source: `.claude/rules/karpathy-principles.md` rule 3, `src/server/handlers_search.cpp:53-55`.
 - Known gaps from `docs/reviews/2026-09-03-review.md` S12 (verify against the tree before citing, some are fixed): pure-meta regex full-scan path ignoring `scoped_paths`/`--exclude`/`--max-count`; post-filters capped by the server page; any token starting with `-` treated as an exclusion (`->next` needs `--`). The `nc`/`iv`-never-read finding (S5) is fixed: `handlers_search.cpp:433-434` set the options.
-- Findings from the 2026-09-08 mapping (fixed or filed): see `docs/reviews/2026-09-08-skill-mapping-findings.md`.
 - Dogfood: `lci def SearchEngine` and `lci refs certifies_absent` both worked for this map; `lci search` could not answer "which KDL keys does config.cpp parse" (needed grep with a regex over `child.name ==`), a gap for structured-pattern search.
 
 ## Probe recipes
@@ -129,7 +128,7 @@ lci claims in this area:
 | Claim | Where made | How to measure | Existing numbers |
 |---|---|---|---|
 | Sub-millisecond search | `README.md:3`, `docs/TOOLS.md:74`, MCP tool description `src/mcp/handlers_core.cpp:220` | `lci_benchmarks --benchmark_filter=Search`; `FastapiSearchUnder5ms` (asserts under 5 ms on the fastapi corpus, in-process, `tests/integration/real_project_performance_test.cpp:77`); time `lci search --json` and read `time_ms` | `tests/benchmarks/baseline/linux-x64.json`; the 5 ms test bound is the only pinned latency figure. Note the CLI path adds server round trip and spawn; "sub-millisecond" is the in-process engine, not the CLI wall clock. |
-| ~80% context reduction versus grep | `README.md:3-4`, `docs/src/content/docs/index.mdx:36` | `benchmarks/repo-qa` tokens column, baseline (grep) vs treatment (LCI MCP) | No checked-in artifact in this repo reproduces 80%; `grep -rn '79.8\|80%' benchmarks/ docs/performance/` is empty. Treat as unmeasured until re-run. |
+| ~80% context reduction versus grep | `README.md:3-4`, `site/src/content/docs/index.mdx:36` | `benchmarks/repo-qa` tokens column, baseline (grep) vs treatment (LCI MCP) | No checked-in artifact in this repo reproduces 80%; `grep -rn '79.8\|80%' benchmarks/ docs/performance/` is empty. Treat as unmeasured until re-run. |
 | Search results are grouped and symbol-annotated so agents skip file reads | `src/mcp/handlers_core.cpp:220-228` | Count `read` tool calls after `search` in an agent trace (`benchmarks/repo-qa` tool-call column) | `benchmarks/repo-qa/ANALYSIS-discovery-sweep.md:88-99`: `control_literal_string_search` F1 0.840 for LCI vs 1.000 for grep (grep wins, 12/12, p=0.0005); baseline recall 1.000 on every family. |
 | Literal search never returns a silent empty | `src/indexing/master_index_search.cpp:343-352` | `SearchRgDifferentialTest`, `lci_integration_suite` | Differential oracle passes on the self corpus; rg is on this host. |
 

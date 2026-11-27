@@ -60,9 +60,9 @@ Tests.
 
 Docs and benchmarks.
 
-- `docs/TOOLS.md:336` (`semantic_annotations`), `:391` (`side_effects`); mirrored at `docs/src/content/docs/mcp-server.mdx`.
-- `docs/src/content/docs/error-handling-score.mdx` — the beta finding vocabulary, suppression directives, and the `side_effects` JSON twin (`:589`).
-- `docs/plans/2026-08-17-error-handling-score-design.md`, `docs/plans/2026-08-30-cold-start-profiling.md` (why the AST pass moved into the index pipeline), `docs/reviews/2026-09-03-review.md:190` (S6) and `:246` (S11).
+- `docs/TOOLS.md:336` (`semantic_annotations`), `:391` (`side_effects`); mirrored at `site/src/content/docs/mcp-server.mdx`.
+- `site/src/content/docs/error-handling-score.mdx` — the beta finding vocabulary, suppression directives, and the `side_effects` JSON twin (`:589`).
+- `docs/performance/cold-start-profiling.md` (why the AST pass moved into the index pipeline), `docs/reviews/2026-09-03-review.md:190` (S6) and `:246` (S11).
 - `benchmarks/repo-qa/ANALYSIS-toolcalling-descriptions.md:76` — selection of `side_effects` for "what-does-this-routine-touch"; `benchmarks/repo-qa/ANALYSIS-comprehension-surface.md:27` — comprehension arm; `benchmarks/repo-qa/toolcalling/tasks/what-does-this-routine-touch.json`; live schema snapshot `benchmarks/repo-qa/comprehension/surface/tool-surface.json`.
 
 ## Config knobs
@@ -85,7 +85,7 @@ No environment variable affects this area. Language is always `"generic"` for th
 - Sink must be attached BEFORE `index_directory` (`src/mcp/runtime.cpp:37`); otherwise the AST records are absent and only the heuristic pass fills functions, at lower fidelity and with no access patterns.
 - Result key is `file:line:column`, but the extractor never passes a column (`unified_extractor.cpp:391` calls the 4-arg `begin_function`) and `populate_from_index`/`propagate_transitive` look up column 0 (`side_effect_analyzer.cpp:463` comment). Two functions on one line still collide in production; the column mechanism is half-wired.
 - Closures fold into the enclosing function (`unified_extractor.cpp:385`). Go closure effects are therefore not attributed to the closure and can be missed for the outer function too: pocketbase `Bootstrap` reported `is_pure:true` with a write-only access pattern (memory `insight-verification-2026-08-16`, "Go closure purity FN"). Known gap, open.
-- Watch-mode / incremental reindex does not refresh side-effect records; functions deleted from a file leave stale keys until the next bulk index (`docs/plans/2026-08-30-cold-start-profiling.md:40`; `merge_results` comment).
+- Watch-mode / incremental reindex does not refresh side-effect records; functions deleted from a file leave stale keys until the next bulk index (`docs/performance/cold-start-profiling.md:40`; `merge_results` comment).
 - Propagator seeding matches impure functions by `function_name` + `start_line` (`runtime.cpp:60`), not by id; anonymous functions seed nothing.
 - `categories_to_propagate` deliberately drops closure/field writes, async and reflection from upstream propagation (`side_effect_analyzer.cpp:524`). `kFieldWrite`, `kAsync`, `kReflection`, `kIndirectWrite` have no producer in the extractor today (grep `kFieldWrite` under `src/`): the category names are accepted by `category` mode and always return empty.
 - `propagate_transitive` caps at 100 iterations and reports `fixpoint_truncated()`, but no handler reads that flag; a truncated fixpoint is still emitted silently at the MCP surface.
@@ -165,12 +165,12 @@ Comparison axes:
 
 | Axis | lci | Check the competitor | Notes |
 |---|---|---|---|
-| Analysis basis | tree-sitter AST facts + callee-name keyword tables, no dataflow, no types beyond receiver names | Infer/Frama-C: abstract interpretation; CodeQL: dataflow on a typed DB | lci is syntactic-heuristic by design (`docs/src/content/docs/error-handling-score.mdx:240`, "What the analysis will not claim") |
+| Analysis basis | tree-sitter AST facts + callee-name keyword tables, no dataflow, no types beyond receiver names | Infer/Frama-C: abstract interpretation; CodeQL: dataflow on a typed DB | lci is syntactic-heuristic by design (`site/src/content/docs/error-handling-score.mdx:240`, "What the analysis will not claim") |
 | Soundness direction | precision-first; pure claims meant to be trustworthy, impure list incomplete | Frama-C sound over-approximation; Infer aims for low FP | measure by sampling the `pure` list |
 | Interprocedural | fixpoint over caller edges, decay 0.95, floor 0.3, 100 iterations | Infer summaries; CodeQL global dataflow | lci resolution is name-based; dynamic-dispatch ref recall was ~20% on the battery corpus (memory) |
 | Languages | every tree-sitter grammar lci indexes (13+), one shared "generic" analyzer | Infer: C-family/Java; Frama-C: C; JetBrains: JVM | breadth vs depth |
 | Query surface | MCP JSON, 6 modes, sorted and capped | CLI reports, SARIF, IDE inspections | none of the listed tools exposes an MCP purity tool |
-| Latency | computed once at warmup, queries are map walks | whole-program analysis minutes to hours | warmup cost recorded in `docs/plans/2026-08-30-cold-start-profiling.md` |
+| Latency | computed once at warmup, queries are map walks | whole-program analysis minutes to hours | warmup cost recorded in `docs/performance/cold-start-profiling.md` |
 | Annotations | `@lci:` inline + JSON manifests, propagated | JetBrains `@Contract`, Frama-C ACSL, Infer `@Pure`/nullability | lci labels are free-form; no checking against the inferred result (`trust_annotations` and `track_field_access` are dead knobs; only `strict_mode` is read, at `src/analysis/side_effect_analyzer.cpp:1053`) |
 | Error-handling findings | beta, dark; catch-site, resource pairing, undo cost | SonarQube/CodeQL rule packs | `error_report` off by default |
 

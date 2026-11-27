@@ -506,7 +506,7 @@ void emit_eh_finding_lines(std::ostringstream& out,
 }
 
 // == ERROR HANDLING == — repo/module error-handling scores + swallowed-error
-// findings (spec: docs/plans/2026-08-17-error-handling-score-design.md).
+// findings (spec: site/src/content/docs/error-handling-score.mdx).
 // Production-only, deterministically sorted; locations always file:line.
 void emit_error_handling(std::ostringstream& out,
                          const ErrorHandlingSummary& s, size_t max_findings) {

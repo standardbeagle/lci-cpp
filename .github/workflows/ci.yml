@@ -6,12 +6,14 @@ on:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
+      - "site/**"
       - ".gitignore"
   pull_request:
     branches: [main]
     paths-ignore:
       - "**/*.md"
       - "docs/**"
+      - "site/**"
       - ".gitignore"
   # Lets a branch run the (billed) macOS leg on demand for validation without
   # merging to main — see the macos job's event-name guard below.

@@ -9,8 +9,7 @@ set -euo pipefail
 # fix in <1 min instead of waiting for a Windows/macOS CI round-trip.
 #
 # The filter strings here are the SINGLE SOURCE OF TRUTH mirrored by
-# .github/workflows/ci.yml (Windows + macOS "unit suite" steps) and
-# docs/superpowers/plans/2026-06-09-windows-macos-release-followups.md.
+# .github/workflows/ci.yml (Windows + macOS "unit suite" steps).
 # When a gap is closed, drop the suite from BOTH the CI filter and here.
 #
 # Usage:
